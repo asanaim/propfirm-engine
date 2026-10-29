@@ -199,6 +199,13 @@ class RuleSupervisor:
     def has_account(self, account_id: str) -> bool:
         return account_id in self._accounts
 
+    def accounts(self) -> tuple[str, ...]:
+        """Every account id, in opening order."""
+        return tuple(self._accounts)
+
+    def rule_set(self, account_id: str) -> RuleSet:
+        return self._state(account_id).rules
+
     def status(self, account_id: str) -> AccountStatus:
         return self._state(account_id).status
 

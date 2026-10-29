@@ -37,6 +37,17 @@ Specification: *Prop Firm Operating Engine — End-to-End Functional Outline*
 After changing `pyproject.toml` or `uv.lock`, rebuild with
 `docker compose build test`.
 
+## Run the platform locally (P2, synthetic prices)
+
+```
+docker compose --profile platform up -d
+```
+
+This starts the engine, the projector, the API on http://127.0.0.1:8000
+(localhost only: there is no login yet), a synthetic price feeder and the
+clock/checkpoint scheduler. `docker compose --profile platform down` stops
+them; add `-v` to delete the journal and start over.
+
 ## Run the tests without Docker
 
 Needs [uv](https://docs.astral.sh/uv/). Unit tests run anywhere; integration
@@ -88,3 +99,13 @@ or rules uses floating point.
 - [x] Step 4: pricing and fills, delay and gap guards (test 5)
 - [x] Step 5: rules engine (test 3)
 - [x] Step 6: event journal and replay (tests 1 and 4)
+
+## Phase P2 progress (gate G2: challenge lifecycle on staging, scans, restore drill)
+
+- [x] Step 1: engine service, live state, history, trading API
+- [ ] Step 2: customers and access (Keycloak, customer record, gating, checkout)
+- [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
+- [ ] Step 4: trader portal
+- [ ] Step 5: back office
+- [ ] Step 6: Twelve Data connector and 12-day trial (C10)
+- [ ] Step 7: staging, backups and restore drill, security scans
