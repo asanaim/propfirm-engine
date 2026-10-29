@@ -48,6 +48,7 @@ class PolicyError(ValueError):
 class AccessPolicy:
     country_gating: bool
     blocked_countries: frozenset[str]
+    min_age: int = 18
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,8 +253,9 @@ def _access(t: _Table) -> AccessPolicy:
     for code in countries:
         if not _COUNTRY.fullmatch(code):
             raise PolicyError(f"{t.name('blocked_countries')}: {code!r} is not ISO alpha-2")
+    min_age = t.integer("min_age", 1)
     t.done()
-    return AccessPolicy(gating, frozenset(countries))
+    return AccessPolicy(gating, frozenset(countries), min_age)
 
 
 def _news(t: _Table) -> NewsPolicy:

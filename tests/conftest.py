@@ -71,3 +71,9 @@ def pg_schema(database_url: str) -> Iterator[str]:
             await conn.close()
 
     asyncio.run(drop())
+
+
+@pytest.fixture
+def keycloak_url() -> str:
+    """Keycloak with the development realm (config/keycloak), from KEYCLOAK_URL."""
+    return _service_url("KEYCLOAK_URL")

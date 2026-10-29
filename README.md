@@ -43,9 +43,12 @@ After changing `pyproject.toml` or `uv.lock`, rebuild with
 docker compose --profile platform up -d
 ```
 
-This starts the engine, the projector, the API on http://127.0.0.1:8000
-(localhost only: there is no login yet), a synthetic price feeder and the
-clock/checkpoint scheduler. `docker compose --profile platform down` stops
+This starts Keycloak (login, http://localhost:8080), the engine, the
+projector, the API on http://127.0.0.1:8000, a synthetic price feeder and
+the clock/checkpoint scheduler. Payments and screening are sandbox
+stand-ins (no money moves). Test users: `trader1@example.com` /
+`dev-trader-password` and `staff1@example.com` / `dev-staff-password`
+(see `config/keycloak/README.md`). `docker compose --profile platform down` stops
 them; add `-v` to delete the journal and start over.
 
 ## Change products, prices and switches
@@ -119,7 +122,7 @@ or rules uses floating point.
 ## Phase P2 progress (gate G2: challenge lifecycle on staging, scans, restore drill)
 
 - [x] Step 1: engine service, live state, history, trading API, policy file
-- [ ] Step 2: customers and access (Keycloak, customer record, gating, checkout)
+- [x] Step 2: customers and access (Keycloak login, CIF, country-gating switch, checkout)
 - [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
 - [ ] Step 4: trader portal
 - [ ] Step 5: back office

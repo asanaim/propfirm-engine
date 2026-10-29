@@ -1,0 +1,219 @@
+{
+  "realm": "propfirm",
+  "displayName": "Prop firm (development)",
+  "enabled": true,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "verifyEmail": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 10,
+  "passwordPolicy": "length(12) and notUsername and notEmail",
+  "sslRequired": "external",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "roles": {
+    "realm": [
+      {
+        "name": "trader",
+        "description": "Buys challenges and trades its own accounts"
+      },
+      {
+        "name": "staff",
+        "description": "Back office: reads all accounts, reviews cases"
+      },
+      {
+        "name": "admin",
+        "description": "Back office administration"
+      },
+      {
+        "name": "default-roles-propfirm",
+        "description": "Given to every user",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "trader",
+            "offline_access",
+            "uma_authorization"
+          ]
+        }
+      },
+      {
+        "name": "offline_access",
+        "description": "Offline access"
+      },
+      {
+        "name": "uma_authorization",
+        "description": "UMA"
+      }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-propfirm",
+    "description": "Given to every user",
+    "composite": true
+  },
+  "clients": [
+    {
+      "clientId": "portal",
+      "name": "Trader portal",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "propfirm-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "propfirm-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "fullScopeAllowed": false
+    },
+    {
+      "clientId": "backoffice",
+      "name": "Back office",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5174/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5174"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5174/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "propfirm-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "propfirm-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "fullScopeAllowed": false
+    },
+    {
+      "clientId": "dev-cli",
+      "name": "Development command line (password grant; development realm only)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "propfirm-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "propfirm-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "fullScopeAllowed": false
+    }
+  ],
+  "users": [
+    {
+      "username": "trader1@example.com",
+      "email": "trader1@example.com",
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "Trader",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-trader-password",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-propfirm"
+      ]
+    },
+    {
+      "username": "staff1@example.com",
+      "email": "staff1@example.com",
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "Staff",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-staff-password",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-propfirm",
+        "staff"
+      ]
+    }
+  ],
+  "scopeMappings": [
+    {
+      "client": "portal",
+      "roles": [
+        "trader",
+        "staff",
+        "admin"
+      ]
+    },
+    {
+      "client": "backoffice",
+      "roles": [
+        "trader",
+        "staff",
+        "admin"
+      ]
+    },
+    {
+      "client": "dev-cli",
+      "roles": [
+        "trader",
+        "staff",
+        "admin"
+      ]
+    }
+  ]
+}
