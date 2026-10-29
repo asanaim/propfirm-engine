@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 from propfirm._checks import require_int, require_text
-from propfirm.market.spread import SpreadConfig
+from propfirm.market.spread import AnySpreadConfig, MarketSpreadConfig, SpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass, SymbolSpec
 
 LEVERAGE: Mapping[AssetClass, Fraction] = {
@@ -62,9 +62,11 @@ class InstrumentSpec:
     quote_currency: str
     max_order_volume_per_100k: int
     max_symbol_volume_per_100k: int
-    spread: SpreadConfig
+    spread: AnySpreadConfig
 
     def __post_init__(self) -> None:
+        if not isinstance(self.spread, (SpreadConfig, MarketSpreadConfig)):
+            raise TypeError("spread must be a SpreadConfig or MarketSpreadConfig")
         require_int("contract_size", self.contract_size, minimum=1)
         require_text("quote_currency", self.quote_currency)
         require_int("max_order_volume_per_100k", self.max_order_volume_per_100k, minimum=1)

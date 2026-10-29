@@ -21,6 +21,7 @@ from propfirm.journal.inputs import (
 )
 from propfirm.journal.machine import CODEC, Machine
 from propfirm.market.guards import GuardConfig
+from propfirm.market.spread import MarketSpreadConfig
 from propfirm.market.types import PriceUpdate
 from propfirm.money import cents_ceil
 from propfirm.policy import (
@@ -58,7 +59,17 @@ def lite(data: dict[str, Any]) -> dict[str, Any]:
 
 def test_shipped_policy_is_the_confirmed_configuration() -> None:
     assert SHIPPED.rule_sets() == tuple(RULESETS.values())
-    assert SHIPPED.trading.instruments == tuple(default_instruments().values())
+    defaults = tuple(default_instruments().values())
+    assert SHIPPED.trading.config_version == "trading-v2"  # the market-following spread
+    assert SHIPPED.trading.instruments == tuple(
+        replace(
+            d,
+            spread=MarketSpreadConfig(
+                min_points=d.spread.min_points, max_points=10 * d.spread.min_points
+            ),
+        )
+        for d in defaults
+    )
     assert SHIPPED.trading.guard == GuardConfig()
     assert SHIPPED.access == AccessPolicy(False, frozenset({"BD", "IN"}))  # gating off
     prices = {p.id: dict(p.prices_cents) for p in SHIPPED.products}
@@ -225,11 +236,11 @@ def test_trading_changes_need_a_new_config_version() -> None:
 
     def versioned(data: dict[str, Any]) -> None:
         leverage(data)
-        data["trading"]["config_version"] = "trading-v2"
+        data["trading"]["config_version"] = "trading-v3"
         data["trading"]["delay_threshold_ms"] = 3_000
 
     (item,) = policy_changes(parse_policy(edited(versioned)), machine(), T0)
-    assert isinstance(item, UpdateTrading) and item.config_version == "trading-v2"
+    assert isinstance(item, UpdateTrading) and item.config_version == "trading-v3"
     assert {s.name for s in item.instruments} == {"XAU/USD", "XAG/USD"}  # only what changed
     assert item.guard is not None and item.guard.delay_threshold_ms == 3_000
 
@@ -268,10 +279,10 @@ def gold(**changes: Any) -> Any:
 def test_new_leverage_applies_to_new_positions_only() -> None:
     d = opened()
     first = next(e for e in d.buy("o1", 10, T0 + 1) if isinstance(e, PositionOpened))
-    events = d.send(UpdateTrading("trading-v2", (gold(leverage=Fraction(25)),), None, T0 + 2))
-    assert events == [TradingConfigChanged(T0 + 2, "trading-v2", ("XAU/USD",), False)]
+    events = d.send(UpdateTrading("trading-v3", (gold(leverage=Fraction(25)),), None, T0 + 2))
+    assert events == [TradingConfigChanged(T0 + 2, "trading-v3", ("XAU/USD",), False)]
     second = next(e for e in d.buy("o2", 10, T0 + 3) if isinstance(e, PositionOpened))
-    assert second.config_version == "trading-v2" and first.config_version == "trading-v1"
+    assert second.config_version == "trading-v3" and first.config_version == "trading-v2"
     held = {p.position_id: p.margin_usd for p in d.machine.supervisor.engine.positions("A")}
     assert held["o2"] == 2 * held["o1"]  # 1:25 instead of 1:50, same price
     assert cents_ceil(held["o1"]) == first.margin_cents  # the open position kept its margin
@@ -281,7 +292,7 @@ def test_new_lot_caps_and_guards_apply() -> None:
     d = opened()
     d.send(
         UpdateTrading(
-            "trading-v2",
+            "trading-v3",
             (gold(max_order_volume_per_100k=50, max_symbol_volume_per_100k=50),),
             GuardConfig(delay_threshold_ms=500),
             T0 + 1,
@@ -296,9 +307,9 @@ def test_new_lot_caps_and_guards_apply() -> None:
 @pytest.mark.parametrize(
     "update",
     [
-        UpdateTrading("trading-v1", (), None, T0),  # version already in force
-        UpdateTrading("trading-v2", (gold(contract_size=1),), None, T0),  # fixed field
-        UpdateTrading("trading-v2", (gold(), gold()), None, T0),  # listed twice
+        UpdateTrading("trading-v2", (), None, T0),  # version already in force
+        UpdateTrading("trading-v3", (gold(contract_size=1),), None, T0),  # fixed field
+        UpdateTrading("trading-v3", (gold(), gold()), None, T0),  # listed twice
     ],
 )
 def test_trading_changes_that_are_refused(update: UpdateTrading) -> None:
@@ -312,10 +323,10 @@ def test_trading_changes_that_are_refused(update: UpdateTrading) -> None:
 
 def test_changed_settings_survive_a_snapshot() -> None:
     d = opened()
-    d.send(UpdateTrading("trading-v2", (gold(leverage=Fraction(25)),), GuardConfig(500), T0 + 1))
+    d.send(UpdateTrading("trading-v3", (gold(leverage=Fraction(25)),), GuardConfig(500), T0 + 1))
     state = CODEC.decode(CODEC.encode(d.machine.state()))
     assert state == d.machine.state()
     engine = machine().supervisor.engine
     engine.restore(d.machine.state().engine)
-    assert engine.config_version == "trading-v2"
+    assert engine.config_version == "trading-v3"
     assert engine.instruments["XAU/USD"].leverage == 25 and engine.guard_config == GuardConfig(500)

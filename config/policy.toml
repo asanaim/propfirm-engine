@@ -50,7 +50,7 @@ split_percent_after = "90"
 max_allocation_cents = 40000000  # $400,000 per trader
 
 [trading]
-config_version = "trading-v1"
+config_version = "trading-v2"
 delay_threshold_ms = 2000      # older updates freeze the symbol
 gap_threshold_ms = 60000       # no update for longer freezes the symbol
 gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
@@ -68,11 +68,18 @@ oil = [2000, 4000]
 crypto = [1000, 2000]
 
 [trading.spread]
-window = 20                    # recent price changes used for volatility
+# The feed has no bid or ask, so the spread follows the market's own
+# movement: the median of the last `window` price changes (once there are
+# `min_samples`), times `vol_multiplier`, never below the symbol's normal
+# spread (`min_points`) and never above `max_multiple` times it (news
+# windows multiply that). A single jump or bad tick does not widen it.
+window = 20                    # recent price changes considered
+min_samples = 3                # changes needed before the market can widen it
 vol_multiplier = "1"
+max_multiple = 10              # widest spread = 10 x the normal spread
 news_multiplier = 3            # inside a news window
 
-[trading.spread.min_points]    # smallest spread per symbol, in points
+[trading.spread.min_points]    # the normal (calm-market) spread per symbol, in points
 "EUR/USD" = 5
 "GBP/USD" = 5
 "USD/JPY" = 5
