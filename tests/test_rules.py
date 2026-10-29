@@ -39,6 +39,19 @@ def test_opening_floors_per_product(rsv: str, size: int, floors: tuple[int, int]
     assert RulesRig(RULESETS[rsv], size, WEEK[0]).sup.floors("A") == floors
 
 
+@pytest.mark.parametrize(
+    ("rsv", "size", "target"),
+    [
+        ("lite-s1-v1", USD_100K, 10_600_000),  # +6 %
+        ("classic-s2-v1", USD_100K, 10_500_000),  # +5 %
+        ("one-step-s1-v1", 2_500_000, 2_750_000),  # +10 %
+        ("instant-funded-v1", 2_500_000, None),  # funded: no target
+    ],
+)
+def test_target_level_per_product(rsv: str, size: int, target: int | None) -> None:
+    assert RulesRig(RULESETS[rsv], size, WEEK[0]).sup.target("A") == target
+
+
 def test_catalogue_matches_confirmed_configuration() -> None:
     targets = {r.rsv_id: r.profit_target for r in RULESETS.values()}
     assert targets == {
@@ -75,6 +88,9 @@ def test_rule_set_validation() -> None:
         replace(LITE_S1, profit_target=None)  # only funded stages lack a target
     with pytest.raises(ValueError):
         replace(LITE_S1, daily_loss=Fraction(0))
+    with pytest.raises(ValueError, match="must not exceed max_loss"):
+        replace(LITE_S1, daily_loss=LITE_S1.max_loss + Fraction(1, 100))
+    assert replace(LITE_S1, daily_loss=LITE_S1.max_loss).daily_loss == LITE_S1.max_loss
     with pytest.raises(ValueError):
         replace(LITE_S1, sizes_cents=(1_234_567,))  # 3% is not whole cents
     with pytest.raises(ValueError):

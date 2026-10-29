@@ -98,17 +98,33 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             await p.writer.publish(PriceUpdate("EUR/USD", 1, t, t, 110_000))
             old = await eventually(lambda: p.live.account(before))
             new = await eventually(lambda: p.live.account(after))
-            # 25,000 USD: the file's 3 % daily and 6 % drawdown, then 4 % and 5 %
-            assert (old["rsv_id"], old["daily_floor_cents"], old["max_floor_cents"]) == (
+            # 25,000 USD: the file's 10 % target, 3 % daily and 6 % drawdown,
+            # then 8 %, 4 % and 5 %
+            floors = ("rsv_id", "target_balance_cents", "daily_floor_cents", "max_floor_cents")
+            assert tuple(old[k] for k in floors) == (
                 "one-step-s1-v1",
+                2_750_000,
                 2_425_000,
                 2_350_000,
             )
-            assert (new["rsv_id"], new["daily_floor_cents"], new["max_floor_cents"]) == (
+            assert tuple(new[k] for k in floors) == (
                 "one-step-s1-v1-a1",
+                2_700_000,
                 2_400_000,
                 2_375_000,
             )
+            # each account shows its own version's numbers, even when the
+            # catalogue has moved on
+            assert (old["rules"]["profit_target_percent"], old["rules"]["max_loss_percent"]) == (
+                "10",
+                "6",
+            )
+            assert (new["rules"]["profit_target_percent"], new["rules"]["max_loss_percent"]) == (
+                "8",
+                "5",
+            )
+            seen = await p.call("GET", f"/accounts/{before}")  # the owner's view
+            assert seen.json()["target_balance_cents"] == 2_750_000
 
             await p.stop_engine()
             await p.engine()  # restarts under the policy in force: nothing to refuse
@@ -141,7 +157,7 @@ def test_limits_changed_while_the_engine_is_down_apply_once_it_has_them(
                 return await p.settings.publish_pending(now_ms()) == 1
 
             await eventually(published)  # a retry finds it journaled: duplicate = done
-            catalogue = (await p.call("GET", "/admin/catalogue", "admin-1", None, ADMIN)).json()
+            catalogue = (await p.call("GET", "/catalogue")).json()
             one_step = next(x for x in catalogue if x["id"] == "one-step")
             assert one_step["stages"][0]["rsv_id"] == "one-step-s1-v1-a1"
             second = (await p.call("POST", "/orders", body=ONE_STEP_25K)).json()

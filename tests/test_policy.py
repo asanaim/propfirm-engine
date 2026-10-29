@@ -130,6 +130,7 @@ def _drop(path: list[Any]) -> Callable[[dict[str, Any]], None]:
         _set(["products", 0, "stages", 0, "stage"], "s3"),
         _set(["products", 0, "stages", 0, "maxloss_percent"], "6"),  # unknown key
         _drop(["products", 0, "stages", 0, "daily_loss_percent"]),
+        _set(["products", 0, "stages", 0, "daily_loss_percent"], "7"),  # above the 6 % drawdown
         _set(["products", 0, "prices_cents"], [2400, 4400]),  # one price per size
         _set(
             ["products", 0, "sizes_cents"], [1000000, 500000, 2500000, 5000000, 10000000, 20000000]
