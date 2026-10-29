@@ -166,6 +166,21 @@ def percent_text(share: Fraction | None) -> str | None:
     return f"{value.numerator}/{value.denominator}"
 
 
+def rule_set_view(r: RuleSet) -> dict[str, Any]:
+    """A stage's numbers as shown to everyone: percentages as exact text."""
+    return {
+        "stage": r.stage.value,
+        "rsv_id": r.rsv_id,
+        "profit_target_percent": percent_text(r.profit_target),
+        "max_loss_percent": percent_text(r.max_loss),
+        "max_loss_kind": r.max_loss_kind.value,
+        "daily_loss_percent": percent_text(r.daily_loss),
+        "min_trading_days": r.min_trading_days,
+        "consistency_percent": percent_text(r.consistency),
+        "consistency_at_pass": r.consistency_at_pass,
+    }
+
+
 def parse_countries(values: object, where: str) -> frozenset[str]:
     """ISO 3166-1 alpha-2 codes ("BD")."""
     if not isinstance(values, (list, tuple)) or not all(isinstance(v, str) for v in values):

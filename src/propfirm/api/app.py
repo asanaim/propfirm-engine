@@ -3,17 +3,18 @@
 Views, by Keycloak realm role (the portal's tokens carry `trader`, the back
 office's carry `staff` and `admin`):
 - public: /health; /catalogue (products, sizes, prices, split, discounts,
-  trading days, consistency; no profit targets or loss limits); /access
-  (the minimum age);
+  and every stage's profit target, daily loss limit, drawdown limit,
+  trading days and consistency rule); /access (the minimum age);
 - signed in, any role: /quotes (Twelve Data licence: display to logged-in
   users only);
-- trader: their own CIF, orders and accounts; buying; trading their own
-  accounts. Someone else's account answers 404, so ids cannot be probed;
+- trader: their own CIF, orders and accounts (an account shows its own
+  target and limits); buying; trading their own accounts. Someone else's
+  account answers 404, so ids cannot be probed;
 - employee (role `staff`): reads every account, its history and inputs;
   trades none; no settings;
 - admin: what an employee reads, and the admin-only settings: the
-  country-gating switch and list, each stage's profit target, daily loss
-  limit and drawdown limit (view and change), and the change history.
+  country-gating switch and list (view and change); changing each stage's
+  profit target, daily loss limit and drawdown limit; the change history.
 A signed-in request outside its role's view answers 403.
 
 Trading: every change is an input submitted to the engine, and the response
@@ -52,8 +53,8 @@ from propfirm.policy import (
     ProductPolicy,
     parse_countries,
     percent_text,
+    rule_set_view,
 )
-from propfirm.rules.products import RuleSet
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.settings.overlay import CountryGating, stage_limits, to_json
@@ -184,24 +185,7 @@ class StageLimitsBody(_Body):
 # --- views ----------------------------------------------------------------------------
 
 
-def stage_view(r: RuleSet, *, limits: bool) -> dict[str, Any]:
-    """A stage; `limits` adds the admin-only profit target and loss limits."""
-    shown: dict[str, Any] = {"stage": r.stage.value, "rsv_id": r.rsv_id}
-    if limits:
-        shown |= {
-            "profit_target_percent": percent_text(r.profit_target),
-            "max_loss_percent": percent_text(r.max_loss),
-            "max_loss_kind": r.max_loss_kind.value,
-            "daily_loss_percent": percent_text(r.daily_loss),
-        }
-    return shown | {
-        "min_trading_days": r.min_trading_days,
-        "consistency_percent": percent_text(r.consistency),
-        "consistency_at_pass": r.consistency_at_pass,
-    }
-
-
-def product_view(p: ProductPolicy, *, limits: bool = False) -> dict[str, Any]:
+def product_view(p: ProductPolicy) -> dict[str, Any]:
     return {
         "id": p.id,
         "name": p.name,
@@ -210,7 +194,7 @@ def product_view(p: ProductPolicy, *, limits: bool = False) -> dict[str, Any]:
         "repeat_discount_percent": [percent_text(d) for d in p.repeat_discounts],
         "fee_refund_with_payout": p.fee_refund_with_payout or None,
         "sizes": [{"size_cents": s, "price_cents": c} for s, c in p.prices_cents],
-        "stages": [stage_view(r, limits=limits) for r in p.rule_sets],
+        "stages": [rule_set_view(r) for r in p.rule_sets],
     }
 
 
@@ -410,7 +394,7 @@ def create_app(
 
     @app.get("/catalogue")
     async def catalogue(deps: D) -> list[dict[str, Any]]:
-        """Products in force: sizes, prices and terms; no targets or loss limits."""
+        """Products in force: sizes, prices, terms, targets and loss limits."""
         return [product_view(p) for p in (await _policy(deps)).products]
 
     @app.get("/access")
@@ -595,11 +579,6 @@ def create_app(
             me.subject, me.email, setting, body.reason, deps.clock()
         )
         return change_view(status)
-
-    @app.get("/admin/catalogue")
-    async def admin_catalogue(deps: D, me: Admin) -> list[dict[str, Any]]:
-        """Products in force with every stage's profit target and loss limits."""
-        return [product_view(p, limits=True) for p in (await _policy(deps)).products]
 
     @app.put("/admin/products/{product_id}/stages/{stage}/limits")
     async def set_stage_limits(

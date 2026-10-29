@@ -56,22 +56,25 @@ them; add `-v` to delete the journal and start over.
 
 | View | Role | Sees and does |
 |---|---|---|
-| Public | none | products, sizes, prices, split, discounts, trading days, consistency; minimum age |
-| Trader (portal) | `trader` | own CIF, orders and accounts; buys; trades own accounts |
+| Public | none | products, sizes, prices, split, discounts; each stage's profit target, daily loss limit, drawdown limit, trading days and consistency rule; minimum age |
+| Trader (portal) | `trader` | own CIF, orders and accounts (each account shows its own target, limits and floors); buys; trades own accounts |
 | Employee (back office) | `staff` | every account, its history and inputs; trades none; no settings |
 | Admin (back office) | `admin` | what an employee sees, plus the admin-only settings below |
 
-Admin-only settings, viewed and changed through the API (each change is
-recorded with who, when and why: `GET /admin/settings/changes`):
+Admin-only settings, changed through the API (each change is recorded with
+who, when and why: `GET /admin/settings/changes`):
 
-- country gating: `GET /admin/access`, `PUT /admin/access/country-gating`
-  with `{"country_gating": true, "blocked_countries": ["BD", "IN"], "reason": "..."}`;
-- a stage's profit target, daily loss limit and drawdown limit:
-  `GET /admin/catalogue`, `PUT /admin/products/{product}/stages/{s1|s2|funded}/limits`
+- country gating, viewed and changed by admins only: `GET /admin/access`,
+  `PUT /admin/access/country-gating` with
+  `{"country_gating": true, "blocked_countries": ["BD", "IN"], "reason": "..."}`;
+- a stage's profit target, daily loss limit and drawdown limit, public to
+  view (`GET /catalogue`), changed by admins only:
+  `PUT /admin/products/{product}/stages/{s1|s2|funded}/limits`
   with `{"profit_target_percent": "8", "daily_loss_percent": "4",
   "max_loss_percent": "5", "max_loss_kind": "static", "reason": "..."}`
-  (`null` target for a funded stage). The change becomes a new rule-set
-  version (`one-step-s1-v1-a1`): accounts already open keep theirs.
+  (`null` target for a funded stage; the daily limit may not exceed the
+  drawdown limit). The change becomes a new rule-set version
+  (`one-step-s1-v1-a1`): accounts already open keep theirs.
 
 The policy file holds the starting values of these settings; once an
 admin has changed one, the admin value wins.

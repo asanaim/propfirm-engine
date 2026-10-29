@@ -298,20 +298,26 @@ def test_scheduler_ticks_and_checkpoints() -> None:
     assert (ticks, checkpoints) == (6, 2)
 
 
-def test_public_catalogue_and_access_hide_admin_only_settings() -> None:
+def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
     policy = load_policy()
     products = call(FakeGateway(), "GET", "/catalogue", policy=policy, user=None).json()
     lite = products[0]
     assert (lite["id"], lite["name"], lite["profit_split_percent"]) == ("lite", "Lite", "80")
     assert lite["sizes"][1] == {"size_cents": 1_000_000, "price_cents": 4_400}
-    assert lite["stages"][0] == {  # no profit target, daily loss or drawdown limit
+    assert lite["stages"][0] == {
         "stage": "s1",
         "rsv_id": "lite-s1-v1",
+        "profit_target_percent": "6",
+        "max_loss_percent": "6",
+        "max_loss_kind": "static",
+        "daily_loss_percent": "3",
         "min_trading_days": 4,
         "consistency_percent": None,
         "consistency_at_pass": False,
     }
-    assert products[-1]["stages"][0]["consistency_percent"] == "50"
+    instant = products[-1]["stages"][0]
+    assert (instant["max_loss_kind"], instant["consistency_percent"]) == ("trailing", "50")
+    assert instant["profit_target_percent"] is None  # funded: no target
     for role in ("trader", "staff"):  # signed in: the same public view
         signed_in = call(FakeGateway(), "GET", "/catalogue", policy=policy, roles=(role,))
         assert signed_in.json() == products

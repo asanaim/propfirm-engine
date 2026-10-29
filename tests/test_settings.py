@@ -107,7 +107,9 @@ def test_invalid_limits_for_a_stage_are_refused() -> None:
         limits_rule_set(funded, stage_limits("one-step", "funded", "8", "3", "5", "static"), 1)
     # 0.0001 % of a $25,000 account is 2.5 cents: not whole cents
     with pytest.raises(ValueError, match="whole cents"):
-        limits_rule_set(s1, stage_limits("one-step", "s1", "8", "3", "0.0001", "static"), 1)
+        limits_rule_set(s1, stage_limits("one-step", "s1", "8", "0.0001", "5", "static"), 1)
+    with pytest.raises(ValueError, match="must not exceed max_loss"):
+        limits_rule_set(s1, stage_limits("one-step", "s1", "8", "6", "5", "static"), 1)
 
 
 def test_stored_form_round_trips_exactly() -> None:
@@ -346,7 +348,6 @@ LIMITS_URL = "/admin/products/one-step/stages/s1/limits"
 ADMIN_CALLS = [
     ("GET", "/admin/access", None),
     ("PUT", "/admin/access/country-gating", GATING),
-    ("GET", "/admin/catalogue", None),
     ("PUT", LIMITS_URL, LIMITS),
     ("GET", "/admin/settings/changes", None),
 ]
@@ -363,23 +364,11 @@ def test_settings_are_admin_only(
     assert records.changes == []
 
 
-def test_admin_views_show_the_gating_switch_and_every_limit() -> None:
+def test_admin_view_shows_the_gating_switch() -> None:
     assert api("GET", "/admin/access").json() == {
         "country_gating": False,
         "blocked_countries": ["BD", "IN"],
         "min_age": 18,
-    }
-    lite = api("GET", "/admin/catalogue").json()[0]
-    assert lite["stages"][0] == {
-        "stage": "s1",
-        "rsv_id": "lite-s1-v1",
-        "profit_target_percent": "6",
-        "max_loss_percent": "6",
-        "max_loss_kind": "static",
-        "daily_loss_percent": "3",
-        "min_trading_days": 4,
-        "consistency_percent": None,
-        "consistency_at_pass": False,
     }
 
 
@@ -419,14 +408,10 @@ def test_admin_changes_stage_limits() -> None:
         "max_loss_kind": "static",
     }
     assert body["change"]["journal_seq"] == 101
-    one_step = next(
-        p for p in api("GET", "/admin/catalogue", records=records).json() if p["id"] == "one-step"
-    )
-    assert one_step["stages"][0]["rsv_id"] == "one-step-s1-v1-a1"
-    assert one_step["stages"][0]["profit_target_percent"] == "8"
     public = api("GET", "/catalogue", records=records, signed_in=False).json()
     public_s1 = next(p for p in public if p["id"] == "one-step")["stages"][0]
-    assert public_s1["rsv_id"] == "one-step-s1-v1-a1" and "profit_target_percent" not in public_s1
+    assert public_s1["rsv_id"] == "one-step-s1-v1-a1"
+    assert (public_s1["profit_target_percent"], public_s1["max_loss_percent"]) == ("8", "5")
 
 
 def test_stage_limits_while_the_engine_is_down_answer_202() -> None:
@@ -444,6 +429,7 @@ def test_stage_limits_while_the_engine_is_down_answer_202() -> None:
         (LIMITS_URL, {**LIMITS, "max_loss_percent": 5}, 422),  # a number, not text
         (LIMITS_URL, {**LIMITS, "max_loss_percent": "5.0e1"}, 422),
         (LIMITS_URL, {**LIMITS, "max_loss_percent": "100"}, 422),  # not below 100 %
+        (LIMITS_URL, {**LIMITS, "daily_loss_percent": "6"}, 422),  # above the 5 % drawdown
         (LIMITS_URL, {**LIMITS, "max_loss_kind": "rolling"}, 422),
         (LIMITS_URL, {**LIMITS, "reason": "  "}, 422),
         (LIMITS_URL, {k: v for k, v in LIMITS.items() if k != "reason"}, 422),
