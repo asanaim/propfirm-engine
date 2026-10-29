@@ -7,7 +7,9 @@ Needs OIDC_ISSUER and OIDC_JWKS_URL (the Keycloak realm). Checkout runs
 only with PROPFIRM_SANDBOX=1 until the real payment and screening
 providers are connected (C6, C7); without it, checkout answers 503.
 A background task retries paid orders whose account is not open yet, and
-admin stage-limit changes the engine has not journaled yet.
+admin stage-limit changes the engine has not journaled yet. At start the
+cached order and customer statuses are rebuilt from their histories; a
+correction (the cache was edited by hand) is logged as a warning.
 """
 
 import asyncio
@@ -68,6 +70,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         policy = load_policy(config.policy_path)
         gateway = Gateway(InputStreamWriter(client, config.stream), pool, config.schema)
         customers = await CustomerStore.open(pool, config.customer_schema)
+        fixed = await customers.rebuild_status()
+        if fixed:
+            log.warning("cached status differed from the history and was rebuilt: %s", fixed)
         settings = Settings(policy, await SettingsStore.open(pool, config.settings_schema), gateway)
         checkout = None
         if config.sandbox:

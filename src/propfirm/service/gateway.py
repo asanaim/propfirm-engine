@@ -48,6 +48,10 @@ class Gateway:
         entry_id = await self._writer.publish(item)
         return await self.outcome(entry_id, wait_s)
 
+    async def publish(self, item: Input) -> str:
+        """Send without waiting; the stream entry id finds the outcome later."""
+        return await self._writer.publish(item)
+
     async def outcome(self, entry_id: str, wait_s: float) -> Outcome:
         deadline = time.monotonic() + wait_s
         delay = 0.005
