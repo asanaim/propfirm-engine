@@ -67,7 +67,13 @@ from propfirm.journal.inputs import (
 from propfirm.journal.setup import EngineSetup, SetupError, build
 from propfirm.ledger import Entry, Ledger, Posting
 from propfirm.market.guards import FreezeReason, GuardConfig, GuardState
-from propfirm.market.spread import NewsWindow, Quote, SpreadConfig, SpreadState
+from propfirm.market.spread import (
+    MarketSpreadConfig,
+    NewsWindow,
+    Quote,
+    SpreadConfig,
+    SpreadState,
+)
 from propfirm.market.symbols import AssetClass, SymbolSpec
 from propfirm.market.types import PriceUpdate
 from propfirm.rules.events import (
@@ -210,6 +216,7 @@ CODEC = Codec(
         InstrumentSpec,
         SymbolSpec,
         SpreadConfig,
+        MarketSpreadConfig,
         GuardConfig,
         NewsWindow,
         RuleSet,

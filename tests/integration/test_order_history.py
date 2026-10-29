@@ -125,7 +125,7 @@ def test_orders_made_before_the_history_are_backfilled(database_url: str, pg_sch
                     f"INSERT INTO {schema}.accounts VALUES ('ACC00000002', 'CIF00000001', "
                     f"'ORD00000004', 'lite', 'lite-s1-v1', 1000000, 41)"
                 )
-            store = await CustomerStore.open(pool, schema)  # applies migration 2
+            store = await CustomerStore.open(pool, schema)  # applies migrations 2 and 3
             assert await store.rebuild_status() == []  # backfilled history matches every row
             kinds = {
                 o: [e.kind for e in await store.order_history(o)]
@@ -138,6 +138,8 @@ def test_orders_made_before_the_history_are_backfilled(database_url: str, pg_sch
                 "ORD00000004": ["created", "invoiced", "paid", "account_assigned", "provisioned"],
                 "ORD00000005": ["created", "invoiced", "paid", "account_assigned", "failed"],
             }
+            owned = await store.account("ACC00000002")  # migration 3: the stage, from the rule set
+            assert owned is not None and (owned.stage, owned.progression) == ("s1", None)
             created = (await store.order_history("ORD00000004"))[0].detail
             assert created["backfilled"] is True and created["price_cents"] == 4_400
             failed = (await store.order_history("ORD00000005"))[-1].detail

@@ -242,6 +242,7 @@ class TradingEngine:
             update.source_ts,
             update.receive_ts,
             self._spread_news(symbol),
+            self._now,
         )
         self._quotes[symbol] = quote
         events.extend(self._trail(quote))

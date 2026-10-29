@@ -7,11 +7,12 @@ office's carry `staff` and `admin`):
   trading days and consistency rule); /access (the minimum age);
 - signed in, any role: /quotes (Twelve Data licence: display to logged-in
   users only);
-- trader: their own CIF, orders and accounts (an account shows its own
-  target and limits); buying; trading their own accounts. Someone else's
+- trader: their own CIF, orders, accounts (an account shows its own
+  target and limits) and progressions; buying; trading their own accounts. Someone else's
   account answers 404, so ids cannot be probed;
 - employee (role `staff`): reads every account, its history and inputs;
-  trades none; no settings;
+  reviews passed stages that lead to funding (approve or deny, never their
+  own); trades none; no settings;
 - admin: what an employee reads, and the admin-only settings: the
   country-gating switch and list (view and change); changing each stage's
   profit target, daily loss limit and drawdown limit; the change history.
@@ -45,6 +46,8 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
+from propfirm.customers.lifecycle import Lifecycle
+from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
 from propfirm.customers.store import (
     AccountRecord,
     AlreadyRegisteredError,
@@ -129,6 +132,7 @@ class Deps:
     checkout: Checkout | None = None
     policy: PolicySource | None = None  # the policy in force
     settings: Settings | None = None  # admin changes
+    lifecycle: Lifecycle | None = None  # stage progression
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
     clock: Callable[[], int] = now_ms
@@ -191,6 +195,10 @@ class PurchaseBody(_Body):
     product_id: Annotated[str, StringConstraints(pattern=PRODUCT_PATTERN)]
     size_cents: StrictInt
     code: Annotated[str, StringConstraints(pattern=r"^[A-Z0-9-]{3,32}$")] | None = None
+
+
+class DecisionBody(_Body):
+    reason: Reason
 
 
 class CountryGatingBody(_Body):
@@ -280,7 +288,31 @@ def account_record_view(a: AccountRecord) -> dict[str, Any]:
         "product_id": a.product_id,
         "rsv_id": a.rsv_id,
         "size_cents": a.size_cents,
+        "stage": a.stage,
+        "progression": a.progression,
         "created_at": a.created_at,
+    }
+
+
+def progression_view(p: ProgressionRecord) -> dict[str, Any]:
+    return {
+        "prg": p.prg,
+        "cif": p.cif,
+        "ord": p.ord,
+        "product_id": p.product_id,
+        "size_cents": p.size_cents,
+        "from_acc": p.from_acc,
+        "from_stage": p.from_stage,
+        "to_stage": p.to_stage,
+        "status": p.status,
+        "to_rsv_id": p.to_rsv_id,
+        "to_acc": p.to_acc,
+        "failure": p.failure,
+        "passed_at": p.passed_at,
+        "passed_seq": p.passed_seq,
+        "decided_by": p.decided_by,
+        "decided_at": p.decided_at,
+        "created_at": p.created_at,
     }
 
 
@@ -337,14 +369,30 @@ async def _admin(me: Me) -> Principal:
     return me
 
 
+async def _staff(me: Me) -> Principal:
+    _role(me, STAFF_ROLES)
+    return me
+
+
 Trader = Annotated[Principal, Depends(_trader)]
+Staff = Annotated[Principal, Depends(_staff)]
 Admin = Annotated[Principal, Depends(_admin)]
+PrgId = Annotated[str, Path(pattern=r"^PRG[0-9]{8}$")]
+STATUSES = Literal[
+    "provisioning", "provisioned", "failed", "review", "approved", "denied", "blocked"
+]
 
 
 async def _policy(deps: Deps) -> Policy:
     if deps.policy is None:
         raise HTTPException(status_code=503, detail="policy not loaded")
     return await deps.policy.current()
+
+
+def _lifecycle(deps: Deps) -> Lifecycle:
+    if deps.lifecycle is None:
+        raise HTTPException(status_code=503, detail="lifecycle not available")
+    return deps.lifecycle
 
 
 def _settings(deps: Deps) -> Settings:
@@ -434,10 +482,14 @@ def create_app(
         cif = await _cif(deps, me)
         accounts = await deps.customers.accounts_for(cif.cif)
         orders = await deps.customers.orders_for(cif.cif)
+        progressions = (
+            await deps.lifecycle.store.progressions_for(cif.cif) if deps.lifecycle else []
+        )
         return {
             **cif_view(cif),
             "accounts": [account_record_view(a) for a in accounts],
             "orders": [order_view(o) for o in orders],
+            "progressions": [progression_view(p) for p in progressions],
         }
 
     @app.post("/me", status_code=201)
@@ -598,6 +650,54 @@ def create_app(
     ) -> JSONResponse:
         await _owns(deps, me, account_id)
         return await submit(deps, lambda ts: SetTrailingStop(account_id, position_id, None, ts))
+
+    # --- employees: stage progression ------------------------------------------------
+
+    @app.get("/staff/progressions")
+    async def progressions(
+        deps: D,
+        me: Staff,
+        status: STATUSES = "review",
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
+    ) -> list[dict[str, Any]]:
+        """Progressions in one status; by default the funded reviews waiting."""
+        found = await _lifecycle(deps).store.with_status(status, limit)
+        return [progression_view(p) for p in found]
+
+    @app.get("/staff/progressions/{prg}")
+    async def progression(deps: D, me: Staff, prg: PrgId) -> dict[str, Any]:
+        """One progression with its full history."""
+        store = _lifecycle(deps).store
+        record = await store.progression(prg)
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown progression")
+        history = [
+            {"kind": e.kind, "ts": e.ts, "detail": dict(e.detail)} for e in await store.history(prg)
+        ]
+        return {**progression_view(record), "history": history}
+
+    async def decide(deps: Deps, me: Principal, prg: str, approve: bool, reason: str) -> Any:
+        try:
+            record = await _lifecycle(deps).decide(
+                prg, approve, me.subject, me.email, reason, deps.clock()
+            )
+        except DecisionError as exc:
+            status = {"unknown": 404, "not_in_review": 409, "own_progression": 403}[exc.code]
+            raise HTTPException(
+                status_code=status, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
+        return progression_view(record)
+
+    @app.post("/staff/progressions/{prg}/approve")
+    async def approve(deps: D, me: Staff, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
+        """Approve a funded review: funded onboarding follows (step 3b)."""
+        result: dict[str, Any] = await decide(deps, me, prg, True, body.reason)
+        return result
+
+    @app.post("/staff/progressions/{prg}/deny")
+    async def deny(deps: D, me: Staff, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
+        result: dict[str, Any] = await decide(deps, me, prg, False, body.reason)
+        return result
 
     # --- admin: settings --------------------------------------------------------------
 

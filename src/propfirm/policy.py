@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from propfirm.market.guards import GuardConfig
-from propfirm.market.spread import SpreadConfig
+from propfirm.market.spread import MarketSpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
 from propfirm.trading.instruments import InstrumentSpec, default_instrument
@@ -164,6 +164,18 @@ def percent_text(share: Fraction | None) -> str | None:
             text = str(abs(scaled.numerator)).rjust(digits + 1, "0")
             return f"{sign}{text[:-digits]}.{text[-digits:]}"
     return f"{value.numerator}/{value.denominator}"
+
+
+_RSV_STAGE = re.compile(r"-(s1|s2|funded)-v[0-9]+(?:-a[0-9]+)?$")
+
+
+def stage_of(rsv_id: str) -> Stage:
+    """The stage a rule-set id names: every id is `<product>-<stage>-v<n>`,
+    with `-a<change>` for an admin change (`one-step-s1-v1-a7` -> s1)."""
+    found = _RSV_STAGE.search(rsv_id)
+    if found is None:
+        raise ValueError(f"{rsv_id!r} is not a rule-set id")
+    return Stage(found.group(1))
 
 
 def rule_set_view(r: RuleSet) -> dict[str, Any]:
@@ -377,8 +389,15 @@ def _trading(t: _Table) -> TradingPolicy:
         caps[c] = (pair[0], pair[1])
     caps_t.done()
     window = spread_t.integer("window", 1)
+    min_samples = spread_t.integer("min_samples", 1)
     vol = spread_t.ratio("vol_multiplier")
     news = spread_t.integer("news_multiplier", 1)
+    max_multiple = spread_t.integer("max_multiple", 1)
+    rollover = (
+        spread_t.integer("rollover_multiplier", 1),
+        spread_t.integer("rollover_before_minutes") * 60_000,
+        spread_t.integer("rollover_after_minutes") * 60_000,
+    )
     mins_t = spread_t.table("min_points")
     spread_t.done()
     instruments: list[InstrumentSpec] = []
@@ -391,11 +410,14 @@ def _trading(t: _Table) -> TradingPolicy:
                 leverage=leverage[symbol.asset_class],
                 max_order_volume_per_100k=order_cap,
                 max_symbol_volume_per_100k=symbol_cap,
-                spread=SpreadConfig(
-                    min_points=mins_t.integer(symbol.name, 1),
-                    window=window,
-                    vol_multiplier=vol,
-                    news_multiplier=news,
+                spread=_market_spread(
+                    mins_t.integer(symbol.name, 1),
+                    max_multiple,
+                    window,
+                    min_samples,
+                    vol,
+                    news,
+                    rollover,
                 ),
             )
         )
@@ -408,6 +430,31 @@ def _trading(t: _Table) -> TradingPolicy:
             raise PolicyError(f"trading.gap_threshold_ms_by_symbol.{name} must be >= 1")
     guard = GuardConfig(delay, gap, dict(sorted(by_symbol.items())) or None)
     return TradingPolicy(config_version, tuple(instruments), guard)
+
+
+def _market_spread(
+    min_points: int,
+    max_multiple: int,
+    window: int,
+    min_samples: int,
+    vol: Fraction,
+    news: int,
+    rollover: tuple[int, int, int],
+) -> MarketSpreadConfig:
+    try:
+        return MarketSpreadConfig(
+            min_points=min_points,
+            max_points=min_points * max_multiple,
+            window=window,
+            min_samples=min_samples,
+            vol_multiplier=vol,
+            news_multiplier=news,
+            rollover_multiplier=rollover[0],
+            rollover_before_ms=rollover[1],
+            rollover_after_ms=rollover[2],
+        )
+    except ValueError as exc:
+        raise PolicyError(f"trading.spread: {exc}") from exc
 
 
 def _product(t: _Table) -> ProductPolicy:

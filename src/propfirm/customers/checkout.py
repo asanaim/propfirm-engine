@@ -179,10 +179,12 @@ class Checkout:
         await self._store.provision_attempted(order.ord, acc, entry_id, ts)  # before the wait
         outcome = await self._gateway.outcome(entry_id, self._wait_s)
         if outcome.seq is not None:
-            if _opened(outcome.events, acc):
+            if opened(outcome.events, acc):
                 await self._store.mark_provisioned(order, acc, ts, outcome.seq)
             else:
-                await self._store.mark_failed(order.ord, _reason(outcome.events), ts, outcome.seq)
+                await self._store.mark_failed(
+                    order.ord, refusal_reason(outcome.events), ts, outcome.seq
+                )
         updated = await self._store.order(order.ord)
         assert updated is not None
         return updated
@@ -195,7 +197,7 @@ class Checkout:
         return len(pending)
 
 
-def _opened(events: Any, acc: str) -> bool:
+def opened(events: Any, acc: str) -> bool:
     for event in events:
         if event.get("type") == "AccountOpened" and event.get("account_id") == acc:
             return True
@@ -208,7 +210,7 @@ def _opened(events: Any, acc: str) -> bool:
     return False
 
 
-def _reason(events: Any) -> str:
+def refusal_reason(events: Any) -> str:
     for event in events:
         if "reason" in event:
             return str(event["reason"])
