@@ -19,6 +19,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
@@ -26,6 +27,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StrictInt, StringConstraints
 
 from propfirm.journal.inputs import CancelOrder, ClosePosition, Input, ModifyStops, PlaceOrder
+from propfirm.policy import Policy, ProductPolicy
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.trading.orders import OrderRequest, OrderType, Side
@@ -60,6 +62,7 @@ class Deps:
     live: LiveSource
     history: HistorySource
     gateway: Submitter
+    policy: Policy | None = None
     clock: Callable[[], int] = now_ms
     new_id: Callable[[], str] = lambda: uuid.uuid4().hex
     wait_s: float = 5.0
@@ -87,6 +90,54 @@ class CloseBody(_Body):
 class StopsBody(_Body):
     stop_loss: StrictInt | None
     take_profit: StrictInt | None
+
+
+def percent_text(share: Fraction | None) -> str | None:
+    """A share as exact percentage text: 7/200 -> "3.5"; never a float."""
+    if share is None:
+        return None
+    value = share * 100
+    for digits in range(13):
+        scaled = value * 10**digits
+        if scaled.denominator == 1:
+            if digits == 0:
+                return str(scaled.numerator)
+            sign = "-" if scaled < 0 else ""
+            text = str(abs(scaled.numerator)).rjust(digits + 1, "0")
+            return f"{sign}{text[:-digits]}.{text[-digits:]}"
+    return f"{value.numerator}/{value.denominator}"
+
+
+def product_view(p: ProductPolicy) -> dict[str, Any]:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "profit_split_percent": percent_text(p.profit_split),
+        "code_discount_max_percent": percent_text(p.code_discount_max),
+        "repeat_discount_percent": [percent_text(d) for d in p.repeat_discounts],
+        "fee_refund_with_payout": p.fee_refund_with_payout or None,
+        "sizes": [{"size_cents": s, "price_cents": c} for s, c in p.prices_cents],
+        "stages": [
+            {
+                "stage": r.stage.value,
+                "rsv_id": r.rsv_id,
+                "profit_target_percent": percent_text(r.profit_target),
+                "max_loss_percent": percent_text(r.max_loss),
+                "max_loss_kind": r.max_loss_kind.value,
+                "daily_loss_percent": percent_text(r.daily_loss),
+                "min_trading_days": r.min_trading_days,
+                "consistency_percent": percent_text(r.consistency),
+                "consistency_at_pass": r.consistency_at_pass,
+            }
+            for r in p.rule_sets
+        ],
+    }
+
+
+def _policy(deps: Deps) -> Policy:
+    if deps.policy is None:
+        raise HTTPException(status_code=503, detail="policy not loaded")
+    return deps.policy
 
 
 def _answer(outcome: Outcome) -> JSONResponse:
@@ -131,6 +182,18 @@ def create_app(
     async def health(deps: D) -> dict[str, Any]:
         head = await deps.live.head()
         return {"status": "ok", "journal_seq": head["seq"] if head else None}
+
+    @app.get("/catalogue")
+    async def catalogue(deps: D) -> list[dict[str, Any]]:
+        """Products as the policy file defines them (prices, rules)."""
+        return [product_view(p) for p in _policy(deps).products]
+
+    @app.get("/access")
+    async def access(deps: D) -> dict[str, Any]:
+        """The country-gating switch and the countries it would refuse."""
+        gate = _policy(deps).access
+        blocked = sorted(gate.blocked_countries)
+        return {"country_gating": gate.country_gating, "blocked_countries": blocked}
 
     @app.get("/quotes")
     async def quotes(deps: D) -> dict[str, dict[str, Any]]:

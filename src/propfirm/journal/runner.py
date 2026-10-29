@@ -188,13 +188,17 @@ class Runner:
         anchors: AnchorStore | None = None,
         full_replay: bool = False,
         new_price_key: Callable[[], bytes] = _new_secret,
+        keep_stored_setup: bool = False,
     ) -> Runner:
-        """`new_price_key` makes the secret when a key is needed; tests fix it."""
+        """`setup` starts a new journal. An existing journal must have the same
+        setup, unless `keep_stored_setup`: then it runs under its own, and
+        later changes arrive as inputs (the engine service's policy changes).
+        `new_price_key` makes the secret when a key is needed; tests fix it."""
         text = CODEC.encode(setup)
         stored = await store.setup()
         if stored is None:
             await store.init_setup(text)
-        elif stored != text:
+        elif stored != text and not keep_stored_setup:
             raise SetupError("configured setup differs from the journal's setup")
         machine = await rebuild(store, full=full_replay)
         keys = await store.price_keys()

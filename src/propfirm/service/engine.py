@@ -3,9 +3,11 @@
     python -m propfirm.service.engine
 
 Starts the runner on PostgreSQL and the Valkey input stream (rebuild,
-anchors, price key; see `propfirm.journal.runner`), then polls until
-SIGTERM or SIGINT. After each batch it republishes the live state (at most
-every `publish_ms`). A stop request finishes the current batch first, so
+anchors, price key; see `propfirm.journal.runner`), sends the inputs that
+bring the engine in line with the policy file (`policy_changes`), then
+polls until SIGTERM or SIGINT. A new journal starts from the policy file.
+After each batch it republishes the live state (at most every
+`publish_ms`). A stop request finishes the current batch first, so
 nothing is half done; a crash is safe anyway (acceptance test 4).
 """
 
@@ -20,21 +22,37 @@ from propfirm.journal.anchor import FileAnchorStore
 from propfirm.journal.postgres import PostgresJournal
 from propfirm.journal.runner import Runner
 from propfirm.journal.setup import EngineSetup
-from propfirm.journal.stream import InputStreamReader
+from propfirm.journal.stream import InputStreamReader, InputStreamWriter
+from propfirm.policy import Policy, load_policy
 from propfirm.service.config import ServiceConfig
+from propfirm.service.feeder import now_ms
 from propfirm.service.live import LivePublisher
-from propfirm.service.setup import development_setup
+from propfirm.service.setup import policy_changes, setup_from_policy
 
 
-async def run(config: ServiceConfig, setup: EngineSetup, stop: asyncio.Event) -> Runner:
-    """Run until `stop` is set; return the runner (for tests)."""
+async def run(
+    config: ServiceConfig,
+    setup: EngineSetup,
+    stop: asyncio.Event,
+    policy: Policy | None = None,
+) -> Runner:
+    """Run until `stop` is set; return the runner (for tests). With a
+    `policy`, an existing journal keeps its setup and receives the policy's
+    changes as inputs; a change that needs a new version number stops the
+    start with PolicyError."""
     client = avalkey.Valkey.from_url(config.valkey_url)
     store = await PostgresJournal.connect(config.database_url, config.schema)
     try:
         reader = InputStreamReader(client, config.stream, config.group, config.consumer)
         await reader.ensure_group()
         anchors = FileAnchorStore(config.anchor_path) if config.anchor_path else None
-        runner = await Runner.start(store, reader, setup, anchors=anchors)
+        runner = await Runner.start(
+            store, reader, setup, anchors=anchors, keep_stored_setup=policy is not None
+        )
+        if policy is not None:
+            writer = InputStreamWriter(client, config.stream)
+            for item in policy_changes(policy, runner.machine, now_ms()):
+                await writer.publish(item)
         publisher = LivePublisher(client, config.live_prefix)
         await publisher.publish(runner.machine)
         published = time.monotonic()
@@ -57,7 +75,9 @@ async def _main() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
-    await run(ServiceConfig.from_env(os.environ), development_setup(), stop)
+    config = ServiceConfig.from_env(os.environ)
+    policy = load_policy(config.policy_path)
+    await run(config, setup_from_policy(policy), stop, policy)
 
 
 if __name__ == "__main__":

@@ -77,6 +77,7 @@ from propfirm.trading.events import (
     StopsModified,
     SymbolFrozen,
     SymbolResumed,
+    TradingConfigChanged,
 )
 from propfirm.trading.instruments import InstrumentSpec, conversion_route, scaled_cap
 from propfirm.trading.orders import OrderRequest, OrderType, PendingOrder, Position, Side
@@ -114,6 +115,9 @@ class EngineState:
     spreads: tuple[tuple[str, SpreadState], ...]  # configured order
     calendar: tuple[tuple[str, NewsWindow], ...]  # scheduled, not yet ended
     calendar_ids: tuple[str, ...]  # sorted: every event id ever scheduled
+    config_version: str  # the trading settings in force (they can change by input)
+    instruments: tuple[InstrumentSpec, ...]  # configured order
+    guard: GuardConfig
 
 
 class _NoRate(Exception):
@@ -362,6 +366,74 @@ class TradingEngine:
         events.append(NewsCancelled(self._now, event_id))
         return events
 
+    def check_reconfigure(
+        self,
+        config_version: str,
+        instruments: Iterable[InstrumentSpec],
+        *,
+        allow_same: bool = False,
+    ) -> str | None:
+        """Why these settings cannot be applied, or None. Only leverage, lot
+        caps and spread parameters may change: symbol, digits, contract size
+        and quote currency define the instrument and P&L of open positions."""
+        if not isinstance(config_version, str) or not config_version.strip():
+            return "config version must be non-empty text"
+        if config_version != config_version.strip():
+            return "config version must be unpadded"
+        if config_version == self._version and not allow_same:
+            return f"config version {config_version!r} is already in force"
+        seen: set[str] = set()
+        for spec in instruments:
+            if not isinstance(spec, InstrumentSpec):
+                return "instruments must be InstrumentSpec values"
+            current = self._instruments.get(spec.name)
+            if current is None:
+                return f"{spec.name} is not a configured symbol"
+            if spec.name in seen:
+                return f"{spec.name} is listed twice"
+            seen.add(spec.name)
+            if (spec.symbol, spec.contract_size, spec.quote_currency) != (
+                current.symbol,
+                current.contract_size,
+                current.quote_currency,
+            ):
+                return f"{spec.name}: symbol, digits, contract size and quote currency are fixed"
+        return None
+
+    def reconfigure(
+        self,
+        config_version: str,
+        instruments: Iterable[InstrumentSpec],
+        guard: GuardConfig | None,
+        ts: int,
+    ) -> list[EngineEvent]:
+        """Apply new trading settings from now on (checked by `check_reconfigure`)."""
+        specs = tuple(instruments)
+        refusal = self.check_reconfigure(config_version, specs)
+        if refusal is not None:
+            raise ValueError(refusal)
+        if guard is not None and not isinstance(guard, GuardConfig):
+            raise TypeError("guard must be a GuardConfig or None")
+        events = self._advance(ts)
+        merged = {**self._instruments, **{s.name: s for s in specs}}
+        self._apply_config(config_version, tuple(merged.values()), guard or self._guards.config)
+        events.append(
+            TradingConfigChanged(
+                self._now, config_version, tuple(sorted(s.name for s in specs)), guard is not None
+            )
+        )
+        return events
+
+    def _apply_config(
+        self, config_version: str, instruments: Iterable[InstrumentSpec], guard: GuardConfig
+    ) -> None:
+        self._version = config_version
+        for spec in instruments:
+            if spec != self._instruments[spec.name]:
+                self._instruments[spec.name] = spec
+            self._spreads[spec.name].reconfigure(spec.spread)
+        self._guards.reconfigure(guard)
+
     def lock_account(self, account_id: str, ts: int) -> list[EngineEvent]:
         """Cancel the account's pending orders and reject all further trading."""
         self._account(account_id)
@@ -380,6 +452,19 @@ class TradingEngine:
     @property
     def now(self) -> int:
         return self._now
+
+    @property
+    def config_version(self) -> str:
+        return self._version
+
+    @property
+    def instruments(self) -> dict[str, InstrumentSpec]:
+        """The trading settings in force, per symbol."""
+        return dict(self._instruments)
+
+    @property
+    def guard_config(self) -> GuardConfig:
+        return self._guards.config
 
     @property
     def symbols(self) -> frozenset[str]:
@@ -412,6 +497,9 @@ class TradingEngine:
             spreads=tuple((s, m.state()) for s, m in self._spreads.items()),
             calendar=tuple(self._calendar.items()),
             calendar_ids=tuple(sorted(self._calendar_ids)),
+            config_version=self._version,
+            instruments=tuple(self._instruments.values()),
+            guard=self._guards.config,
         )
 
     def restore(self, state: EngineState) -> None:
@@ -427,6 +515,12 @@ class TradingEngine:
         accounts = {a: _Account(a, balance) for a, balance in state.accounts}
         if len(accounts) != len(state.accounts):
             raise ValueError("duplicate account in state")
+        if [i.name for i in state.instruments] != list(self._instruments):
+            raise ValueError("instrument state is for other symbols")
+        refusal = self.check_reconfigure(state.config_version, state.instruments, allow_same=True)
+        if refusal is not None:
+            raise ValueError(refusal)
+        self._apply_config(state.config_version, state.instruments, state.guard)
         self._guards.restore(state.guards)
         for symbol, spread in state.spreads:
             self._spreads[symbol].restore(spread)

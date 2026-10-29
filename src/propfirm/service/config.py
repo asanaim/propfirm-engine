@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from propfirm.policy import DEFAULT_POLICY
+
 _NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 _KEY = re.compile(r"[A-Za-z0-9:_.-]{1,200}")
 
@@ -28,6 +30,7 @@ class ServiceConfig:
     group: str = "engine"
     consumer: str = "engine-1"
     anchor_path: Path | None = None
+    policy_path: Path = DEFAULT_POLICY
     batch: int = 200  # inputs per transaction, at most
     block_ms: int = 1_000  # how long one stream read waits for input
     publish_ms: int = 250  # live state is published at most this often
@@ -68,6 +71,7 @@ class ServiceConfig:
             return int(raw)
 
         anchor = env.get("PROPFIRM_ANCHOR_PATH")
+        policy = env.get("PROPFIRM_POLICY")
         return cls(
             database_url=text("DATABASE_URL", ""),
             valkey_url=text("VALKEY_URL", ""),
@@ -77,6 +81,7 @@ class ServiceConfig:
             group=text("PROPFIRM_GROUP", "engine"),
             consumer=text("PROPFIRM_CONSUMER", "engine-1"),
             anchor_path=Path(anchor) if anchor else None,
+            policy_path=Path(policy) if policy else DEFAULT_POLICY,
             batch=number("PROPFIRM_BATCH", 200),
             block_ms=number("PROPFIRM_BLOCK_MS", 1_000),
             publish_ms=number("PROPFIRM_PUBLISH_MS", 250),

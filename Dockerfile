@@ -16,6 +16,7 @@ RUN uv sync --frozen --no-install-project
 
 COPY src ./src
 COPY tests ./tests
+COPY config ./config
 RUN uv sync --frozen
 
 CMD ["uv", "run", "--frozen", "pytest"]

@@ -19,6 +19,7 @@ from propfirm.journal.inputs import (
     PlaceOrder,
 )
 from propfirm.market.types import PriceUpdate
+from propfirm.policy import load_policy
 from propfirm.service.config import ConfigError, ServiceConfig
 from propfirm.service.feeder import feed
 from propfirm.service.gateway import Outcome
@@ -120,8 +121,12 @@ class FakeGateway:
         return Outcome(entry_id, self.seq, self.events)
 
 
-def call(gateway: FakeGateway, method: str, url: str, body: object = None) -> httpx.Response:
-    deps = Deps(FakeLive(), FakeHistory(), gateway, clock=lambda: NOW, new_id=lambda: "gen1")
+def call(
+    gateway: FakeGateway, method: str, url: str, body: object = None, policy: Any = None
+) -> httpx.Response:
+    deps = Deps(
+        FakeLive(), FakeHistory(), gateway, policy, clock=lambda: NOW, new_id=lambda: "gen1"
+    )
     app = create_app(deps)
 
     async def go() -> httpx.Response:
@@ -267,3 +272,28 @@ def test_scheduler_ticks_and_checkpoints() -> None:
     a = [Advance(NOW + k * 1_000) for k in range(1, 7)]
     assert items == [*a[:3], Checkpoint(NOW + 3_000), *a[3:], Checkpoint(NOW + 6_000)]
     assert (ticks, checkpoints) == (6, 2)
+
+
+def test_catalogue_and_access_come_from_the_policy() -> None:
+    policy = load_policy()
+    products = call(FakeGateway(), "GET", "/catalogue", policy=policy).json()
+    lite = products[0]
+    assert (lite["id"], lite["name"], lite["profit_split_percent"]) == ("lite", "Lite", "80")
+    assert lite["sizes"][1] == {"size_cents": 1_000_000, "price_cents": 4_400}
+    s1 = lite["stages"][0]
+    assert s1 == {
+        "stage": "s1",
+        "rsv_id": "lite-s1-v1",
+        "profit_target_percent": "6",
+        "max_loss_percent": "6",
+        "max_loss_kind": "static",
+        "daily_loss_percent": "3",
+        "min_trading_days": 4,
+        "consistency_percent": None,
+        "consistency_at_pass": False,
+    }
+    instant = products[-1]["stages"][0]
+    assert (instant["max_loss_kind"], instant["consistency_percent"]) == ("trailing", "50")
+    access = call(FakeGateway(), "GET", "/access", policy=policy).json()
+    assert access == {"country_gating": False, "blocked_countries": ["BD", "IN"]}
+    assert call(FakeGateway(), "GET", "/catalogue").status_code == 503  # no policy loaded

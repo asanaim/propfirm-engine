@@ -3,9 +3,12 @@ journaling to PostgreSQL, live state in Valkey, history from the projector,
 and the API on top. Then a restart: the same state comes back."""
 
 import asyncio
+import copy
+import tomllib
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from fractions import Fraction
 from typing import Any
 
 import asyncpg
@@ -18,13 +21,14 @@ from propfirm.journal.inputs import OpenAccount
 from propfirm.journal.runner import Runner
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.market.types import PriceUpdate
+from propfirm.policy import DEFAULT_POLICY, Policy, PolicyError, load_policy, parse_policy
 from propfirm.service.config import ServiceConfig
 from propfirm.service.engine import run
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader, Projector
-from propfirm.service.setup import development_setup
+from propfirm.service.setup import development_setup, setup_from_policy
 
 pytestmark = pytest.mark.integration
 
@@ -164,5 +168,56 @@ def test_projector_waits_for_the_journal_and_takes_one_lock(
             conn = await asyncpg.connect(database_url)
             await conn.execute(f"DROP SCHEMA IF EXISTS {read} CASCADE")
             await conn.close()
+
+    asyncio.run(scenario())
+
+
+def test_policy_edits_reach_the_engine_on_restart(
+    database_url: str, valkey_url: str, pg_schema: str
+) -> None:
+    config = ServiceConfig(
+        database_url=database_url,
+        valkey_url=valkey_url,
+        schema=pg_schema,
+        read_schema=f"{pg_schema}_r",
+        stream=f"test:inputs:{uuid.uuid4().hex}",
+        block_ms=50,
+        publish_ms=1,
+    )
+    shipped = load_policy()
+    raw = tomllib.loads(DEFAULT_POLICY.read_text("utf-8"))
+    raw["products"][0]["stages"][0].update(version=2, daily_loss_percent="4")
+    raw["trading"]["config_version"] = "trading-v2"
+    raw["trading"]["leverage"]["metal"] = "25"
+    edited = parse_policy(raw)
+    same_version = copy.deepcopy(raw)
+    same_version["products"][0]["stages"][0].update(version=1)
+
+    async def life(policy: Policy) -> Runner:
+        stop = asyncio.Event()
+        task = asyncio.create_task(run(config, setup_from_policy(shipped), stop, policy))
+        await asyncio.sleep(0.5)
+        stop.set()
+        return await asyncio.wait_for(task, timeout=10)
+
+    async def scenario() -> None:
+        client = avalkey.Valkey.from_url(valkey_url)
+        try:
+            first = await life(shipped)
+            assert first.machine.supervisor.engine.config_version == "trading-v1"
+            second = await life(edited)  # the journal keeps its setup; edits arrive as inputs
+            engine = second.machine.supervisor.engine
+            assert "lite-s1-v2" in second.machine.rule_sets
+            assert engine.config_version == "trading-v2"
+            assert engine.instruments["XAU/USD"].leverage == 25
+            assert second.machine.rule_sets["lite-s1-v1"].daily_loss == Fraction(3, 100)
+            with pytest.raises(PolicyError, match="raise the stage's version"):
+                await life(parse_policy(same_version))
+        finally:
+            for key in [config.stream] + [
+                k async for k in client.scan_iter(f"{config.live_prefix}:*")
+            ]:
+                await client.delete(key)
+            await client.aclose()
 
     asyncio.run(scenario())

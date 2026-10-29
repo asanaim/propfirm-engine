@@ -42,6 +42,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
+      - ./config:/app/config:ro
     command: ["uv", "run", "--frozen", "pytest"]
 
   # --- the platform (P2): docker compose --profile platform up ---------------
@@ -59,6 +60,7 @@ services:
       PROPFIRM_ANCHOR_PATH: /var/lib/propfirm/anchors.jsonl
     volumes:
       - anchors:/var/lib/propfirm
+      - ./config:/app/config:ro  # edit config/policy.toml, then restart the engine
     command: ["/opt/venv/bin/python", "-m", "propfirm.service.engine"]
     stop_grace_period: 15s
 
@@ -74,6 +76,8 @@ services:
     build: .
     depends_on: *services
     environment: *platform-env
+    volumes:
+      - ./config:/app/config:ro
     ports:
       - "127.0.0.1:8000:8000"  # localhost only until login exists (P2 step 2)
     command: ["/opt/venv/bin/uvicorn", "propfirm.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

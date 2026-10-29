@@ -108,6 +108,15 @@ class SpreadModel:
         self._changes: deque[int] = deque(maxlen=config.window)
         self._last: int | None = None
 
+    def reconfigure(self, config: SpreadConfig) -> None:
+        """New parameters from the next quote on; keeps the most recent
+        changes that fit the new window."""
+        if not isinstance(config, SpreadConfig):
+            raise TypeError("config must be a SpreadConfig")
+        kept = list(self._changes)[-config.window :]
+        self._config = config
+        self._changes = deque(kept, maxlen=config.window)
+
     def state(self) -> SpreadState:
         return SpreadState(tuple(self._changes), self._last)
 

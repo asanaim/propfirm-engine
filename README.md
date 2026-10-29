@@ -48,6 +48,22 @@ This starts the engine, the projector, the API on http://127.0.0.1:8000
 clock/checkpoint scheduler. `docker compose --profile platform down` stops
 them; add `-v` to delete the journal and start over.
 
+## Change products, prices and switches
+
+Every number and switch the firm can change lives in `config/policy.toml`:
+product targets, drawdowns, daily loss, trading days, consistency, sizes,
+prices, split and discounts; leverage, lot caps, spreads and feed guards;
+the country-gating switch; news windows, payouts and scaling.
+
+1. Edit the file. For a product stage, raise its `version`; for anything
+   under `[trading]`, set a new `config_version`. (Published versions never
+   change: open accounts keep theirs, new accounts get the new one.)
+2. Restart the engine: `docker compose restart engine api`.
+
+The engine applies the change through its journal and refuses an edit that
+reuses a version number. A typo (unknown key, a number written as 6.0
+instead of "6") stops the start with a message naming the line.
+
 ## Run the tests without Docker
 
 Needs [uv](https://docs.astral.sh/uv/). Unit tests run anywhere; integration
@@ -102,7 +118,7 @@ or rules uses floating point.
 
 ## Phase P2 progress (gate G2: challenge lifecycle on staging, scans, restore drill)
 
-- [x] Step 1: engine service, live state, history, trading API
+- [x] Step 1: engine service, live state, history, trading API, policy file
 - [ ] Step 2: customers and access (Keycloak, customer record, gating, checkout)
 - [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
 - [ ] Step 4: trader portal

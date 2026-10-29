@@ -1,0 +1,243 @@
+# Firm policy: the numbers and switches the firm can change without code.
+#
+# How to change something:
+#   - Edit this file and restart the engine (docker compose restart engine).
+#     The engine applies the change through its journal, so every decision
+#     stays traceable to the settings in force at the time.
+#   - Product rules: raise the stage's `version` whenever you change any of
+#     its numbers. Versions never change once published: accounts already
+#     open keep the version they started on; new accounts get the new one.
+#   - Trading settings: change `trading.config_version` whenever you change
+#     anything under [trading]. Open positions keep the margin set when
+#     they opened.
+#
+# Formats: percentages are text ("6", "3.5") so they stay exact; money is
+# whole US cents; volumes are hundredths of a lot; times are milliseconds.
+
+[access]
+# Refuse customers whose ID document, IP address or device country is in
+# `blocked_countries`. Off: everyone may register (the plan's settled input
+# excluded Bangladesh and India; changed on 29 Oct 2026, see counsel C8).
+country_gating = false
+blocked_countries = ["BD", "IN"]  # ISO 3166-1 alpha-2
+
+[news]
+# Default window around a restricted event: no trade opens or closes from
+# `before_minutes` before to `after_minutes` after it.
+before_minutes = 2
+after_minutes = 2
+
+[payouts]
+minimum_cents = 5000           # $50
+first_after_days = 14          # after funding
+pay_days = ["15", "last"]      # days of the month
+approvals_required = 2         # people who must approve each payout
+
+[scaling]                      # Lite, Classic and 1-Step funded accounts
+review_months = 4
+min_net_profit_percent = "10"
+min_paid_payouts = 3
+step_percent = "20"            # added to initial capital per step
+split_after_step = 2           # from this step the split below applies
+split_percent_after = "90"
+max_allocation_cents = 40000000  # $400,000 per trader
+
+[trading]
+config_version = "trading-v1"
+delay_threshold_ms = 2000      # older updates freeze the symbol
+gap_threshold_ms = 60000       # no update for longer freezes the symbol
+gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
+
+[trading.leverage]             # "100" means 1:100
+forex = "100"
+metal = "50"
+oil = "20"
+crypto = "3.33"
+
+[trading.lot_caps]             # per $100,000 of initial balance: [per order, per symbol]
+forex = [5000, 10000]
+metal = [2000, 4000]
+oil = [2000, 4000]
+crypto = [1000, 2000]
+
+[trading.spread]
+window = 20                    # recent price changes used for volatility
+vol_multiplier = "1"
+news_multiplier = 3            # inside a news window
+
+[trading.spread.min_points]    # smallest spread per symbol, in points
+"EUR/USD" = 5
+"GBP/USD" = 5
+"USD/JPY" = 5
+"USD/CHF" = 5
+"AUD/USD" = 5
+"USD/CAD" = 5
+"NZD/USD" = 5
+"EUR/GBP" = 15
+"EUR/JPY" = 15
+"EUR/CHF" = 15
+"EUR/AUD" = 15
+"EUR/CAD" = 15
+"EUR/NZD" = 15
+"GBP/JPY" = 15
+"GBP/CHF" = 15
+"GBP/AUD" = 15
+"GBP/CAD" = 15
+"AUD/JPY" = 15
+"AUD/CAD" = 15
+"CAD/JPY" = 15
+"CHF/JPY" = 15
+"XAU/USD" = 20
+"XAG/USD" = 20
+"WTI" = 3
+"Brent" = 3
+"BTC/USD" = 1000
+"ETH/USD" = 100
+"SOL/USD" = 5
+"XRP/USD" = 5
+"LTC/USD" = 5
+
+# --- products -------------------------------------------------------------------
+# Each stage becomes the rule-set version "<product>-<stage>-v<version>".
+# max_loss_kind: "static" (initial balance - max loss) or "trailing"
+# (equity high-water mark - max loss, never above the initial balance).
+# consistency: best day's profit as a share of total profit ("" = no rule).
+
+[[products]]
+id = "lite"
+name = "Lite"
+sizes_cents = [500000, 1000000, 2500000, 5000000, 10000000, 20000000]
+prices_cents = [2400, 4400, 9900, 17900, 31900, 63900]
+profit_split_percent = "80"
+code_discount_max_percent = "10"
+repeat_discount_percent = ["10", "15"]  # 2nd and 3rd account
+fee_refund_with_payout = 0     # 0: no fee refund
+
+  [[products.stages]]
+  stage = "s1"
+  version = 1
+  profit_target_percent = "6"
+  max_loss_percent = "6"
+  max_loss_kind = "static"
+  daily_loss_percent = "3"
+  min_trading_days = 4
+  consistency_percent = ""
+  consistency_at_pass = false
+
+  [[products.stages]]
+  stage = "s2"
+  version = 1
+  profit_target_percent = "6"
+  max_loss_percent = "6"
+  max_loss_kind = "static"
+  daily_loss_percent = "3"
+  min_trading_days = 4
+  consistency_percent = ""
+  consistency_at_pass = false
+
+  [[products.stages]]
+  stage = "funded"
+  version = 1
+  profit_target_percent = ""
+  max_loss_percent = "6"
+  max_loss_kind = "static"
+  daily_loss_percent = "3"
+  min_trading_days = 0
+  consistency_percent = ""
+  consistency_at_pass = false
+
+[[products]]
+id = "classic"
+name = "Classic"
+sizes_cents = [1000000, 2500000, 5000000, 10000000, 20000000]
+prices_cents = [5400, 11900, 20900, 40900, 79900]
+profit_split_percent = "80"
+code_discount_max_percent = "10"
+repeat_discount_percent = ["10", "15"]
+fee_refund_with_payout = 0
+
+  [[products.stages]]
+  stage = "s1"
+  version = 1
+  profit_target_percent = "10"
+  max_loss_percent = "8"
+  max_loss_kind = "static"
+  daily_loss_percent = "4"
+  min_trading_days = 4
+  consistency_percent = ""
+  consistency_at_pass = false
+
+  [[products.stages]]
+  stage = "s2"
+  version = 1
+  profit_target_percent = "5"
+  max_loss_percent = "8"
+  max_loss_kind = "static"
+  daily_loss_percent = "4"
+  min_trading_days = 4
+  consistency_percent = ""
+  consistency_at_pass = false
+
+  [[products.stages]]
+  stage = "funded"
+  version = 1
+  profit_target_percent = ""
+  max_loss_percent = "8"
+  max_loss_kind = "static"
+  daily_loss_percent = "4"
+  min_trading_days = 0
+  consistency_percent = ""
+  consistency_at_pass = false
+
+[[products]]
+id = "one-step"
+name = "1-Step"
+sizes_cents = [500000, 1000000, 2500000, 5000000, 10000000, 20000000]
+prices_cents = [3700, 7900, 19900, 29900, 49900, 99900]
+profit_split_percent = "80"
+code_discount_max_percent = "10"
+repeat_discount_percent = ["10", "15"]
+fee_refund_with_payout = 3     # refunded with the 3rd payout
+
+  [[products.stages]]
+  stage = "s1"
+  version = 1
+  profit_target_percent = "10"
+  max_loss_percent = "6"
+  max_loss_kind = "static"
+  daily_loss_percent = "3"
+  min_trading_days = 4
+  consistency_percent = "50"
+  consistency_at_pass = true
+
+  [[products.stages]]
+  stage = "funded"
+  version = 1
+  profit_target_percent = ""
+  max_loss_percent = "6"
+  max_loss_kind = "static"
+  daily_loss_percent = "3"
+  min_trading_days = 0
+  consistency_percent = "50"
+  consistency_at_pass = false
+
+[[products]]
+id = "instant"
+name = "Instant"
+sizes_cents = [500000, 1000000, 2500000]
+prices_cents = [10900, 19900, 47900]
+profit_split_percent = "80"
+code_discount_max_percent = "0"  # no codes on Instant
+repeat_discount_percent = ["10", "10"]
+fee_refund_with_payout = 0
+
+  [[products.stages]]
+  stage = "funded"
+  version = 1
+  profit_target_percent = ""
+  max_loss_percent = "5"
+  max_loss_kind = "trailing"
+  daily_loss_percent = "3"
+  min_trading_days = 0
+  consistency_percent = "50"
+  consistency_at_pass = false

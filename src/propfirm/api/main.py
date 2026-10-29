@@ -15,6 +15,7 @@ from fastapi import FastAPI
 
 from propfirm.api.app import Deps, create_app
 from propfirm.journal.stream import InputStreamWriter
+from propfirm.policy import load_policy
 from propfirm.service.config import ServiceConfig
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             live=LiveReader(client, config.live_prefix),
             history=HistoryReader(pool, config.read_schema),
             gateway=Gateway(InputStreamWriter(client, config.stream), pool, config.schema),
+            policy=load_policy(config.policy_path),
         )
         app.state.deps = deps
         yield

@@ -60,6 +60,7 @@ from propfirm.journal.inputs import (
     RuleSetAdded,
     ScheduleNews,
     StateCheckpointed,
+    UpdateTrading,
     apply,
 )
 from propfirm.journal.setup import EngineSetup, SetupError, build
@@ -96,6 +97,7 @@ from propfirm.trading.events import (
     StopsModified,
     SymbolFrozen,
     SymbolResumed,
+    TradingConfigChanged,
 )
 from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest, OrderType, PendingOrder, Position, Side
@@ -162,6 +164,7 @@ CODEC = Codec(
         AddRuleSet,
         ScheduleNews,
         CancelNews,
+        UpdateTrading,
         Checkpoint,
         Malformed,
         PriceRef,
@@ -186,6 +189,7 @@ CODEC = Codec(
         StaleUpdate,
         NewsScheduled,
         NewsCancelled,
+        TradingConfigChanged,
         DayStarted,
         AccountBreached,
         StagePassed,
