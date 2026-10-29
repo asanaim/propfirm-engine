@@ -6,7 +6,8 @@ environment.
 Needs OIDC_ISSUER and OIDC_JWKS_URL (the Keycloak realm). Checkout runs
 only with PROPFIRM_SANDBOX=1 until the real payment and screening
 providers are connected (C6, C7); without it, checkout answers 503.
-A background task retries paid orders whose account is not open yet.
+A background task retries paid orders whose account is not open yet, and
+admin stage-limit changes the engine has not journaled yet.
 """
 
 import asyncio
@@ -32,14 +33,22 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
+from propfirm.settings.service import Settings
+from propfirm.settings.store import SettingsStore
 
 RECONCILE_S = 10.0
 log = logging.getLogger(__name__)
 
 
-async def _reconcile_forever(checkout: Checkout) -> None:
+async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> None:
     while True:
         await asyncio.sleep(RECONCILE_S)
+        try:
+            await settings.publish_pending(now_ms())
+        except Exception:  # retried next round; the previous limits stay in force
+            log.exception("setting publication retry failed")
+        if checkout is None:
+            continue
         try:
             await checkout.reconcile(now_ms())
         except Exception:  # retried next round; the order stays paid
@@ -59,10 +68,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         policy = load_policy(config.policy_path)
         gateway = Gateway(InputStreamWriter(client, config.stream), pool, config.schema)
         customers = await CustomerStore.open(pool, config.customer_schema)
+        settings = Settings(policy, await SettingsStore.open(pool, config.settings_schema), gateway)
         checkout = None
         if config.sandbox:
-            checkout = Checkout(customers, policy, SandboxPayments(), SandboxScreener(), gateway)
-            task = asyncio.create_task(_reconcile_forever(checkout))
+            checkout = Checkout(customers, settings, SandboxPayments(), SandboxScreener(), gateway)
+        task = asyncio.create_task(_reconcile_forever(checkout, settings))
         app.state.deps = Deps(
             live=LiveReader(client, config.live_prefix),
             history=HistoryReader(pool, config.read_schema),
@@ -72,7 +82,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
             customers=customers,
             checkout=checkout,
-            policy=policy,
+            policy=settings,
+            settings=settings,
             sandbox=config.sandbox,
             country_header=config.country_header,
         )

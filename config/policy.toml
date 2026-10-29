@@ -7,6 +7,10 @@
 #   - Product rules: raise the stage's `version` whenever you change any of
 #     its numbers. Versions never change once published: accounts already
 #     open keep the version they started on; new accounts get the new one.
+#   - Admin-only settings (starting values here; an admin changes them
+#     through the API, and the admin value wins): access.country_gating,
+#     access.blocked_countries, and each stage's profit_target_percent,
+#     daily_loss_percent, max_loss_percent and max_loss_kind.
 #   - Trading settings: change `trading.config_version` whenever you change
 #     anything under [trading]. Open positions keep the margin set when
 #     they opened.
@@ -18,6 +22,8 @@
 # Refuse customers whose ID document, IP address or device country is in
 # `blocked_countries`. Off: everyone may register (the plan's settled input
 # excluded Bangladesh and India; changed on 29 Oct 2026, see counsel C8).
+# Admin-only setting: these are starting values; an admin changes them
+# through the API (PUT /admin/access/country-gating), and that value wins.
 country_gating = false
 blocked_countries = ["BD", "IN"]  # ISO 3166-1 alpha-2
 min_age = 18                   # years, from the date of birth given at registration

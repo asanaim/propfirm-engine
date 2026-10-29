@@ -6,10 +6,15 @@ values are errors, so a typo cannot silently change a rule.
 
 What reads which part:
 - `products`: the rule sets the engine enforces, and the catalogue
-  (sizes, prices, split, discounts) the API shows and checkout will use.
+  (sizes, prices, split, discounts) the API shows and checkout uses.
 - `trading`: leverage, lot caps, spreads and feed-guard thresholds.
-- `access`: the country-gating switch (customer registration, step 2).
+- `access`: the country-gating switch and the minimum age (registration).
 - `news`, `payouts`, `scaling`: read by later P2 steps.
+
+Admin-owned settings: the country-gating switch with its country list, and
+each stage's profit target, daily loss limit and drawdown limit, are
+changed by admins through the API (`propfirm.settings`); the file holds
+their starting values. `PolicySource.current()` gives the policy in force.
 
 The engine never reads this file directly: the engine service turns
 differences into journaled inputs (`policy_changes`), so every decision
@@ -22,7 +27,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import SpreadConfig
@@ -117,6 +122,60 @@ class Policy:
         raise KeyError(f"unknown product {product_id!r}")
 
 
+class PolicySource(Protocol):
+    async def current(self) -> Policy: ...
+
+
+class FixedPolicy:
+    """A policy that does not change (tests; the file without admin settings)."""
+
+    def __init__(self, policy: Policy) -> None:
+        self._policy = policy
+
+    async def current(self) -> Policy:
+        return self._policy
+
+
+# --- exact percentages and country codes -----------------------------------------
+
+
+def parse_percent(value: object, where: str, optional: bool = False) -> Fraction | None:
+    """A percentage written as text ("6", "3.5") as an exact share (3/50,
+    7/200); "" is no value when `optional`. Anything else is a PolicyError."""
+    if optional and value == "":
+        return None
+    if not isinstance(value, str) or not _PERCENT.fullmatch(value):
+        raise PolicyError(f'{where} must be a percentage written as text, e.g. "6" or "3.5"')
+    return Fraction(value) / 100
+
+
+def percent_text(share: Fraction | None) -> str | None:
+    """A share as exact percentage text: 7/200 -> "3.5"; never a float. A
+    share that is not a finite decimal stays a fraction ("1/3")."""
+    if share is None:
+        return None
+    value = share * 100
+    for digits in range(13):
+        scaled = value * 10**digits
+        if scaled.denominator == 1:
+            if digits == 0:
+                return str(scaled.numerator)
+            sign = "-" if scaled < 0 else ""
+            text = str(abs(scaled.numerator)).rjust(digits + 1, "0")
+            return f"{sign}{text[:-digits]}.{text[-digits:]}"
+    return f"{value.numerator}/{value.denominator}"
+
+
+def parse_countries(values: object, where: str) -> frozenset[str]:
+    """ISO 3166-1 alpha-2 codes ("BD")."""
+    if not isinstance(values, (list, tuple)) or not all(isinstance(v, str) for v in values):
+        raise PolicyError(f"{where} must be a list of text values")
+    for code in values:
+        if not _COUNTRY.fullmatch(code):
+            raise PolicyError(f"{where}: {code!r} is not ISO alpha-2")
+    return frozenset(values)
+
+
 # --- reading ---------------------------------------------------------------------
 
 
@@ -168,7 +227,7 @@ class _Table:
 
     def percent(self, key: str, *, optional: bool = False) -> Fraction | None:
         value = self._get(key)
-        return _percent(value, self.name(key), optional)
+        return parse_percent(value, self.name(key), optional)
 
     def required_percent(self, key: str) -> Fraction:
         value = self.percent(key)
@@ -208,14 +267,6 @@ class _Table:
             raise PolicyError(f"{self._where}: unknown keys {sorted(extra)}")
 
 
-def _percent(value: object, where: str, optional: bool) -> Fraction | None:
-    if optional and value == "":
-        return None
-    if not isinstance(value, str) or not _PERCENT.fullmatch(value):
-        raise PolicyError(f'{where} must be a percentage written as text, e.g. "6" or "3.5"')
-    return Fraction(value) / 100
-
-
 def load_policy(path: Path = DEFAULT_POLICY) -> Policy:
     try:
         with path.open("rb") as f:
@@ -249,13 +300,10 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
 
 def _access(t: _Table) -> AccessPolicy:
     gating = t.boolean("country_gating")
-    countries = t.texts("blocked_countries")
-    for code in countries:
-        if not _COUNTRY.fullmatch(code):
-            raise PolicyError(f"{t.name('blocked_countries')}: {code!r} is not ISO alpha-2")
+    countries = parse_countries(t.texts("blocked_countries"), t.name("blocked_countries"))
     min_age = t.integer("min_age", 1)
     t.done()
-    return AccessPolicy(gating, frozenset(countries), min_age)
+    return AccessPolicy(gating, countries, min_age)
 
 
 def _news(t: _Table) -> NewsPolicy:
@@ -359,7 +407,7 @@ def _product(t: _Table) -> ProductPolicy:
     split = t.required_percent("profit_split_percent")
     code_max = t.required_percent("code_discount_max_percent")
     repeats = tuple(
-        _percent(v, t.name("repeat_discount_percent"), False)
+        parse_percent(v, t.name("repeat_discount_percent"))
         for v in t.texts("repeat_discount_percent")
     )
     refund = t.integer("fee_refund_with_payout")

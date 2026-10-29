@@ -32,6 +32,7 @@ class ServiceConfig:
     anchor_path: Path | None = None
     policy_path: Path = DEFAULT_POLICY
     customer_schema: str = "customers"  # CIF, orders, accounts (personal data)
+    settings_schema: str = "settings"  # admin setting changes
     oidc_issuer: str = ""  # e.g. http://localhost:8080/realms/propfirm (API only)
     oidc_jwks_url: str = ""  # where the API fetches the realm's signing keys
     oidc_audience: str = "propfirm-api"
@@ -45,11 +46,12 @@ class ServiceConfig:
         for name in ("database_url", "valkey_url"):
             if not getattr(self, name):
                 raise ConfigError(f"{name} is required")
-        for name in ("schema", "read_schema", "customer_schema"):
+        schemas = ("schema", "read_schema", "customer_schema", "settings_schema")
+        for name in schemas:
             if not _NAME.fullmatch(getattr(self, name)):
                 raise ConfigError(f"{name} must match {_NAME.pattern}")
-        if len({self.schema, self.read_schema, self.customer_schema}) != 3:
-            raise ConfigError("schema, read_schema and customer_schema must differ")
+        if len({getattr(self, name) for name in schemas}) != len(schemas):
+            raise ConfigError(f"{', '.join(schemas)} must differ")
         for name in ("stream", "group", "consumer"):
             if not _KEY.fullmatch(getattr(self, name)):
                 raise ConfigError(f"{name} must match {_KEY.pattern}")
@@ -92,6 +94,7 @@ class ServiceConfig:
             anchor_path=Path(anchor) if anchor else None,
             policy_path=Path(policy) if policy else DEFAULT_POLICY,
             customer_schema=text("PROPFIRM_CUSTOMER_SCHEMA", "customers"),
+            settings_schema=text("PROPFIRM_SETTINGS_SCHEMA", "settings"),
             oidc_issuer=text("OIDC_ISSUER", ""),
             oidc_jwks_url=text("OIDC_JWKS_URL", ""),
             oidc_audience=text("OIDC_AUDIENCE", "propfirm-api"),

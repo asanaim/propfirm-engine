@@ -11,7 +11,6 @@ from typing import Any
 import pytest
 
 from propfirm.access.gating import check_country
-from propfirm.api.app import percent_text
 from propfirm.journal.inputs import (
     AddRuleSet,
     InputRejected,
@@ -24,7 +23,14 @@ from propfirm.journal.machine import CODEC, Machine
 from propfirm.market.guards import GuardConfig
 from propfirm.market.types import PriceUpdate
 from propfirm.money import cents_ceil
-from propfirm.policy import DEFAULT_POLICY, AccessPolicy, PolicyError, load_policy, parse_policy
+from propfirm.policy import (
+    DEFAULT_POLICY,
+    AccessPolicy,
+    PolicyError,
+    load_policy,
+    parse_policy,
+    percent_text,
+)
 from propfirm.rules.products import RULESETS
 from propfirm.service.setup import policy_changes, setup_from_policy
 from propfirm.trading.events import OrderRejected, PositionOpened, TradingConfigChanged
