@@ -61,14 +61,20 @@ def test_shipped_policy_is_the_confirmed_configuration() -> None:
     assert SHIPPED.rule_sets() == tuple(RULESETS.values())
     defaults = tuple(default_instruments().values())
     assert SHIPPED.trading.config_version == "trading-v2"  # the market-following spread
-    assert SHIPPED.trading.instruments == tuple(
-        replace(
-            d,
-            spread=MarketSpreadConfig(
-                min_points=d.spread.min_points, max_points=10 * d.spread.min_points
-            ),
-        )
-        for d in defaults
+    shipped = SHIPPED.trading.instruments
+    assert tuple(replace(s, spread=d.spread) for s, d in zip(shipped, defaults, strict=True)) == (
+        defaults
+    )  # only the spread differs from the engine defaults
+    normal = {s.name: s.spread.min_points for s in shipped}
+    assert (normal["EUR/USD"], normal["GBP/USD"], normal["USD/JPY"]) == (8, 11, 14)  # pips x 10
+    assert (normal["XAU/USD"], normal["WTI"], normal["BTC/USD"]) == (47, 6, 5_313)  # cents
+    eurusd = next(s.spread for s in shipped if s.name == "EUR/USD")
+    assert eurusd == MarketSpreadConfig(
+        min_points=8,
+        max_points=80,
+        rollover_multiplier=3,
+        rollover_before_ms=300_000,
+        rollover_after_ms=900_000,
     )
     assert SHIPPED.trading.guard == GuardConfig()
     assert SHIPPED.access == AccessPolicy(False, frozenset({"BD", "IN"}))  # gating off
@@ -153,6 +159,9 @@ def _drop(path: list[Any]) -> Callable[[dict[str, Any]], None]:
         _set(["access", "blocked_countries"], ["Bangladesh"]),
         _set(["trading", "leverage", "forex"], 100),  # number, not text
         _drop(["trading", "spread", "min_points", "EUR/USD"]),
+        _drop(["trading", "spread", "rollover_after_minutes"]),
+        _set(["trading", "spread", "rollover_multiplier"], 0),
+        _set(["trading", "spread", "rollover_before_minutes"], 1_440),  # window a day or more
         _set(["trading", "gap_threshold_ms_by_symbol"], {"EURUSD": 5000}),
         _set(["payouts", "pay_days"], ["15", "31"]),
         _set(["unexpected"], 1),

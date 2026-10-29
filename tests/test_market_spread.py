@@ -2,6 +2,7 @@
 replay, and the switch between them through the journal."""
 
 from dataclasses import replace
+from datetime import datetime
 from fractions import Fraction
 from typing import Any
 
@@ -15,16 +16,18 @@ from propfirm.market.spread import (
     MarketSpreadConfig,
     SpreadConfig,
     SpreadModel,
+    in_rollover,
     lower_median,
 )
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import load_policy
+from propfirm.rules.clock import NEW_YORK
 from propfirm.service.setup import policy_changes, setup_from_policy
 from propfirm.trading.events import PositionOpened
 from propfirm.trading.instruments import default_instruments
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
-MARKET = MarketSpreadConfig(min_points=5, max_points=50)  # EUR/USD as shipped
+MARKET = MarketSpreadConfig(min_points=5, max_points=50)  # no rollover widening
 T0 = 1_790_000_000_000
 
 
@@ -171,7 +174,7 @@ def test_a_market_order_right_after_a_jump_pays_the_normal_spread() -> None:
     shipped = load_policy()
     inputs = [OpenAccount("A", "lite-s1-v1", 1_000_000, T0), *jump_then_buy("o1", 1)]
     _, out = run(shipped, inputs)
-    assert opened(out[-1]).price == 110_303  # ask = 110,300 + 6 / 2
+    assert opened(out[-1]).price == 110_304  # ask = 110,300 + 8 / 2 (EUR/USD 0.8 pip)
 
 
 def test_the_switch_is_journaled_and_replays_exactly() -> None:
@@ -196,8 +199,8 @@ def test_the_switch_is_journaled_and_replays_exactly() -> None:
         eurusd_buy("o2", T0 + 300),  # under the market model
     ]
     machine, out = run(first, inputs)
-    assert opened(out[12]).price > 110_303  # first model: the jump widened the spread
-    assert opened(out[-1]).price <= 110_304  # market model: normal spread again
+    assert opened(out[12]).price > 110_305  # first model: the jump widened the spread
+    assert opened(out[-1]).price <= 110_305  # market model: normal spread again
     assert opened(out[-1]).config_version == "trading-v2"
     again, _ = run(first, inputs)  # same inputs, same records
     assert again.head == machine.head
@@ -224,5 +227,62 @@ def test_an_existing_journal_switches_at_engine_start() -> None:
     events = CODEC.decode(machine.apply("1-0", update).record.events)
     assert isinstance(events, tuple) and not any(isinstance(e, InputRejected) for e in events)
     spec = machine.supervisor.engine.instruments["EUR/USD"]
-    assert spec.spread == MarketSpreadConfig(min_points=5, max_points=50)
+    assert isinstance(spec.spread, MarketSpreadConfig)
+    assert (spec.spread.min_points, spec.spread.max_points) == (8, 80)
     assert policy_changes(shipped, machine, T0) == []
+
+
+# --- the daily rollover ---------------------------------------------------------------
+
+
+ROLLOVER = replace(
+    MARKET, rollover_multiplier=3, rollover_before_ms=300_000, rollover_after_ms=900_000
+)
+
+
+def ny(day: str, clock: str) -> int:
+    """ms UTC of a New York wall-clock time."""
+    local = datetime.fromisoformat(f"{day}T{clock}").replace(tzinfo=NEW_YORK)
+    return int(local.timestamp() * 1000)
+
+
+@pytest.mark.parametrize("day", ["2026-07-15", "2026-01-15"])  # daylight time and standard time
+def test_the_rollover_window_is_around_17_new_york(day: str) -> None:
+    assert not in_rollover(ROLLOVER, ny(day, "16:54:59.999"))
+    assert in_rollover(ROLLOVER, ny(day, "16:55:00"))
+    assert in_rollover(ROLLOVER, ny(day, "17:00:00"))
+    assert in_rollover(ROLLOVER, ny(day, "17:14:59.999"))
+    assert not in_rollover(ROLLOVER, ny(day, "17:15:00"))
+    assert not in_rollover(MARKET, ny(day, "17:00:00"))  # multiplier 1: off
+
+
+def test_rollover_widens_the_spread_and_news_does_not_stack_on_it() -> None:
+    model = SpreadModel(ROLLOVER)
+    for price in calm(30):
+        model.observe(price)
+    noon, five = ny("2026-07-15", "12:00:00"), ny("2026-07-15", "17:05:00")
+    assert model.spread_points(False, noon) == 6
+    assert model.spread_points(False, five) == 16  # 5 x 3 = 15 -> 16
+    assert model.spread_points(True, five) == 16  # the larger multiplier, not 3 x 3
+    assert model.spread_points(False) == 6  # no time given: no rollover
+
+
+def test_rollover_settings_are_validated() -> None:
+    with pytest.raises(ValueError):
+        replace(MARKET, rollover_multiplier=0)
+    with pytest.raises(ValueError):
+        replace(MARKET, rollover_before_ms=-1)
+    with pytest.raises(ValueError):
+        replace(MARKET, rollover_before_ms=43_200_000, rollover_after_ms=43_200_000)
+
+
+def test_the_engine_widens_quotes_made_at_rollover() -> None:
+    shipped = load_policy()
+    five = ny("2026-07-15", "17:05:00")
+    inputs = [
+        OpenAccount("A", "lite-s1-v1", 1_000_000, five - 1_000),
+        PriceUpdate("EUR/USD", 1, five, five, 110_000),
+        eurusd_buy("o1", five + 1),
+    ]
+    _, out = run(shipped, inputs)
+    assert opened(out[-1]).price == 110_012  # ask = 110,000 + (8 x 3) / 2

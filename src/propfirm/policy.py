@@ -381,6 +381,11 @@ def _trading(t: _Table) -> TradingPolicy:
     vol = spread_t.ratio("vol_multiplier")
     news = spread_t.integer("news_multiplier", 1)
     max_multiple = spread_t.integer("max_multiple", 1)
+    rollover = (
+        spread_t.integer("rollover_multiplier", 1),
+        spread_t.integer("rollover_before_minutes") * 60_000,
+        spread_t.integer("rollover_after_minutes") * 60_000,
+    )
     mins_t = spread_t.table("min_points")
     spread_t.done()
     instruments: list[InstrumentSpec] = []
@@ -394,7 +399,13 @@ def _trading(t: _Table) -> TradingPolicy:
                 max_order_volume_per_100k=order_cap,
                 max_symbol_volume_per_100k=symbol_cap,
                 spread=_market_spread(
-                    mins_t.integer(symbol.name, 1), max_multiple, window, min_samples, vol, news
+                    mins_t.integer(symbol.name, 1),
+                    max_multiple,
+                    window,
+                    min_samples,
+                    vol,
+                    news,
+                    rollover,
                 ),
             )
         )
@@ -416,6 +427,7 @@ def _market_spread(
     min_samples: int,
     vol: Fraction,
     news: int,
+    rollover: tuple[int, int, int],
 ) -> MarketSpreadConfig:
     try:
         return MarketSpreadConfig(
@@ -425,6 +437,9 @@ def _market_spread(
             min_samples=min_samples,
             vol_multiplier=vol,
             news_multiplier=news,
+            rollover_multiplier=rollover[0],
+            rollover_before_ms=rollover[1],
+            rollover_after_ms=rollover[2],
         )
     except ValueError as exc:
         raise PolicyError(f"trading.spread: {exc}") from exc
