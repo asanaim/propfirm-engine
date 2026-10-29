@@ -31,6 +31,12 @@ class ServiceConfig:
     consumer: str = "engine-1"
     anchor_path: Path | None = None
     policy_path: Path = DEFAULT_POLICY
+    customer_schema: str = "customers"  # CIF, orders, accounts (personal data)
+    oidc_issuer: str = ""  # e.g. http://localhost:8080/realms/propfirm (API only)
+    oidc_jwks_url: str = ""  # where the API fetches the realm's signing keys
+    oidc_audience: str = "propfirm-api"
+    sandbox: bool = False  # sandbox payments and screening; never in production
+    country_header: str | None = None  # header a trusted proxy sets with the IP country
     batch: int = 200  # inputs per transaction, at most
     block_ms: int = 1_000  # how long one stream read waits for input
     publish_ms: int = 250  # live state is published at most this often
@@ -39,11 +45,11 @@ class ServiceConfig:
         for name in ("database_url", "valkey_url"):
             if not getattr(self, name):
                 raise ConfigError(f"{name} is required")
-        for name in ("schema", "read_schema"):
+        for name in ("schema", "read_schema", "customer_schema"):
             if not _NAME.fullmatch(getattr(self, name)):
                 raise ConfigError(f"{name} must match {_NAME.pattern}")
-        if self.schema == self.read_schema:
-            raise ConfigError("schema and read_schema must differ")
+        if len({self.schema, self.read_schema, self.customer_schema}) != 3:
+            raise ConfigError("schema, read_schema and customer_schema must differ")
         for name in ("stream", "group", "consumer"):
             if not _KEY.fullmatch(getattr(self, name)):
                 raise ConfigError(f"{name} must match {_KEY.pattern}")
@@ -72,6 +78,9 @@ class ServiceConfig:
 
         anchor = env.get("PROPFIRM_ANCHOR_PATH")
         policy = env.get("PROPFIRM_POLICY")
+        sandbox = env.get("PROPFIRM_SANDBOX", "0")
+        if sandbox not in ("0", "1"):
+            raise ConfigError("PROPFIRM_SANDBOX must be 0 or 1")
         return cls(
             database_url=text("DATABASE_URL", ""),
             valkey_url=text("VALKEY_URL", ""),
@@ -82,6 +91,12 @@ class ServiceConfig:
             consumer=text("PROPFIRM_CONSUMER", "engine-1"),
             anchor_path=Path(anchor) if anchor else None,
             policy_path=Path(policy) if policy else DEFAULT_POLICY,
+            customer_schema=text("PROPFIRM_CUSTOMER_SCHEMA", "customers"),
+            oidc_issuer=text("OIDC_ISSUER", ""),
+            oidc_jwks_url=text("OIDC_JWKS_URL", ""),
+            oidc_audience=text("OIDC_AUDIENCE", "propfirm-api"),
+            sandbox=sandbox == "1",
+            country_header=env.get("PROPFIRM_COUNTRY_HEADER") or None,
             batch=number("PROPFIRM_BATCH", 200),
             block_ms=number("PROPFIRM_BLOCK_MS", 1_000),
             publish_ms=number("PROPFIRM_PUBLISH_MS", 250),

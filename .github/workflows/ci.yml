@@ -28,10 +28,18 @@ jobs:
     env:
       VALKEY_URL: redis://localhost:6379/0
       DATABASE_URL: postgresql://propfirm:propfirm-ci@localhost:5432/propfirm
+      KEYCLOAK_URL: http://localhost:8080
       # CI must run the integration tests, never skip them.
       PROPFIRM_REQUIRE_SERVICES: "1"
     steps:
       - uses: actions/checkout@v7
+      - name: Start Keycloak with the development realm
+        run: |
+          docker run -d --name keycloak -p 8080:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin-ci \
+            -e KC_HOSTNAME=http://localhost:8080 \
+            -v "$PWD/config/keycloak:/opt/keycloak/data/import:ro" \
+            quay.io/keycloak/keycloak:26.8.1 start-dev --import-realm
       - uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.6"
@@ -40,4 +48,13 @@ jobs:
       - run: uv run --frozen ruff check .
       - run: uv run --frozen ruff format --check .
       - run: uv run --frozen mypy
+      - name: Wait for Keycloak
+        run: |
+          for i in $(seq 1 90); do
+            curl -sf http://localhost:8080/realms/propfirm/.well-known/openid-configuration \
+              > /dev/null && exit 0
+            sleep 2
+          done
+          docker logs keycloak
+          exit 1
       - run: uv run --frozen pytest
