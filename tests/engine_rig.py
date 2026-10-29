@@ -1,6 +1,7 @@
 """Shared test rig for the order engine."""
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import replace
 from fractions import Fraction
 
@@ -60,11 +61,11 @@ class Rig:
         return self.engine.place_order(request, at)
 
 
-def one[E](events: list[EngineEvent], kind: type[E]) -> E:
+def one[E](events: Sequence[object], kind: type[E]) -> E:
     found = [e for e in events if isinstance(e, kind)]
     assert len(found) == 1, events
     return found[0]
 
 
-def rejected(events: list[EngineEvent]) -> RejectReason:
+def rejected(events: Sequence[object]) -> RejectReason:
     return one(events, OrderRejected).reason

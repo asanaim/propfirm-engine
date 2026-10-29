@@ -27,12 +27,15 @@ class RejectReason(StrEnum):
     NO_CONVERSION_RATE = "no_conversion_rate"
     UNKNOWN_POSITION = "unknown_position"
     UNKNOWN_ORDER = "unknown_order"
+    ACCOUNT_LOCKED = "account_locked"
+    NEWS_WINDOW = "news_window"
 
 
 class CloseReason(StrEnum):
     CLIENT = "client"
     STOP_LOSS = "stop_loss"
     TAKE_PROFIT = "take_profit"
+    BREACH = "breach"
 
 
 @dataclass(frozen=True, slots=True)
