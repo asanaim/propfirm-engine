@@ -11,7 +11,7 @@ import pytest
 
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import Policy, load_policy
-from propfirm.rules.products import Stage
+from propfirm.rules.products import RuleSet, Stage
 from propfirm.service.feeder import now_ms
 from tests.integration.test_customers import ADULT, LITE_10K, Platform, eventually, platform
 
@@ -21,19 +21,26 @@ STAFF = ("staff",)
 
 
 def quick_lite() -> Policy:
-    """Lite with a 1 % target and one trading day on S1 and S2, so a single
-    trade passes a stage (a new journal per test, so the ids stay v1)."""
+    """Every evaluation stage with a 1 % target, one trading day and no
+    consistency rule, so a single trade passes it (a new journal per test,
+    so the ids stay v1). Funded stages are unchanged."""
     policy = load_policy()
-    lite = policy.product("lite")
-    rule_sets = tuple(
-        replace(r, profit_target=Fraction(1, 100), min_trading_days=1)
-        if r.stage is not Stage.FUNDED
-        else r
-        for r in lite.rule_sets
-    )
-    products = tuple(
-        replace(p, rule_sets=rule_sets) if p.id == "lite" else p for p in policy.products
-    )
+
+    def quick(rule_sets: tuple[RuleSet, ...]) -> tuple[RuleSet, ...]:
+        return tuple(
+            r
+            if r.stage is Stage.FUNDED
+            else replace(
+                r,
+                profit_target=Fraction(1, 100),
+                min_trading_days=1,
+                consistency=None,
+                consistency_at_pass=False,
+            )
+            for r in rule_sets
+        )
+
+    products = tuple(replace(p, rule_sets=quick(p.rule_sets)) for p in policy.products)
     return replace(policy, products=products)
 
 
@@ -188,5 +195,71 @@ def test_an_engine_answer_missed_is_retried_and_a_pass_of_an_unknown_account_ign
             kinds = [e.kind for e in await p.lifecycle.store.history("PRG00000001")]
             assert kinds.count("provision_attempted") >= 2 and kinds[-1] == "provisioned"
             assert kinds.count("account_assigned") == 1  # the same ACC on every try
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("product", "status", "to_stage", "opened_stage"),
+    [
+        ("lite", "provisioned", "s2", "s2"),  # 2-Step: S1 -> S2 at once
+        ("classic", "provisioned", "s2", "s2"),  # 2-Step: S1 -> S2 at once
+        ("one-step", "review", "funded", None),  # 1-Step: S1 -> funded review
+    ],
+)
+def test_each_product_progresses_its_own_way(
+    database_url: str,
+    valkey_url: str,
+    pg_schema: str,
+    product: str,
+    status: str,
+    to_stage: str,
+    opened_stage: str | None,
+) -> None:
+    async def scenario() -> None:
+        async with platform(database_url, valkey_url, pg_schema, quick_lite()) as p:
+            market = Market(p)
+            await market.price(110_000)
+            await p.call("POST", "/me", body=ADULT)
+            buy = {"product_id": product, "size_cents": 1_000_000}
+            order = (await p.call("POST", "/orders", body=buy)).json()
+            first = (await p.call("POST", order["pay_url"])).json()["acc"]
+            await market.pass_stage(first)
+            (prg,) = await p.lifecycle.poll(now_ms())
+            await p.lifecycle.advance(now_ms())
+            me = (await p.call("GET", "/me")).json()
+            (made,) = me["progressions"]
+            assert (made["prg"], made["status"], made["to_stage"]) == (prg, status, to_stage)
+            stages = [a["stage"] for a in me["accounts"]]
+            assert stages == (["s1", opened_stage] if opened_stage else ["s1"])
+
+    asyncio.run(scenario())
+
+
+def test_instant_is_funded_from_purchase_and_has_no_stage_to_pass(
+    database_url: str, valkey_url: str, pg_schema: str
+) -> None:
+    async def scenario() -> None:
+        async with platform(database_url, valkey_url, pg_schema, quick_lite()) as p:
+            market = Market(p)
+            await market.price(110_000)
+            await p.call("POST", "/me", body=ADULT)
+            buy = {"product_id": "instant", "size_cents": 1_000_000}
+            order = (await p.call("POST", "/orders", body=buy)).json()
+            acc = (await p.call("POST", order["pay_url"])).json()["acc"]
+            await eventually(lambda: p.live.account(acc))
+            trade = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 100}
+            opened = (await p.call("POST", f"/accounts/{acc}/orders", body=trade)).json()
+            (position,) = [
+                e["position_id"] for e in opened["events"] if e["type"] == "PositionOpened"
+            ]
+            await market.ramp(300)
+            closed = (
+                await p.call("POST", f"/accounts/{acc}/positions/{position}/close", body={})
+            ).json()
+            assert "StagePassed" not in [e["type"] for e in closed["events"]]  # no target
+            assert await p.lifecycle.poll(now_ms()) == []
+            me = (await p.call("GET", "/me")).json()
+            assert [a["stage"] for a in me["accounts"]] == ["funded"] and me["progressions"] == []
 
     asyncio.run(scenario())
