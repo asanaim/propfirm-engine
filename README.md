@@ -148,6 +148,25 @@ history, of account ownership (`accounts`) and of an order's facts
 `cif_events`, `screenings`) is never edited by the code but is not locked,
 so it stays erasable on a lawful request. See `src/propfirm/customers/`.
 
+## Stage progression
+
+When the engine reports a pass, the API's background loop (every second)
+records a progression (`PRG00000001`) with the next stage, taken from the
+product as the policy in force defines it at that moment:
+
+- an evaluation stage (Lite and Classic: S1 → S2): the next account opens
+  at once on that stage's rule set, with the same size, under the same
+  order, retried until the engine has it;
+- the funded stage (Lite and Classic after S2, 1-Step after S1): an
+  employee approves or denies it (`GET /staff/progressions`,
+  `POST /staff/progressions/{prg}/approve` or `/deny` with a reason); nobody
+  decides their own. Funded onboarding (Tier 2 verification, contract,
+  signature, the funded account) follows an approval (step 3b);
+- no next stage in the policy: the progression is blocked for an employee.
+
+Each step is an event in `progression_events` (append-only); the trader
+sees their progressions in `GET /me`.
+
 ## Conventions
 
 See `CLAUDE.md`. In short: money is integer cents, prices are integer
@@ -169,6 +188,10 @@ or rules uses floating point.
 - [x] Step 2: customers and access (Keycloak login, CIF, country-gating switch, checkout,
   trader / employee / admin views, admin-only settings)
 - [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
+  - [x] 3a: stage progression (next evaluation account, funded review)
+  - [ ] 3b: funded onboarding (Tier 2 verification, contract, signature)
+  - [ ] 3c: payable profit and payout eligibility
+  - [ ] 3d: payout processing (two-person approval)
 - [ ] Step 4: trader portal
 - [ ] Step 5: back office
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)

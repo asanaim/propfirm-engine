@@ -38,6 +38,7 @@ from propfirm.customers.history import (
 )
 from propfirm.pgschema import Conn, check_schema
 from propfirm.pgschema import migrate as _migrate
+from propfirm.policy import stage_of
 
 _LOCK_CLASS = 0x63757374  # "cust"
 
@@ -185,6 +186,79 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         FROM {s}.orders WHERE status = 'failed' ORDER BY ord;
         """,
     ),
+    (
+        3,
+        """
+        CREATE SEQUENCE {s}.prg_seq;
+        CREATE TABLE {s}.progressions (
+            prg text PRIMARY KEY,
+            from_acc text NOT NULL UNIQUE REFERENCES {s}.accounts (acc),
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            product_id text NOT NULL,
+            size_cents bigint NOT NULL CHECK (size_cents > 0),
+            from_stage text NOT NULL CHECK (from_stage IN ('s1', 's2')),
+            to_stage text CHECK (to_stage IN ('s2', 'funded')),
+            passed_seq bigint NOT NULL,
+            passed_at bigint NOT NULL,
+            created_at bigint NOT NULL,
+            status text NOT NULL CHECK (status IN ('provisioning', 'provisioned', 'failed',
+                'review', 'approved', 'denied', 'blocked')),
+            to_rsv_id text,
+            to_acc text,
+            failure text,
+            decided_by text,
+            decided_at bigint
+        );
+        CREATE INDEX ON {s}.progressions (cif);
+        CREATE INDEX ON {s}.progressions (status);
+        CREATE TABLE {s}.progression_events (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            prg text NOT NULL REFERENCES {s}.progressions (prg),
+            kind text NOT NULL CHECK (kind IN ('created', 'account_assigned',
+                'provision_attempted', 'provisioned', 'failed', 'approved', 'denied')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.progression_events (prg, id);
+        CREATE TRIGGER progression_events_append_only
+            BEFORE UPDATE OR DELETE ON {s}.progression_events
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE FUNCTION {s}.progression_facts_fixed() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'progressions are append-only';
+            END IF;
+            IF (NEW.prg, NEW.from_acc, NEW.cif, NEW.ord, NEW.product_id, NEW.size_cents,
+                NEW.from_stage, NEW.to_stage, NEW.passed_seq, NEW.passed_at, NEW.created_at)
+               IS DISTINCT FROM
+               (OLD.prg, OLD.from_acc, OLD.cif, OLD.ord, OLD.product_id, OLD.size_cents,
+                OLD.from_stage, OLD.to_stage, OLD.passed_seq, OLD.passed_at, OLD.created_at) THEN
+                RAISE EXCEPTION 'progression facts never change';
+            END IF;
+            RETURN NEW;
+        END $$;
+        CREATE TRIGGER progressions_facts_fixed BEFORE UPDATE OR DELETE ON {s}.progressions
+            FOR EACH ROW EXECUTE FUNCTION {s}.progression_facts_fixed();
+        CREATE TABLE {s}.lifecycle_cursor (
+            id smallint PRIMARY KEY CHECK (id = 1),
+            seq bigint NOT NULL CHECK (seq >= 0)
+        );
+        INSERT INTO {s}.lifecycle_cursor (id, seq) VALUES (1, 0);
+
+        -- every stage account of a challenge belongs to the order that bought it
+        ALTER TABLE {s}.accounts ADD COLUMN stage text;
+        ALTER TABLE {s}.accounts ADD COLUMN progression text REFERENCES {s}.progressions (prg);
+        ALTER TABLE {s}.accounts DISABLE TRIGGER accounts_append_only;
+        UPDATE {s}.accounts
+            SET stage = substring(rsv_id from '-(s1|s2|funded)-v[0-9]+(?:-a[0-9]+)?$');
+        ALTER TABLE {s}.accounts ENABLE TRIGGER accounts_append_only;
+        ALTER TABLE {s}.accounts ALTER COLUMN stage SET NOT NULL;
+        ALTER TABLE {s}.accounts ADD CHECK (stage IN ('s1', 's2', 'funded'));
+        ALTER TABLE {s}.accounts DROP CONSTRAINT accounts_ord_key;
+        CREATE INDEX ON {s}.accounts (ord);
+        """,
+    ),
 )
 
 
@@ -235,6 +309,8 @@ class AccountRecord:
     rsv_id: str
     size_cents: int
     created_at: int
+    stage: str  # s1, s2 or funded
+    progression: str | None = None  # the PRG that opened it; None: bought directly
 
 
 def _check(name: str) -> str:
@@ -566,7 +642,7 @@ class CustomerStore:
                 return
             await conn.execute(
                 f"INSERT INTO {s}.accounts (acc, cif, ord, product_id, rsv_id, size_cents, "
-                f"created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                f"created_at, stage) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                 acc,
                 current.cif,
                 current.ord,
@@ -574,6 +650,7 @@ class CustomerStore:
                 current.rsv_id,
                 current.size_cents,
                 ts,
+                stage_of(current.rsv_id).value,
             )
             await self._append(
                 conn, order.ord, "provisioned", ts, {"acc": acc, "journal_seq": journal_seq}
@@ -670,6 +747,10 @@ class CustomerStore:
             f"SELECT * FROM {self._s}.accounts WHERE cif = $1 ORDER BY acc", cif
         )
         return [AccountRecord(**dict(r)) for r in rows]
+
+    async def account(self, acc: str) -> AccountRecord | None:
+        row = await self._pool.fetchrow(f"SELECT * FROM {self._s}.accounts WHERE acc = $1", acc)
+        return None if row is None else AccountRecord(**dict(row))
 
     async def account_owner(self, acc: str) -> str | None:
         owner: str | None = await self._pool.fetchval(

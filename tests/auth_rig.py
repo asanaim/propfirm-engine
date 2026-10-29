@@ -81,7 +81,7 @@ class FakeCustomers:
 
     async def accounts_for(self, cif: str) -> list[AccountRecord]:
         return [
-            AccountRecord(acc, cif, f"ORD-{acc}", "lite", "lite-s1-v1", 1_000_000, 0)
+            AccountRecord(acc, cif, f"ORD-{acc}", "lite", "lite-s1-v1", 1_000_000, 0, "s1")
             for acc, owner in self.owners.items()
             if owner == cif
         ]

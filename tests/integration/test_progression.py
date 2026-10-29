@@ -1,0 +1,192 @@
+"""Stage progression against PostgreSQL, Valkey and a running engine: a pass
+opens the next evaluation account; the last evaluation pass waits for an
+employee's review."""
+
+import asyncio
+from dataclasses import replace
+from fractions import Fraction
+
+import asyncpg
+import pytest
+
+from propfirm.market.types import PriceUpdate
+from propfirm.policy import Policy, load_policy
+from propfirm.rules.products import Stage
+from propfirm.service.feeder import now_ms
+from tests.integration.test_customers import ADULT, LITE_10K, Platform, eventually, platform
+
+pytestmark = pytest.mark.integration
+
+STAFF = ("staff",)
+
+
+def quick_lite() -> Policy:
+    """Lite with a 1 % target and one trading day on S1 and S2, so a single
+    trade passes a stage (a new journal per test, so the ids stay v1)."""
+    policy = load_policy()
+    lite = policy.product("lite")
+    rule_sets = tuple(
+        replace(r, profit_target=Fraction(1, 100), min_trading_days=1)
+        if r.stage is not Stage.FUNDED
+        else r
+        for r in lite.rule_sets
+    )
+    products = tuple(
+        replace(p, rule_sets=rule_sets) if p.id == "lite" else p for p in policy.products
+    )
+    return replace(policy, products=products)
+
+
+class Market:
+    def __init__(self, p: Platform) -> None:
+        self.p, self.seq, self.mid = p, 0, 110_000
+
+    async def price(self, mid: int) -> None:
+        self.seq, self.mid = self.seq + 1, mid
+        t = now_ms()
+        await self.p.writer.publish(PriceUpdate("EUR/USD", self.seq, t, t, mid))
+
+    async def ramp(self, points: int, steps: int = 20) -> None:
+        """Move the price in small steps: the spread follows the mean price
+        change over the last 20 updates, so one jump would widen it."""
+        for _ in range(steps):
+            await self.price(self.mid + points // steps)
+
+    async def pass_stage(self, acc: str) -> None:
+        """Buy 1 lot, raise EUR/USD 300 points in 20 steps, close: about
+        +$280 on $10,000, above the 1 % target."""
+        await eventually(lambda: self.p.live.account(acc))
+        trade = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 100}
+        opened = (await self.p.call("POST", f"/accounts/{acc}/orders", body=trade)).json()
+        assert opened["status"] == "done", opened
+        (position,) = [e["position_id"] for e in opened["events"] if e["type"] == "PositionOpened"]
+        await self.ramp(300)
+        closed = (
+            await self.p.call("POST", f"/accounts/{acc}/positions/{position}/close", body={})
+        ).json()
+        kinds = [e["type"] for e in closed["events"]]
+        assert "StagePassed" in kinds, [(e["type"], e.get("reason")) for e in closed["events"]]
+
+
+def test_a_pass_opens_the_next_stage_and_the_last_waits_for_review(
+    database_url: str, valkey_url: str, pg_schema: str
+) -> None:
+    async def scenario() -> None:
+        async with platform(database_url, valkey_url, pg_schema, quick_lite()) as p:
+            market = Market(p)
+            await market.price(110_000)
+            await p.call("POST", "/me", body=ADULT)
+            order = (await p.call("POST", "/orders", body=LITE_10K)).json()
+            s1 = (await p.call("POST", order["pay_url"])).json()["acc"]
+
+            await market.pass_stage(s1)
+            assert await p.lifecycle.poll(now_ms()) == ["PRG00000001"]
+            assert await p.lifecycle.poll(now_ms()) == []  # the cursor moved past it
+            head = await asyncpg.connect(database_url)
+            try:
+                last = await head.fetchval(f"SELECT max(seq) FROM {p.config.schema}.journal")
+            finally:
+                await head.close()
+            assert await p.lifecycle.store.cursor() == last
+            assert await p.lifecycle.advance(now_ms()) == 1
+            me = (await p.call("GET", "/me")).json()
+            s2 = me["accounts"][1]
+            assert (s2["acc"], s2["stage"], s2["rsv_id"], s2["ord"], s2["progression"]) == (
+                "ACC00000002",
+                "s2",
+                "lite-s2-v1",
+                order["ord"],
+                "PRG00000001",
+            )
+            first = me["progressions"][0]
+            assert (first["status"], first["from_acc"], first["to_acc"]) == (
+                "provisioned",
+                s1,
+                "ACC00000002",
+            )
+
+            await market.pass_stage("ACC00000002")
+            assert await p.lifecycle.poll(now_ms()) == ["PRG00000002"]
+            assert await p.lifecycle.advance(now_ms()) == 0  # funded: nothing opens
+            waiting = (await p.call("GET", "/staff/progressions", "staff-1", roles=STAFF)).json()
+            assert [(w["prg"], w["status"], w["to_stage"]) for w in waiting] == [
+                ("PRG00000002", "review", "funded")
+            ]
+
+            url = "/staff/progressions/PRG00000002"
+            decision = {"reason": "clean record, no flags"}
+            assert (await p.call("POST", f"{url}/approve", body=decision)).status_code == 403
+            own = await p.call("POST", f"{url}/approve", "u1", decision, ("trader", "staff"))
+            assert own.status_code == 403 and own.json()["detail"]["code"] == "own_progression"
+            approved = await p.call("POST", f"{url}/approve", "staff-1", decision, STAFF)
+            assert approved.status_code == 200, approved.text
+            assert (approved.json()["status"], approved.json()["decided_by"]) == (
+                "approved",
+                "staff-1",
+            )
+            again = await p.call("POST", f"{url}/deny", "staff-2", decision, STAFF)
+            assert again.status_code == 409
+
+            detail = (await p.call("GET", url, "staff-1", roles=STAFF)).json()
+            assert [h["kind"] for h in detail["history"]] == ["created", "approved"]
+            created = detail["history"][0]["detail"]
+            assert (created["from_rsv_id"], created["trading_days"], created["to_stage"]) == (
+                "lite-s2-v1",
+                1,
+                "funded",
+            )
+            assert created["balance_cents"] > 1_010_000  # passed above the 1 % target
+
+            store = p.lifecycle.store
+            history = [e.kind for e in await store.history("PRG00000001")]
+            assert history == [
+                "created",
+                "account_assigned",
+                "provision_attempted",
+                "provisioned",
+            ]
+            s = p.config.customer_schema
+            conn = await asyncpg.connect(database_url)
+            try:
+                for sql in (
+                    f"UPDATE {s}.progression_events SET ts = 0",
+                    f"DELETE FROM {s}.progression_events",
+                    f"UPDATE {s}.progressions SET from_acc = 'ACC00000009'",
+                    f"DELETE FROM {s}.progressions",
+                ):
+                    with pytest.raises(asyncpg.RaiseError):
+                        await conn.execute(sql)
+                await conn.execute(f"UPDATE {s}.progressions SET status = 'denied'")
+            finally:
+                await conn.close()
+            assert await store.rebuild_status() == ["PRG00000001", "PRG00000002"]
+            assert (await store.progression("PRG00000002")).status == "approved"  # type: ignore[union-attr]
+
+    asyncio.run(scenario())
+
+
+def test_an_engine_answer_missed_is_retried_and_a_pass_of_an_unknown_account_ignored(
+    database_url: str, valkey_url: str, pg_schema: str
+) -> None:
+    async def scenario() -> None:
+        async with platform(database_url, valkey_url, pg_schema, quick_lite(), wait_s=0.3) as p:
+            market = Market(p)
+            await market.price(110_000)
+            await p.call("POST", "/me", body=ADULT)
+            order = (await p.call("POST", "/orders", body=LITE_10K)).json()
+            s1 = (await p.call("POST", order["pay_url"])).json()["acc"]
+            await market.pass_stage(s1)
+            await p.stop_engine()
+            assert await p.lifecycle.poll(now_ms()) == ["PRG00000001"]
+            assert await p.lifecycle.advance(now_ms()) == 0  # no engine answer in time
+            await p.engine()
+
+            async def opened() -> bool:
+                return await p.lifecycle.advance(now_ms()) == 1
+
+            await eventually(opened)  # the retry finds it opened (duplicate) or opens it
+            kinds = [e.kind for e in await p.lifecycle.store.history("PRG00000001")]
+            assert kinds.count("provision_attempted") >= 2 and kinds[-1] == "provisioned"
+            assert kinds.count("account_assigned") == 1  # the same ACC on every try
+
+    asyncio.run(scenario())
