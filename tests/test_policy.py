@@ -11,7 +11,6 @@ from typing import Any
 import pytest
 
 from propfirm.access.gating import check_country
-from propfirm.api.app import percent_text
 from propfirm.journal.inputs import (
     AddRuleSet,
     InputRejected,
@@ -24,7 +23,14 @@ from propfirm.journal.machine import CODEC, Machine
 from propfirm.market.guards import GuardConfig
 from propfirm.market.types import PriceUpdate
 from propfirm.money import cents_ceil
-from propfirm.policy import DEFAULT_POLICY, AccessPolicy, PolicyError, load_policy, parse_policy
+from propfirm.policy import (
+    DEFAULT_POLICY,
+    AccessPolicy,
+    PolicyError,
+    load_policy,
+    parse_policy,
+    percent_text,
+)
 from propfirm.rules.products import RULESETS
 from propfirm.service.setup import policy_changes, setup_from_policy
 from propfirm.trading.events import OrderRejected, PositionOpened, TradingConfigChanged
@@ -124,6 +130,7 @@ def _drop(path: list[Any]) -> Callable[[dict[str, Any]], None]:
         _set(["products", 0, "stages", 0, "stage"], "s3"),
         _set(["products", 0, "stages", 0, "maxloss_percent"], "6"),  # unknown key
         _drop(["products", 0, "stages", 0, "daily_loss_percent"]),
+        _set(["products", 0, "stages", 0, "daily_loss_percent"], "7"),  # above the 6 % drawdown
         _set(["products", 0, "prices_cents"], [2400, 4400]),  # one price per size
         _set(
             ["products", 0, "sizes_cents"], [1000000, 500000, 2500000, 5000000, 10000000, 20000000]

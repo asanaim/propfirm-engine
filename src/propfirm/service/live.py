@@ -4,7 +4,10 @@ After each batch (at most every `publish_ms`) the engine process writes:
 
     {prefix}:head            journal seq and hash, engine time
     {prefix}:account:{id}    one account: status, balance, equity, margin,
-                             floors, trading days, positions, pending orders
+                             floors, target, trading days, positions,
+                             pending orders, and the numbers of its own
+                             rule-set version (it may be older than the
+                             catalogue's)
     {prefix}:quotes          hash: symbol -> current bid/ask, frozen, blocked
 
 This is a cache, never a record: the journal decides and keeps everything,
@@ -21,6 +24,7 @@ from typing import Any
 import valkey.asyncio as avalkey
 
 from propfirm.journal.machine import Machine
+from propfirm.policy import rule_set_view
 from propfirm.service.jsonview import view
 
 
@@ -45,6 +49,8 @@ def account_view(machine: Machine, account_id: str) -> dict[str, Any]:
         "free_margin_cents": equity - used,
         "daily_floor_cents": daily_floor,
         "max_floor_cents": max_floor,
+        "target_balance_cents": sup.target(account_id),  # None: no target (funded)
+        "rules": rule_set_view(sup.rule_set(account_id)),  # this account's own version
         "trading_days": sup.trading_days(account_id),
         "positions": view(engine.positions(account_id)),
         "pending_orders": view(engine.pending_orders(account_id)),

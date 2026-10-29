@@ -230,6 +230,11 @@ class RuleSupervisor:
         state = self._state(account_id)
         return self._daily_floor(state), self._max_floor(state)
 
+    def target(self, account_id: str) -> int | None:
+        """The level in cents the target basis must reach to pass; None
+        when the stage has no profit target (funded)."""
+        return self._target(self._state(account_id))
+
     def consistency_ok(self, account_id: str) -> bool:
         """Best day <= the rule set's share of total realized profit (and
         total profit positive). True when the rule set has no such rule."""
@@ -310,6 +315,12 @@ class RuleSupervisor:
     def _daily_floor(self, state: _State) -> int:
         return state.day_base - state.rules.amount(state.rules.daily_loss, state.initial_balance)
 
+    def _target(self, state: _State) -> int | None:
+        rules = state.rules
+        if rules.profit_target is None:
+            return None
+        return state.initial_balance + rules.amount(rules.profit_target, state.initial_balance)
+
     def _max_floor(self, state: _State) -> int:
         loss = state.rules.amount(state.rules.max_loss, state.initial_balance)
         if state.rules.max_loss_kind is MaxLossKind.STATIC:
@@ -344,12 +355,12 @@ class RuleSupervisor:
 
     def _pass(self, state: _State, equity: int) -> list[Event]:
         rules = state.rules
-        if rules.profit_target is None:
+        target = self._target(state)
+        if target is None:
             return []
         account_id = state.account_id
         balance = self._engine.balance(account_id)
         measured = balance if rules.target_basis is TargetBasis.CLOSED_BALANCE else equity
-        target = state.initial_balance + rules.amount(rules.profit_target, state.initial_balance)
         if measured < target or len(state.trading_days) < rules.min_trading_days:
             return []
         if rules.flat_to_pass and (

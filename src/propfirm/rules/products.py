@@ -79,6 +79,8 @@ class RuleSet:
             value = getattr(self, name)
             if not isinstance(value, Fraction) or not 0 < value < 1:
                 raise ValueError(f"{name} must be a Fraction in (0, 1)")
+        if self.daily_loss > self.max_loss:
+            raise ValueError("daily_loss must not exceed max_loss")
         for name in ("profit_target", "consistency"):
             value = getattr(self, name)
             if value is not None and (not isinstance(value, Fraction) or value <= 0):
