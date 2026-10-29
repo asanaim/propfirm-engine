@@ -61,6 +61,6 @@ or rules uses floating point.
 - [x] Step 1: repository skeleton
 - [x] Step 2: synthetic price generator and Valkey Streams transport
 - [x] Step 3: double-entry ledger (acceptance test 2)
-- [ ] Step 4: pricing and fills, delay and gap guards (test 5)
+- [x] Step 4: pricing and fills, delay and gap guards (test 5)
 - [ ] Step 5: rules engine (test 3)
 - [ ] Step 6: event journal and replay (tests 1 and 4)
