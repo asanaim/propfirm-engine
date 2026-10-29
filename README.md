@@ -40,8 +40,8 @@ After changing `pyproject.toml` or `uv.lock`, rebuild with
 ## Run the tests without Docker
 
 Needs [uv](https://docs.astral.sh/uv/). Unit tests run anywhere; integration
-tests run only when `VALKEY_URL` points at a running Valkey and are skipped
-otherwise.
+tests run only when `VALKEY_URL` and `DATABASE_URL` point at running Valkey
+and PostgreSQL, and are skipped otherwise.
 
 ```
 uv sync
@@ -49,6 +49,16 @@ uv run pytest
 uv run ruff check .
 uv run mypy
 ```
+
+## Event journal
+
+Every input (price, order, close, clock tick, account opening) reaches the
+engine through one Valkey stream and is journaled in PostgreSQL with the
+events and ledger entries it caused, in one transaction, before it is
+acknowledged. Records are hash-chained from the engine setup. On start the
+engine replays the journal and checks that every record comes out identical.
+Prices are kept in a separate, purgeable table and referenced by digest.
+See `src/propfirm/journal/`.
 
 ## Conventions
 
@@ -63,4 +73,4 @@ or rules uses floating point.
 - [x] Step 3: double-entry ledger (acceptance test 2)
 - [x] Step 4: pricing and fills, delay and gap guards (test 5)
 - [x] Step 5: rules engine (test 3)
-- [ ] Step 6: event journal and replay (tests 1 and 4)
+- [x] Step 6: event journal and replay (tests 1 and 4)

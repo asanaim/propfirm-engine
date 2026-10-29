@@ -1,7 +1,8 @@
-"""Price updates over a Valkey Stream.
+"""Price updates over a Valkey Stream (step 2 transport).
 
-One stream carries every symbol, so the engine consumes updates in a single
-total order (needed for deterministic replay). Consumers read through a
+One stream carries every symbol in a single total order. The engine itself
+reads `propfirm.journal.stream`, which carries prices and every other input
+in one order (needed for deterministic replay). Consumers read through a
 consumer group: an update stays pending until acknowledged, and after a crash
 the same consumer receives its unacknowledged updates again before new ones.
 """
