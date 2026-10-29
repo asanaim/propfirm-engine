@@ -23,6 +23,16 @@ held, because frozen prices are never applied. Cancelling a pending order is
 always allowed. On the first fresh update the symbol resumes and anything that
 update crosses fills at its price.
 
+News trade blocks (Confirmed Configuration CC-3): inside a block on an
+affected symbol no trade is opened or closed: market orders, new pending
+orders and manual closes are rejected, and pending orders do not trigger
+(they are held until the block ends) [DEFAULT]. Stop-losses and take-profits
+still execute [DEFAULT]. Changing stops is allowed.
+
+Rules hooks (step 5): `close_all` closes every position of an account at the
+current prices, ignoring freezes and news blocks (breach close-out), and
+`lock_account` cancels its pending orders and rejects all further trading.
+
 Money:
 - Account currency USD; balances are ledger balances in integer cents.
 - P&L and margin are exact rationals until rounded: P&L half-even to the
@@ -96,7 +106,10 @@ class TradingEngine:
         config_version: str,
         guard_config: GuardConfig | None = None,
         news_windows: Iterable[NewsWindow] = (),
+        trade_blocks: Iterable[NewsWindow] = (),
     ) -> None:
+        """`news_windows` widen spreads; `trade_blocks` stop trading on the
+        affected symbols (both built from the restricted-events calendar)."""
         if not instruments:
             raise ValueError("instruments must not be empty")
         self._instruments = dict(instruments)
@@ -106,6 +119,7 @@ class TradingEngine:
         self._sequences = SequenceTracker()
         self._spreads = {s: SpreadModel(spec.spread) for s, spec in self._instruments.items()}
         self._news = tuple(news_windows)
+        self._blocks = tuple(trade_blocks)
         self._routes: dict[str, tuple[str, bool]] = {}
         for spec in self._instruments.values():
             currency = spec.quote_currency
@@ -116,6 +130,7 @@ class TradingEngine:
         self._orders: dict[str, PendingOrder] = {}  # pending, in placement order
         self._positions: dict[str, Position] = {}  # open, in opening order
         self._used_ids: set[str] = set()
+        self._locked: set[str] = set()
         self._now = 0
 
     # --- inputs -------------------------------------------------------------
@@ -239,8 +254,14 @@ class TradingEngine:
         if position is None or position.account_id != account_id:
             events.append(self._reject(position_id, account_id, RejectReason.UNKNOWN_POSITION))
             return events
+        if account_id in self._locked:
+            events.append(self._reject(position_id, account_id, RejectReason.ACCOUNT_LOCKED))
+            return events
         if self._guards.is_frozen(position.symbol):
             events.append(self._reject(position_id, account_id, RejectReason.SYMBOL_FROZEN))
+            return events
+        if in_news(self._blocks, position.symbol, self._now):
+            events.append(self._reject(position_id, account_id, RejectReason.NEWS_WINDOW))
             return events
         amount = position.volume if volume is None else volume
         if not is_int(amount) or not 1 <= amount <= position.volume:
@@ -264,6 +285,9 @@ class TradingEngine:
         if position is None or position.account_id != account_id:
             events.append(self._reject(position_id, account_id, RejectReason.UNKNOWN_POSITION))
             return events
+        if account_id in self._locked:
+            events.append(self._reject(position_id, account_id, RejectReason.ACCOUNT_LOCKED))
+            return events
         if self._guards.is_frozen(position.symbol):
             events.append(self._reject(position_id, account_id, RejectReason.SYMBOL_FROZEN))
             return events
@@ -278,6 +302,31 @@ class TradingEngine:
         events.append(StopsModified(self._now, position_id, account_id, stop_loss, take_profit))
         return events
 
+    def close_all(self, account_id: str, ts: int, reason: CloseReason) -> list[EngineEvent]:
+        """Close every position of an account at the current prices. Ignores
+        freezes and news blocks: a frozen symbol closes at its last applied
+        price (traceable through `price_seq`)."""
+        self._account(account_id)
+        events = self._advance(ts)
+        for position in self._open(account_id):
+            events.append(
+                self._close(position, position.volume, self._quotes[position.symbol], reason)
+            )
+        return events
+
+    def lock_account(self, account_id: str, ts: int) -> list[EngineEvent]:
+        """Cancel the account's pending orders and reject all further trading."""
+        self._account(account_id)
+        events = self._advance(ts)
+        for order_id, pending in list(self._orders.items()):
+            if pending.request.account_id == account_id:
+                del self._orders[order_id]
+                events.append(
+                    OrderCancelled(self._now, order_id, account_id, RejectReason.ACCOUNT_LOCKED)
+                )
+        self._locked.add(account_id)
+        return events
+
     # --- queries ------------------------------------------------------------
 
     @property
@@ -289,6 +338,14 @@ class TradingEngine:
 
     def is_frozen(self, symbol: str) -> bool:
         return self._guards.is_frozen(symbol)
+
+    def is_blocked(self, symbol: str) -> bool:
+        """Whether a news trade block covers `symbol` at engine time."""
+        return in_news(self._blocks, symbol, self._now)
+
+    def is_locked(self, account_id: str) -> bool:
+        self._account(account_id)
+        return account_id in self._locked
 
     def balance(self, account_id: str) -> int:
         self._account(account_id)
@@ -345,6 +402,8 @@ class TradingEngine:
         account = self._accounts.get(request.account_id)
         if account is None:
             return RejectReason.UNKNOWN_ACCOUNT
+        if request.account_id in self._locked:
+            return RejectReason.ACCOUNT_LOCKED
         if request.order_id in self._used_ids or request.order_id in self._positions:
             return RejectReason.DUPLICATE_ID
         spec = self._instruments.get(request.symbol)
@@ -352,6 +411,8 @@ class TradingEngine:
             return RejectReason.UNKNOWN_SYMBOL
         if self._guards.is_frozen(request.symbol):
             return RejectReason.SYMBOL_FROZEN
+        if in_news(self._blocks, request.symbol, self._now):
+            return RejectReason.NEWS_WINDOW
         if request.volume < 1:
             return RejectReason.INVALID_VOLUME
         if request.volume > scaled_cap(spec.max_order_volume_per_100k, account.initial_balance):
@@ -426,6 +487,8 @@ class TradingEngine:
 
     def _trigger_orders(self, quote: Quote) -> list[EngineEvent]:
         events: list[EngineEvent] = []
+        if in_news(self._blocks, quote.symbol, self._now):
+            return events  # held: no trade opens inside a news block
         for order_id, pending in list(self._orders.items()):
             request = pending.request
             if request.symbol != quote.symbol or not _triggered(request, quote):
