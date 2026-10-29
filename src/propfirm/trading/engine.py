@@ -333,6 +333,11 @@ class TradingEngine:
     def now(self) -> int:
         return self._now
 
+    @property
+    def symbols(self) -> frozenset[str]:
+        """The configured symbols."""
+        return frozenset(self._instruments)
+
     def quote(self, symbol: str) -> Quote | None:
         return self._quotes.get(symbol)
 

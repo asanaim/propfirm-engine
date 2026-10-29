@@ -96,7 +96,8 @@ class Entry:
 
 
 class Ledger:
-    """In-memory ledger. Persistence arrives with the event journal (step 6)."""
+    """In-memory ledger. The event journal persists every entry with the
+    input that caused it (`propfirm.journal`)."""
 
     def __init__(self, entries: Iterable[Entry] = ()) -> None:
         self._entries: list[Entry] = []
@@ -141,6 +142,11 @@ class Ledger:
 
     def entries(self) -> tuple[Entry, ...]:
         return tuple(self._entries)
+
+    def entries_since(self, index: int) -> tuple[Entry, ...]:
+        """Entries from position `index` on (0 is the first entry)."""
+        require_int("index", index, minimum=0)
+        return tuple(self._entries[index:])
 
     def __len__(self) -> int:
         return len(self._entries)

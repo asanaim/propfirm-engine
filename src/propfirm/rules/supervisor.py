@@ -129,6 +129,9 @@ class RuleSupervisor:
     def engine(self) -> TradingEngine:
         return self._engine
 
+    def has_account(self, account_id: str) -> bool:
+        return account_id in self._accounts
+
     def status(self, account_id: str) -> AccountStatus:
         return self._state(account_id).status
 
