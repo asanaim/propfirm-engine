@@ -8,18 +8,22 @@ Tables, in one schema per engine:
     ledger_postings  one row per posting (BIGINT cents)
     prices           the licensed price store: one row per price input,
                      keyed by the record (update) that carried it
+    price_keys       the secrets of the price digests
+    snapshots        engine state at checkpoint records
 
-Everything except `prices` is append-only: triggers reject UPDATE, DELETE
-and TRUNCATE. `prices` rejects UPDATE but allows DELETE, so licensed prices
-can be purged (CLAUDE.md); a purged journal still verifies its chain but can
+The record tables are append-only: triggers reject UPDATE, DELETE and
+TRUNCATE. The licensed tables (`prices`, `price_keys`, `snapshots`, which
+holds quotes) reject UPDATE but allow DELETE, so `purge_licensed` can remove
+them together (CLAUDE.md); a purged journal still verifies its chain but can
 no longer be replayed. The triggers stop mistakes, not a superuser, who can
-disable them; the hash chain detects what they let through.
+disable them; the hash chain and the external anchor detect what they let
+through.
 
 One writer per schema: the store takes a session advisory lock on connect
 and holds it for the life of the connection. A second writer fails at once.
 
-One batch is one transaction: records, ledger rows and prices commit
-together or not at all.
+One batch is one transaction: records, ledger rows, prices and snapshots
+commit together or not at all.
 
 Limit [DEFAULT]: the schema is created idempotently on connect; versioned
 migrations come with the first change to it.
@@ -32,7 +36,7 @@ from typing import Self
 import asyncpg
 
 from propfirm.journal.codec import digest
-from propfirm.journal.machine import Record, StoredRecord
+from propfirm.journal.machine import Record, Snapshot, StoredRecord
 from propfirm.ledger import Entry, Posting
 from propfirm.market.types import PriceUpdate
 
@@ -87,6 +91,16 @@ CREATE TABLE IF NOT EXISTS {s}.prices (
     price bigint NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS {s}.price_keys (
+    key_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    secret bytea NOT NULL CHECK (length(secret) = 32)
+);
+
+CREATE TABLE IF NOT EXISTS {s}.snapshots (
+    seq bigint PRIMARY KEY REFERENCES {s}.journal (seq),
+    state text NOT NULL
+);
+
 CREATE OR REPLACE FUNCTION {s}.reject_change() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -97,6 +111,7 @@ $$;
 """
 
 _APPEND_ONLY = ("setup", "journal", "ledger_entries", "ledger_postings")
+_PURGEABLE = ("prices", "price_keys", "snapshots")
 
 _TRIGGERS = """
 CREATE OR REPLACE TRIGGER {t}_append_only BEFORE {ops} ON {s}.{t}
@@ -113,7 +128,7 @@ class JournalLockedError(RuntimeError):
 def _ddl(schema: str) -> str:
     parts = [_DDL.format(s=schema)]
     parts += [_TRIGGERS.format(s=schema, t=t, ops="UPDATE OR DELETE") for t in _APPEND_ONLY]
-    parts.append(_TRIGGERS.format(s=schema, t="prices", ops="UPDATE"))
+    parts += [_TRIGGERS.format(s=schema, t=t, ops="UPDATE") for t in _PURGEABLE]
     return "\n".join(parts)
 
 
@@ -155,8 +170,7 @@ class PostgresJournal:
             digest(text),
         )
 
-    async def records(self) -> AsyncIterator[StoredRecord]:
-        after = 0
+    async def records(self, after: int = 0) -> AsyncIterator[StoredRecord]:
         while True:
             rows = await self._conn.fetch(
                 f"SELECT seq, source_id, kind, ts, input, events, prev_hash, hash "
@@ -171,19 +185,38 @@ class PostgresJournal:
             prices = await self._prices(first, last)
             for row in rows:
                 seq = row["seq"]
-                record = Record(
-                    seq=seq,
-                    source_id=row["source_id"],
-                    kind=row["kind"],
-                    ts=row["ts"],
-                    input=row["input"],
-                    events=row["events"],
-                    entries=tuple(entries.get(seq, ())),
-                    prev_hash=row["prev_hash"],
-                    hash=row["hash"],
-                )
-                yield StoredRecord(record, prices.get(seq))
+                yield StoredRecord(_record(row, entries.get(seq, [])), prices.get(seq))
             after = last
+
+    async def record(self, seq: int) -> Record | None:
+        row = await self._conn.fetchrow(
+            f"SELECT seq, source_id, kind, ts, input, events, prev_hash, hash "
+            f"FROM {self._s}.journal WHERE seq = $1",
+            seq,
+        )
+        if row is None:
+            return None
+        return _record(row, (await self._entries(seq, seq)).get(seq, []))
+
+    async def entries_until(self, seq: int) -> list[Entry]:
+        grouped = await self._entries(1, seq)
+        return [e for s in sorted(grouped) for e in grouped[s]]
+
+    async def latest_snapshot(self) -> Snapshot | None:
+        row = await self._conn.fetchrow(
+            f"SELECT seq, state FROM {self._s}.snapshots ORDER BY seq DESC LIMIT 1"
+        )
+        return None if row is None else Snapshot(row["seq"], row["state"])
+
+    async def price_keys(self) -> dict[int, bytes]:
+        rows = await self._conn.fetch(f"SELECT key_id, secret FROM {self._s}.price_keys")
+        return {r["key_id"]: bytes(r["secret"]) for r in rows}
+
+    async def add_price_key(self, secret: bytes) -> int:
+        key_id: int = await self._conn.fetchval(
+            f"INSERT INTO {self._s}.price_keys (secret) VALUES ($1) RETURNING key_id", secret
+        )
+        return key_id
 
     async def _entries(self, first: int, last: int) -> dict[int, list[Entry]]:
         rows = await self._conn.fetch(
@@ -224,7 +257,9 @@ class PostgresJournal:
             for r in rows
         }
 
-    async def append(self, batch: Sequence[StoredRecord]) -> None:
+    async def append(
+        self, batch: Sequence[StoredRecord], snapshots: Sequence[Snapshot] = ()
+    ) -> None:
         if not batch:
             return
         journal: list[tuple[object, ...]] = []
@@ -268,8 +303,33 @@ class PostgresJournal:
                     f"price) VALUES ($1, $2, $3, $4, $5, $6)",
                     prices,
                 )
+            if snapshots:
+                await self._conn.executemany(
+                    f"INSERT INTO {s}.snapshots (seq, state) VALUES ($1, $2)",
+                    [(snap.seq, snap.state) for snap in snapshots],
+                )
 
-    async def purge_prices(self) -> int:
-        """Delete every stored price (licence ended); return how many."""
-        result: str = await self._conn.execute(f"DELETE FROM {self._s}.prices")
-        return int(result.split()[-1])
+    async def purge_licensed(self) -> dict[str, int]:
+        """Delete every stored price, price key and snapshot in one
+        transaction (licence ended); return the rows deleted per table. Run
+        with the engine stopped: this store holds the writer lock."""
+        counts: dict[str, int] = {}
+        async with self._conn.transaction():
+            for table in _PURGEABLE:
+                result: str = await self._conn.execute(f"DELETE FROM {self._s}.{table}")
+                counts[table] = int(result.split()[-1])
+        return counts
+
+
+def _record(row: asyncpg.Record, entries: list[Entry]) -> Record:
+    return Record(
+        seq=row["seq"],
+        source_id=row["source_id"],
+        kind=row["kind"],
+        ts=row["ts"],
+        input=row["input"],
+        events=row["events"],
+        entries=tuple(entries),
+        prev_hash=row["prev_hash"],
+        hash=row["hash"],
+    )

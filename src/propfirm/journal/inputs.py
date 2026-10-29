@@ -13,14 +13,17 @@ sees them, so a bad input is recorded and never changes state. Any other
 exception is a defect: the runner stops rather than guess (fail-stop).
 """
 
-from collections.abc import Mapping
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
 
 from propfirm._checks import require_int, require_text
+from propfirm.market.guards import GuardConfig
 from propfirm.market.types import PriceUpdate
+from propfirm.rules.news import RestrictedEvent, event_window
 from propfirm.rules.products import RuleSet
 from propfirm.rules.supervisor import Event, RuleSupervisor
+from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest, Trail
 
 
@@ -165,6 +168,80 @@ class Malformed:
             raise TypeError("raw and error must be str")
 
 
+@dataclass(frozen=True, slots=True)
+class AddRuleSet:
+    """Publish a new rule-set version. Versions are immutable: an id that
+    exists is refused, and accounts keep the version they opened on."""
+
+    rule_set: RuleSet
+    ts: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.rule_set, RuleSet):
+            raise TypeError("rule_set must be a RuleSet")
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleNews:
+    """Add a restricted event to the calendar (risk desk)."""
+
+    event: RestrictedEvent
+    ts: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.event, RestrictedEvent):
+            raise TypeError("event must be a RestrictedEvent")
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class CancelNews:
+    """Remove a scheduled event before its window starts."""
+
+    event_id: str
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("event_id", self.event_id)
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateTrading:
+    """New trading settings from `ts` on (from the policy file): leverage, lot
+    caps and spread parameters of the instruments listed, and the feed-guard
+    thresholds unless `guard` is None. `config_version` names the new
+    settings; engine events record it."""
+
+    config_version: str
+    instruments: tuple[InstrumentSpec, ...]
+    guard: GuardConfig | None
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("config_version", self.config_version)
+        if not isinstance(self.instruments, tuple):
+            raise TypeError("instruments must be a tuple")
+        for spec in self.instruments:
+            if not isinstance(spec, InstrumentSpec):
+                raise TypeError("instruments must hold InstrumentSpec values")
+        if self.guard is not None and not isinstance(self.guard, GuardConfig):
+            raise TypeError("guard must be a GuardConfig or None")
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class Checkpoint:
+    """Record a digest of the whole engine state in the chain and store a
+    snapshot of it, so start-up can resume from here (sent by the scheduler)."""
+
+    ts: int
+
+    def __post_init__(self) -> None:
+        _ts(self.ts)
+
+
 type Input = (
     PriceUpdate
     | OpenAccount
@@ -175,6 +252,11 @@ type Input = (
     | SetTrailingStop
     | Advance
     | Outage
+    | AddRuleSet
+    | ScheduleNews
+    | CancelNews
+    | UpdateTrading
+    | Checkpoint
     | Malformed
 )
 
@@ -188,6 +270,11 @@ INPUT_TYPES = (
     SetTrailingStop,
     Advance,
     Outage,
+    AddRuleSet,
+    ScheduleNews,
+    CancelNews,
+    UpdateTrading,
+    Checkpoint,
     Malformed,
 )
 
@@ -198,6 +285,12 @@ class InputRejectReason(StrEnum):
     UNKNOWN_RULE_SET = "unknown_rule_set"
     INVALID_SIZE = "invalid_size"
     DUPLICATE_ACCOUNT = "duplicate_account"
+    DUPLICATE_RULE_SET = "duplicate_rule_set"
+    DUPLICATE_NEWS_EVENT = "duplicate_news_event"
+    UNKNOWN_NEWS_EVENT = "unknown_news_event"
+    NEWS_STARTED = "news_started"  # a window that started or ended cannot be cancelled
+    NO_AFFECTED_SYMBOLS = "no_affected_symbols"
+    INVALID_TRADING_CONFIG = "invalid_trading_config"
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,13 +307,30 @@ class InputRejected:
     reason: InputRejectReason
 
 
-type JournalEvent = Event | InputRejected
+@dataclass(frozen=True, slots=True)
+class RuleSetAdded:
+    ts: int  # engine time; the input does not advance it
+    rsv_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class StateCheckpointed:
+    """The SHA-256 of the canonical engine state after record `ts` was reached;
+    the snapshot stored with this record must have this digest."""
+
+    ts: int
+    state_digest: str
+
+
+type JournalEvent = Event | InputRejected | RuleSetAdded | StateCheckpointed
 
 
 def apply(
-    supervisor: RuleSupervisor, rule_sets: Mapping[str, RuleSet], item: Input
+    supervisor: RuleSupervisor, rule_sets: MutableMapping[str, RuleSet], item: Input
 ) -> list[JournalEvent]:
-    """Hand one input to the supervisor and return the events it caused."""
+    """Hand one input to the supervisor and return the events it caused.
+    `rule_sets` is the live catalogue; AddRuleSet extends it. Checkpoint is
+    handled by the journal machine, which owns the state digest."""
     sup = supervisor
 
     def reject(ref: str, reason: InputRejectReason) -> list[JournalEvent]:
@@ -262,5 +372,33 @@ def apply(
             return list(sup.advance(item.ts))
         case Outage():
             return list(sup.on_outage(item.ts))
+        case AddRuleSet():
+            rsv_id = item.rule_set.rsv_id
+            if rsv_id in rule_sets:
+                return reject(rsv_id, InputRejectReason.DUPLICATE_RULE_SET)
+            rule_sets[rsv_id] = item.rule_set
+            return [RuleSetAdded(sup.engine.now, rsv_id)]
+        case ScheduleNews():
+            event_id = item.event.event_id
+            if sup.engine.knows_news(event_id):
+                return reject(event_id, InputRejectReason.DUPLICATE_NEWS_EVENT)
+            window = event_window(item.event, sup.engine.symbol_specs.values())
+            if window is None:
+                return reject(event_id, InputRejectReason.NO_AFFECTED_SYMBOLS)
+            return list(sup.schedule_news(event_id, window, item.ts))
+        case CancelNews():
+            if not sup.engine.knows_news(item.event_id):
+                return reject(item.event_id, InputRejectReason.UNKNOWN_NEWS_EVENT)
+            scheduled = sup.engine.news_event(item.event_id)
+            if scheduled is None or scheduled.start_ts <= max(sup.engine.now, item.ts):
+                return reject(item.event_id, InputRejectReason.NEWS_STARTED)
+            return list(sup.cancel_news(item.event_id, item.ts))
+        case UpdateTrading():
+            refusal = sup.engine.check_reconfigure(item.config_version, item.instruments)
+            if refusal is not None:
+                return reject(item.config_version, InputRejectReason.INVALID_TRADING_CONFIG)
+            return list(sup.reconfigure(item.config_version, item.instruments, item.guard, item.ts))
+        case Checkpoint():
+            raise TypeError("Checkpoint is applied by the journal machine")
         case Malformed():
             return reject("", InputRejectReason.MALFORMED)

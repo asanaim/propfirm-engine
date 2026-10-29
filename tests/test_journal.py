@@ -24,19 +24,23 @@ from propfirm.journal.stream import decode_input, encode_input
 from propfirm.market.types import PriceUpdate
 from tests.journal_rig import (
     T0,
+    TEST_KEY,
     Crash,
     Fault,
     FaultyStore,
     MemoryJournal,
     MemoryStream,
     engine_setup,
+    start,
 )
 
 U = PriceUpdate("EUR/USD", 1, T0, T0, 110_000)
 
 
 def machine() -> Machine:
-    return Machine(CODEC.encode(engine_setup()))
+    m = Machine(CODEC.encode(engine_setup()), {1: TEST_KEY})
+    m.use_price_key(1)
+    return m
 
 
 # --- refused inputs -----------------------------------------------------------------
@@ -106,7 +110,7 @@ def test_input_round_trips_through_message_fields() -> None:
         {"input": "{not json"},
         {"input": CODEC.encode(U), "extra": "1"},
         {"symbol": "EUR/USD"},
-        {"input": CODEC.encode(price_ref(U))},  # a journal reference is not an input
+        {"input": CODEC.encode(price_ref(U, 1, TEST_KEY))},  # a journal reference is not an input
         {"input": CODEC.encode(Malformed("{}", "x"))},  # nor is Malformed
         {"input": '{"_t":"Advance","ts":-5}'},  # fails validation
         {b"input": b"\xff\xfe"},  # not UTF-8
@@ -132,7 +136,7 @@ def test_malformed_and_references_are_never_sent() -> None:
     with pytest.raises(TypeError):
         encode_input(Malformed("{}", "x"))
     with pytest.raises(TypeError):
-        encode_input(PriceRef("EUR/USD", 1, "0" * 64))  # type: ignore[arg-type]
+        encode_input(PriceRef("EUR/USD", 1, 1, "0" * 64))  # type: ignore[arg-type]
 
 
 # --- records ------------------------------------------------------------------------
@@ -156,7 +160,7 @@ def test_machine_refuses_a_source_id_that_does_not_increase() -> None:
 
 def test_price_is_journaled_by_reference_only() -> None:
     stored = machine().apply("1-0", U)
-    assert CODEC.decode(stored.record.input) == price_ref(U)
+    assert CODEC.decode(stored.record.input) == price_ref(U, 1, TEST_KEY)
     assert str(U.price) not in stored.record.input
     assert stored.price == U
 
@@ -174,7 +178,7 @@ def test_first_record_links_to_the_setup_fingerprint() -> None:
 def test_setup_must_match_the_journal() -> None:
     async def scenario() -> None:
         store = MemoryJournal()
-        await Runner.start(store, MemoryStream().reader(), engine_setup())
+        await start(store, MemoryStream().reader())
         other = replace(engine_setup(), config_version="something-else")
         with pytest.raises(SetupError):
             await Runner.start(store, MemoryStream().reader(), other)
@@ -198,13 +202,13 @@ def test_runner_stops_after_a_failure() -> None:
         store, stream = MemoryJournal(), MemoryStream()
         stream.publish([U, replace(U, seq=2)])
         faulty = FaultyStore(store, Fault.BEFORE_COMMIT, 1)
-        runner = await Runner.start(faulty, stream.reader(), engine_setup())
+        runner = await start(faulty, stream.reader())
         with pytest.raises(Crash):
             await runner.poll(1)
         with pytest.raises(RunnerStoppedError):
             await runner.poll(1)
         assert store.rows == []
-        restarted = await Runner.start(store, stream.reader(), engine_setup())
+        restarted = await start(store, stream.reader())
         assert await restarted.drain() == 2
         assert [r.record.source_id for r in store.rows] == ["1-0", "2-0"]
         assert restarted.machine.seq == 2

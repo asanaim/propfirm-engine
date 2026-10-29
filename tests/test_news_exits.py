@@ -9,9 +9,11 @@ $3,000. EUR/USD 10 lots (volume 1,000) = $10 per point; spread 10 points.
 from collections.abc import Sequence
 from dataclasses import replace
 
+from propfirm.journal.machine import CODEC
 from propfirm.rules.events import AccountBreached, AccountStatus, NewsExitViolation, StagePassed
 from propfirm.rules.news import EventScope, RestrictedEvent
 from propfirm.rules.products import PRODUCTS, RuleSet
+from propfirm.rules.supervisor import RuleSupervisor
 from propfirm.trading.events import CloseReason, PositionClosed, TrailingStopSet
 from propfirm.trading.orders import OrderRequest, OrderType, Side, Trail
 from tests.engine_rig import USD_100K, one
@@ -119,3 +121,15 @@ def test_rule_set_can_keep_news_exit_profit_in_the_target() -> None:
     events = rig.price(110_710, INSIDE)
     assert one(events, NewsExitViolation).excluded_cents == 0  # still recorded
     one(events, StagePassed)
+
+
+def test_excluded_profit_survives_a_state_snapshot() -> None:
+    rig = rig_with_three_days()
+    rig.price(110_000, WEEK[3])
+    rig.order(Side.BUY, 1_000, WEEK[3], tp=110_700)
+    rig.price(110_710, INSIDE)
+    state = rig.sup.state()
+    assert CODEC.decode(CODEC.encode(state)) == state
+    restored = RuleSupervisor(rig.engine)
+    restored.restore(state)
+    assert restored.news_excluded("A") == 700_000

@@ -92,6 +92,14 @@ def round_up_to_even(points: int) -> int:
     return points + (points % 2)
 
 
+@dataclass(frozen=True, slots=True)
+class SpreadState:
+    """A SpreadModel's memory: recent absolute changes and the last price."""
+
+    changes: tuple[int, ...]
+    last: int | None
+
+
 class SpreadModel:
     """Tracks recent price changes for one symbol and quotes bid and ask."""
 
@@ -99,6 +107,30 @@ class SpreadModel:
         self._config = config
         self._changes: deque[int] = deque(maxlen=config.window)
         self._last: int | None = None
+
+    def reconfigure(self, config: SpreadConfig) -> None:
+        """New parameters from the next quote on; keeps the most recent
+        changes that fit the new window."""
+        if not isinstance(config, SpreadConfig):
+            raise TypeError("config must be a SpreadConfig")
+        kept = list(self._changes)[-config.window :]
+        self._config = config
+        self._changes = deque(kept, maxlen=config.window)
+
+    def state(self) -> SpreadState:
+        return SpreadState(tuple(self._changes), self._last)
+
+    def restore(self, state: SpreadState) -> None:
+        if len(state.changes) > self._config.window:
+            raise ValueError("more changes than the window holds")
+        for change in state.changes:
+            require_int("change", change, minimum=0)
+        if state.last is not None:
+            require_int("last", state.last, minimum=1)
+        if state.changes and state.last is None:
+            raise ValueError("changes without a last price")
+        self._changes = deque(state.changes, maxlen=self._config.window)
+        self._last = state.last
 
     def observe(self, price: int) -> None:
         require_int("price", price, minimum=1)

@@ -11,9 +11,8 @@ import sys
 import valkey.asyncio as avalkey
 
 from propfirm.journal.postgres import PostgresJournal
-from propfirm.journal.runner import Runner
 from propfirm.journal.stream import InputStreamReader
-from tests.journal_rig import CONSUMER, engine_setup
+from tests.journal_rig import CONSUMER, start
 
 GROUP = "engine"
 
@@ -24,7 +23,7 @@ async def main(database_url: str, schema: str, valkey_url: str, stream: str) -> 
     try:
         reader = InputStreamReader(client, stream, GROUP, CONSUMER)
         await reader.ensure_group()
-        runner = await Runner.start(store, reader, engine_setup())
+        runner = await start(store, reader)
         await runner.drain(count=1)
     finally:
         await store.close()

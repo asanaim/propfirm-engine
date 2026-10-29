@@ -188,6 +188,36 @@ class StaleUpdate:
     lag_ms: int
 
 
+@dataclass(frozen=True, slots=True)
+class NewsScheduled:
+    """A restricted event entered the calendar: no trades on `symbols` and
+    wider spreads while engine time is in [start_ts, end_ts)."""
+
+    ts: int
+    event_id: str
+    symbols: tuple[str, ...]  # sorted
+    start_ts: int
+    end_ts: int
+
+
+@dataclass(frozen=True, slots=True)
+class NewsCancelled:
+    ts: int
+    event_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class TradingConfigChanged:
+    """New trading settings apply from `ts`: leverage, lot caps and spread
+    parameters of `symbols`, and the feed-guard thresholds when
+    `guard_changed`. Open positions keep the margin fixed when they opened."""
+
+    ts: int
+    config_version: str
+    symbols: tuple[str, ...]  # sorted
+    guard_changed: bool
+
+
 type EngineEvent = (
     AccountOpened
     | OrderRejected
@@ -203,4 +233,7 @@ type EngineEvent = (
     | FeedGap
     | DuplicateUpdate
     | StaleUpdate
+    | NewsScheduled
+    | NewsCancelled
+    | TradingConfigChanged
 )
