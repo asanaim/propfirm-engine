@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Prop firm trading engine: prices, fills, rules, ledger and replay"
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
-dependencies = []
+dependencies = [
+    "valkey==6.2.0",
+]
 
 [dependency-groups]
 dev = [
