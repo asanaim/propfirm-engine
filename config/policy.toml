@@ -50,7 +50,7 @@ split_percent_after = "90"
 max_allocation_cents = 40000000  # $400,000 per trader
 
 [trading]
-config_version = "trading-v1"
+config_version = "trading-v2"
 delay_threshold_ms = 2000      # older updates freeze the symbol
 gap_threshold_ms = 60000       # no update for longer freezes the symbol
 gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
@@ -68,41 +68,59 @@ oil = [2000, 4000]
 crypto = [1000, 2000]
 
 [trading.spread]
-window = 20                    # recent price changes used for volatility
+# The feed has no bid or ask, so the spread is set the way broker houses
+# quote it: the normal spread below in a calm market; wider while the
+# market keeps moving fast (the median of the last `window` price changes,
+# once there are `min_samples`, times `vol_multiplier`), never above
+# `max_multiple` times the normal spread; multiplied inside news windows and
+# around the 17:00 New York rollover, when liquidity moves to Asia. A single
+# jump or bad tick does not widen it.
+window = 20                    # recent price changes considered
+min_samples = 3                # changes needed before the market can widen it
 vol_multiplier = "1"
+max_multiple = 10              # widest spread = 10 x the normal spread
 news_multiplier = 3            # inside a news window
+rollover_multiplier = 3        # around the daily rollover [DEFAULT]
+rollover_before_minutes = 5    # from 16:55 New York
+rollover_after_minutes = 15    # to 17:15 New York
 
-[trading.spread.min_points]    # smallest spread per symbol, in points
-"EUR/USD" = 5
-"GBP/USD" = 5
-"USD/JPY" = 5
-"USD/CHF" = 5
-"AUD/USD" = 5
-"USD/CAD" = 5
-"NZD/USD" = 5
-"EUR/GBP" = 15
-"EUR/JPY" = 15
-"EUR/CHF" = 15
-"EUR/AUD" = 15
-"EUR/CAD" = 15
-"EUR/NZD" = 15
-"GBP/JPY" = 15
-"GBP/CHF" = 15
-"GBP/AUD" = 15
-"GBP/CAD" = 15
-"AUD/JPY" = 15
-"AUD/CAD" = 15
-"CAD/JPY" = 15
-"CHF/JPY" = 15
-"XAU/USD" = 20
-"XAG/USD" = 20
-"WTI" = 3
-"Brent" = 3
-"BTC/USD" = 1000
-"ETH/USD" = 100
-"SOL/USD" = 5
-"XRP/USD" = 5
-"LTC/USD" = 5
+[trading.spread.min_points]
+# The normal (calm-market) spread per symbol, in points, as an all-in cost:
+# spread plus round-trip commission (there is no separate commission here).
+# Set 29 Oct 2026 to the median of FTMO, FundedNext, Exness (Standard) and
+# OANDA (spread only), rounded up to a whole point; see
+# docs/spread-benchmarks.md. The engine quotes the next even number of
+# points, so the feed price stays the mid. Forex: 10 points = 1 pip.
+"EUR/USD" = 8                  # 0.8 pip
+"GBP/USD" = 11                 # 1.1 pip
+"USD/JPY" = 14                 # 1.4 pip
+"USD/CHF" = 14                 # 1.4 pip
+"AUD/USD" = 10                 # 1.0 pip
+"USD/CAD" = 14                 # 1.4 pip
+"NZD/USD" = 14                 # 1.4 pip
+"EUR/GBP" = 12                 # 1.2 pip
+"EUR/JPY" = 20                 # 2.0 pip
+"EUR/CHF" = 17                 # 1.7 pip
+"EUR/AUD" = 21                 # 2.1 pip
+"EUR/CAD" = 26                 # 2.6 pip
+"EUR/NZD" = 35                 # 3.5 pip
+"GBP/JPY" = 30                 # 3.0 pip
+"GBP/CHF" = 20                 # 2.0 pip
+"GBP/AUD" = 23                 # 2.3 pip
+"GBP/CAD" = 26                 # 2.6 pip
+"AUD/JPY" = 18                 # 1.8 pip
+"AUD/CAD" = 23                 # 2.3 pip
+"CAD/JPY" = 20                 # 2.0 pip
+"CHF/JPY" = 23                 # 2.3 pip
+"XAU/USD" = 47                 # $0.47 an ounce
+"XAG/USD" = 33                 # $0.033 an ounce
+"WTI" = 6                      # $0.06 a barrel
+"Brent" = 6                    # $0.06 a barrel
+"BTC/USD" = 5313               # $53.13 (at BTC $80,900; commissions are % of price)
+"ETH/USD" = 149                # $1.49 (at ETH $2,335)
+"SOL/USD" = 10                 # $0.10 [E]: no house publishes SOL; calibrate in P3
+"XRP/USD" = 20                 # $0.0020 (two houses)
+"LTC/USD" = 72                 # $0.72 (two houses, far apart)
 
 # --- products -------------------------------------------------------------------
 # Each stage becomes the rule-set version "<product>-<stage>-v<version>".

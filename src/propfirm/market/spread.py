@@ -1,19 +1,44 @@
-"""Synthetic bid and ask around the feed's single price.
+"""Bid and ask around the feed's single price.
 
-The feed sends one price per update and no bid or ask (Twelve Data, all
-tiers), so the engine derives them:
+The feed sends one price per update and no bid or ask (Twelve Data sends no
+bid or ask over its WebSocket, on any plan), so the engine derives them
+from the market's own movement. Two models, chosen by the config type:
 
-    raw    = max(min_points, ceil(vol_multiplier * mean |price change|))
-    spread = round_up_to_even(raw * (news_multiplier inside a news window, else 1))
-    bid    = price - spread / 2;   ask = bid + spread
+`MarketSpreadConfig` (policy trading-v2 on): follows the market the way
+broker houses quote it.
 
-The spread is always an even number of points, so the midpoint of bid and
-ask equals the feed price. Bid never goes below 1 point; in that edge case
-the spread is kept and the midpoint moves up.
+    move   = the median of the last `window` |price changes| (the lower one
+             of the middle two for an even count), once there are
+             `min_samples` of them; 0 before
+    raw    = min(max(min_points, ceil(vol_multiplier * move)), max_points)
+    times  = the larger of news_multiplier (inside a news window) and
+             rollover_multiplier (around the 17:00 New York rollover), else 1
+    spread = round_up_to_even(raw * times)
 
-`min_points`, `window`, `vol_multiplier` and `news_multiplier` are [DEFAULT]
-values calibrated in P3 on recorded prices. Only applied (fresh) prices feed
-the volatility estimate.
+    In a calm market the spread is the symbol's normal spread (`min_points`,
+    set from what broker houses and prop firms charge in all); when the
+    market moves fast for a while the spread widens with it, up to
+    `max_points`. A single jump, a gap or a bad tick is one change among
+    `window`, so it does not move the median: the price follows the market
+    at once, the spread does not blow out. Around the daily rollover
+    (`rollover_before_ms` before to `rollover_after_ms` after 17:00
+    America/New_York) liquidity moves from New York to Asia and brokers'
+    spreads widen; quotes made in that window are multiplied too.
+
+`SpreadConfig` (the first model, kept so journals written under it replay
+exactly): raw = max(min_points, ceil(vol_multiplier * mean |price change|)),
+no cap. A single large jump widens it to about the jump's size for up to
+`window` updates, so a market order right after a gap could breach a loss
+limit at once; that is why trading-v2 replaced it.
+
+Both: bid = price - spread / 2; ask = bid + spread. The spread is always an
+even number of points, so the midpoint of bid and ask equals the feed price.
+Bid never goes below 1 point; in that edge case the spread is kept and the
+midpoint moves up. Only applied (fresh) prices feed the estimate.
+
+`min_points`, `max_points`, `window`, `min_samples`, `vol_multiplier` and
+`news_multiplier` are [DEFAULT] values, calibrated in P3 on recorded
+prices and broker spreads.
 """
 
 import math
@@ -23,6 +48,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 
 from propfirm._checks import require_int, require_text
+from propfirm.rules.clock import NEW_YORK_17
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +64,59 @@ class SpreadConfig:
         require_int("news_multiplier", self.news_multiplier, minimum=1)
         if not isinstance(self.vol_multiplier, Fraction) or self.vol_multiplier < 0:
             raise ValueError("vol_multiplier must be a non-negative Fraction")
+
+
+@dataclass(frozen=True, slots=True)
+class MarketSpreadConfig:
+    min_points: int  # the symbol's normal spread in a calm market
+    max_points: int  # the widest spread outside news windows
+    window: int = 20  # [DEFAULT] recent price changes considered
+    min_samples: int = 3  # [DEFAULT] changes needed before the market can widen it
+    vol_multiplier: Fraction = field(default_factory=lambda: Fraction(1))  # [DEFAULT]
+    news_multiplier: int = 3  # [DEFAULT]
+    rollover_multiplier: int = 1  # 1: no rollover widening
+    rollover_before_ms: int = 0  # window before 17:00 New York
+    rollover_after_ms: int = 0  # window after 17:00 New York
+
+    def __post_init__(self) -> None:
+        require_int("min_points", self.min_points, minimum=1)
+        require_int("max_points", self.max_points, minimum=self.min_points)
+        require_int("window", self.window, minimum=1)
+        require_int("min_samples", self.min_samples, minimum=1)
+        require_int("news_multiplier", self.news_multiplier, minimum=1)
+        require_int("rollover_multiplier", self.rollover_multiplier, minimum=1)
+        require_int("rollover_before_ms", self.rollover_before_ms, minimum=0)
+        require_int("rollover_after_ms", self.rollover_after_ms, minimum=0)
+        if self.rollover_before_ms + self.rollover_after_ms >= _DAY_MS:
+            raise ValueError("the rollover window must be shorter than a day")
+        if self.min_samples > self.window:
+            raise ValueError("min_samples must be <= window")
+        if not isinstance(self.vol_multiplier, Fraction) or self.vol_multiplier < 0:
+            raise ValueError("vol_multiplier must be a non-negative Fraction")
+
+
+type AnySpreadConfig = SpreadConfig | MarketSpreadConfig
+
+_DAY_MS = 86_400_000
+
+
+def in_rollover(config: MarketSpreadConfig, ts: int) -> bool:
+    """Whether `ts` (ms UTC) is within the config's window around the 17:00
+    New York rollover (the trading-day boundary of the rules)."""
+    if config.rollover_multiplier == 1 or ts < 0:
+        return False
+    since = ts - NEW_YORK_17.day_start(ts)  # after the last rollover
+    until = NEW_YORK_17.next_boundary(ts) - ts  # before the next one
+    return since < config.rollover_after_ms or until <= config.rollover_before_ms
+
+
+def lower_median(values: Iterable[int]) -> int:
+    """The middle value; of the two middle values for an even count, the
+    lower (an integer, so the result is exact and deterministic)."""
+    ordered = sorted(values)
+    if not ordered:
+        raise ValueError("no values")
+    return ordered[(len(ordered) - 1) // 2]
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,16 +182,18 @@ class SpreadState:
 class SpreadModel:
     """Tracks recent price changes for one symbol and quotes bid and ask."""
 
-    def __init__(self, config: SpreadConfig) -> None:
-        self._config = config
+    def __init__(self, config: AnySpreadConfig) -> None:
+        if not isinstance(config, (SpreadConfig, MarketSpreadConfig)):
+            raise TypeError("config must be a SpreadConfig or MarketSpreadConfig")
+        self._config: AnySpreadConfig = config
         self._changes: deque[int] = deque(maxlen=config.window)
         self._last: int | None = None
 
-    def reconfigure(self, config: SpreadConfig) -> None:
-        """New parameters from the next quote on; keeps the most recent
-        changes that fit the new window."""
-        if not isinstance(config, SpreadConfig):
-            raise TypeError("config must be a SpreadConfig")
+    def reconfigure(self, config: AnySpreadConfig) -> None:
+        """New parameters (or model) from the next quote on; keeps the most
+        recent changes that fit the new window."""
+        if not isinstance(config, (SpreadConfig, MarketSpreadConfig)):
+            raise TypeError("config must be a SpreadConfig or MarketSpreadConfig")
         kept = list(self._changes)[-config.window :]
         self._config = config
         self._changes = deque(kept, maxlen=config.window)
@@ -138,16 +219,35 @@ class SpreadModel:
             self._changes.append(abs(price - self._last))
         self._last = price
 
-    def spread_points(self, news: bool) -> int:
+    def spread_points(self, news: bool, ts: int = -1) -> int:
+        """The spread for a quote made at engine time `ts` (ms UTC; only the
+        market model's rollover window reads it)."""
         cfg = self._config
-        volatility = Fraction(sum(self._changes), len(self._changes)) if self._changes else 0
-        raw = max(cfg.min_points, math.ceil(volatility * cfg.vol_multiplier))
+        if isinstance(cfg, MarketSpreadConfig):
+            enough = len(self._changes) >= cfg.min_samples
+            move = lower_median(self._changes) if enough else 0
+            raw = min(max(cfg.min_points, math.ceil(move * cfg.vol_multiplier)), cfg.max_points)
+            times = max(
+                cfg.news_multiplier if news else 1,
+                cfg.rollover_multiplier if in_rollover(cfg, ts) else 1,
+            )
+            return round_up_to_even(raw * times)
+        else:
+            volatility = Fraction(sum(self._changes), len(self._changes)) if self._changes else 0
+            raw = max(cfg.min_points, math.ceil(volatility * cfg.vol_multiplier))
         return round_up_to_even(raw * cfg.news_multiplier if news else raw)
 
     def quote(
-        self, symbol: str, price: int, seq: int, source_ts: int, receive_ts: int, news: bool
+        self,
+        symbol: str,
+        price: int,
+        seq: int,
+        source_ts: int,
+        receive_ts: int,
+        news: bool,
+        ts: int = -1,
     ) -> Quote:
-        spread = self.spread_points(news)
+        spread = self.spread_points(news, ts)
         bid = max(1, price - spread // 2)
         return Quote(
             symbol=symbol,
