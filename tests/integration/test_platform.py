@@ -221,3 +221,97 @@ def test_policy_edits_reach_the_engine_on_restart(
             await client.aclose()
 
     asyncio.run(scenario())
+
+
+def test_trailing_stop_through_the_api(database_url: str, valkey_url: str, pg_schema: str) -> None:
+    config = ServiceConfig(
+        database_url=database_url,
+        valkey_url=valkey_url,
+        schema=pg_schema,
+        read_schema=f"{pg_schema}_r",
+        stream=f"test:inputs:{uuid.uuid4().hex}",
+        block_ms=50,
+        publish_ms=1,
+    )
+
+    async def scenario() -> None:
+        client = avalkey.Valkey.from_url(valkey_url)
+        pool = await asyncpg.create_pool(database_url, min_size=1, max_size=4)
+        writer = InputStreamWriter(client, config.stream)
+        live = LiveReader(client, config.live_prefix)
+        deps = Deps(
+            live=live,
+            history=HistoryReader(pool, config.read_schema),
+            gateway=Gateway(writer, pool, config.schema),
+        )
+        transport = httpx.ASGITransport(app=create_app(deps))
+        api = httpx.AsyncClient(transport=transport, base_url="http://api")
+
+        async def price(seq: int, points: int) -> None:
+            t = now_ms()
+            await writer.publish(PriceUpdate("EUR/USD", seq, t, t, points))
+
+        async def bid(seq: int) -> int:
+            async def check() -> int | None:
+                quote = (await live.quotes()).get("EUR/USD")
+                return quote["bid"] if quote and quote["seq"] == seq else None
+
+            value: int = await eventually(check)
+            return value
+
+        async def position_level(expected: int | None) -> Any:
+            async def check() -> bool:
+                data = await live.account("A")
+                levels = [p["trailing_level"] for p in data["positions"]] if data else None
+                return levels == ([] if expected is None else [expected])
+
+            return await eventually(check)
+
+        try:
+            async with engine(config):
+                await writer.publish(OpenAccount("A", "lite-s1-v1", 10_000_000, now_ms()))
+                await price(1, 110_000)
+                await eventually(lambda: live.account("A"))
+                order = {
+                    "symbol": "EUR/USD",
+                    "side": "buy",
+                    "type": "market",
+                    "volume": 100,
+                    "trailing_stop": {"distance": 100, "step": 1},
+                }
+                opened = (await api.post("/accounts/A/orders", json=order)).json()
+                assert types(opened["events"]) == ["PositionOpened", "TrailingStopSet"], opened
+                start = opened["events"][1]["level"]
+                assert start == await bid(1) - 100
+                await position_level(start)
+
+                await price(2, 110_400)  # the bid rises: the stop follows it
+                moved = await bid(2) - 100
+                assert moved > start
+                await position_level(moved)
+
+                url = f"/accounts/A/positions/{opened['events'][0]['position_id']}/trailing-stop"
+                changed = (await api.put(url, json={"distance": 50, "step": 1})).json()
+                assert types(changed["events"]) == ["TrailingStopSet"], changed
+                assert changed["events"][0]["level"] == moved + 50  # the bid less 50
+                removed = (await api.delete(url)).json()
+                assert removed["events"][0]["level"] is None
+                set_again = (await api.put(url, json={"distance": 50, "step": 1})).json()
+                assert set_again["status"] == "done"
+
+                await price(3, 109_000)  # far below the stop
+                await position_level(None)
+                refused = (await api.put(url, json={"distance": 50, "step": 1})).json()
+                assert refused["status"] == "rejected"  # the position is gone
+        finally:
+            await api.aclose()
+            async with pool.acquire() as conn:
+                await conn.execute(f"DROP SCHEMA IF EXISTS {config.read_schema} CASCADE")
+            await pool.close()
+            for key in [config.stream] + [
+                k async for k in client.scan_iter(f"{config.live_prefix}:*")
+            ]:
+                await client.delete(key)
+            await client.aclose()
+
+    asyncio.run(scenario())

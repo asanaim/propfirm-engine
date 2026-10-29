@@ -11,6 +11,12 @@ the entry id, and the outcome can be fetched later.
 Prices and levels are integer points, volumes integer hundredths of a lot,
 times integer UTC milliseconds; floats are refused (CLAUDE.md).
 
+Trailing orders (Outline CC-3, D43): an order of type "trailing" needs
+`trail` and no `level`; any order may carry `trailing_stop`, set on the
+position when it opens. A position's trailing stop is set or replaced with
+PUT and removed with DELETE on /accounts/{id}/positions/{id}/trailing-stop.
+Distance and step are whole points, chosen by the trader.
+
 Not yet here [P2 step 2]: login (Keycloak) and account ownership. Until
 then the API must only listen on localhost.
 """
@@ -26,11 +32,18 @@ from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StrictInt, StringConstraints
 
-from propfirm.journal.inputs import CancelOrder, ClosePosition, Input, ModifyStops, PlaceOrder
+from propfirm.journal.inputs import (
+    CancelOrder,
+    ClosePosition,
+    Input,
+    ModifyStops,
+    PlaceOrder,
+    SetTrailingStop,
+)
 from propfirm.policy import Policy, ProductPolicy
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
-from propfirm.trading.orders import OrderRequest, OrderType, Side
+from propfirm.trading.orders import OrderRequest, OrderType, Side, Trail
 
 ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 Ident = Annotated[str, Path(pattern=ID_PATTERN)]
@@ -72,14 +85,26 @@ class _Body(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class TrailBody(_Body):
+    """A trailing level's distance and step, in whole points (both >= 1)."""
+
+    distance: StrictInt
+    step: StrictInt
+
+    def trail(self) -> Trail:
+        return Trail(self.distance, self.step)
+
+
 class OrderBody(_Body):
     symbol: str
     side: Literal["buy", "sell"]
-    type: Literal["market", "limit", "stop"]
+    type: Literal["market", "limit", "stop", "trailing"]
     volume: StrictInt
     level: StrictInt | None = None
     stop_loss: StrictInt | None = None
     take_profit: StrictInt | None = None
+    trail: TrailBody | None = None  # trailing orders only
+    trailing_stop: TrailBody | None = None
     order_id: Annotated[str, StringConstraints(pattern=ID_PATTERN)] | None = None
 
 
@@ -234,6 +259,8 @@ def create_app(
                 level=body.level,
                 stop_loss=body.stop_loss,
                 take_profit=body.take_profit,
+                trail=body.trail.trail() if body.trail else None,
+                trailing_stop=body.trailing_stop.trail() if body.trailing_stop else None,
             )
             return PlaceOrder(request, ts)
 
@@ -259,5 +286,18 @@ def create_app(
             deps,
             lambda ts: ModifyStops(account_id, position_id, body.stop_loss, body.take_profit, ts),
         )
+
+    @app.put("/accounts/{account_id}/positions/{position_id}/trailing-stop")
+    async def set_trailing_stop(
+        deps: D, account_id: Ident, position_id: Ident, body: TrailBody
+    ) -> JSONResponse:
+        """Set or replace the trailing stop; it starts from the current exit price."""
+        return await submit(
+            deps, lambda ts: SetTrailingStop(account_id, position_id, body.trail(), ts)
+        )
+
+    @app.delete("/accounts/{account_id}/positions/{position_id}/trailing-stop")
+    async def remove_trailing_stop(deps: D, account_id: Ident, position_id: Ident) -> JSONResponse:
+        return await submit(deps, lambda ts: SetTrailingStop(account_id, position_id, None, ts))
 
     return app

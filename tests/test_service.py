@@ -17,6 +17,7 @@ from propfirm.journal.inputs import (
     Input,
     ModifyStops,
     PlaceOrder,
+    SetTrailingStop,
 )
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import load_policy
@@ -26,7 +27,7 @@ from propfirm.service.gateway import Outcome
 from propfirm.service.jsonview import view
 from propfirm.service.scheduler import schedule
 from propfirm.service.setup import development_setup
-from propfirm.trading.orders import OrderType, Position, Side
+from propfirm.trading.orders import OrderType, Position, Side, Trail
 
 ENV = {"DATABASE_URL": "postgresql://u:p@h/db", "VALKEY_URL": "redis://h:6379/0"}
 NOW = 1_790_000_000_000
@@ -205,7 +206,34 @@ def test_close_and_stops() -> None:
     ]
 
 
+def test_trailing_order_and_trailing_stops() -> None:
+    g = FakeGateway()
+    body = {
+        "symbol": "EUR/USD",
+        "side": "sell",
+        "type": "trailing",
+        "volume": 10,
+        "trail": {"distance": 50, "step": 5},
+        "trailing_stop": {"distance": 80, "step": 1},
+    }
+    assert call(g, "POST", "/accounts/A/orders", body).json()["status"] == "done"
+    call(g, "PUT", "/accounts/A/positions/p1/trailing-stop", {"distance": 30, "step": 2})
+    call(g, "DELETE", "/accounts/A/positions/p1/trailing-stop")
+    placed, set_stop, removed = g.sent
+    assert isinstance(placed, PlaceOrder)
+    request = placed.request
+    assert (request.order_type, request.side, request.level) == (
+        OrderType.TRAILING,
+        Side.SELL,
+        None,
+    )
+    assert (request.trail, request.trailing_stop) == (Trail(50, 5), Trail(80, 1))
+    assert set_stop == SetTrailingStop("A", "p1", Trail(30, 2), NOW)
+    assert removed == SetTrailingStop("A", "p1", None, NOW)
+
+
 GOOD = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 10}
+TRAILING = {**GOOD, "type": "trailing", "trail": {"distance": 50, "step": 1}}
 
 
 @pytest.mark.parametrize(
@@ -221,11 +249,21 @@ GOOD = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 10}
         ("/accounts/A/orders", {**GOOD, "order_id": "bad id!"}),
         ("/accounts/A!/orders", GOOD),  # bad account id
         ("/accounts/A/positions/p1/stops", {"stop_loss": 0.5, "take_profit": None}),
+        ("/accounts/A/orders", {**TRAILING, "trail": None}),  # trailing without a trail
+        ("/accounts/A/orders", {**TRAILING, "level": 110_000}),  # trailing with a level
+        ("/accounts/A/orders", {**GOOD, "trail": {"distance": 50, "step": 1}}),  # not trailing
+        ("/accounts/A/orders", {**TRAILING, "trail": {"distance": 0, "step": 1}}),
+        ("/accounts/A/orders", {**TRAILING, "trail": {"distance": 50}}),  # no step
+        ("/accounts/A/orders", {**TRAILING, "trail": {"distance": 50, "step": 1.0}}),
+        ("/accounts/A/orders", {**GOOD, "trailing_stop": {"distance": 5, "step": 0}}),
+        ("/accounts/A/positions/p1/trailing-stop", {"distance": 50, "step": 0}),
+        ("/accounts/A/positions/p1/trailing-stop", {"distance": "50", "step": 1}),
+        ("/accounts/A/positions/p!/trailing-stop", {"distance": 50, "step": 1}),
     ],
 )
 def test_requests_the_api_refuses(url: str, body: dict[str, Any]) -> None:
     g = FakeGateway()
-    method = "PUT" if url.endswith("/stops") else "POST"
+    method = "PUT" if url.endswith(("/stops", "/trailing-stop")) else "POST"
     assert call(g, method, url, body).status_code == 422
     assert g.sent == []
 
