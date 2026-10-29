@@ -4,6 +4,8 @@ records the rule-set version (`rsv_id`) it was decided under."""
 from dataclasses import dataclass
 from enum import StrEnum
 
+from propfirm.trading.events import CloseReason
+
 
 class BreachReason(StrEnum):
     DAILY_LOSS = "daily_loss"
@@ -51,4 +53,21 @@ class StagePassed:
     rsv_id: str
 
 
-type RuleEvent = DayStarted | AccountBreached | StagePassed
+@dataclass(frozen=True, slots=True)
+class NewsExitViolation:
+    """A stop-loss, take-profit or trailing stop closed a position inside a
+    news trade block on its symbol (D15). The fill stands; `excluded_cents`
+    is the profit kept out of the profit target (0 for a loss, or when the
+    rule set does not exclude it)."""
+
+    ts: int
+    account_id: str
+    close_id: str
+    symbol: str
+    reason: CloseReason
+    pnl_cents: int
+    excluded_cents: int
+    rsv_id: str
+
+
+type RuleEvent = DayStarted | AccountBreached | StagePassed | NewsExitViolation

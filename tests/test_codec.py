@@ -7,12 +7,24 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from propfirm.journal.codec import Codec, CodecError, digest
-from propfirm.journal.inputs import InputRejected, InputRejectReason, Malformed, PlaceOrder
+from propfirm.journal.inputs import (
+    InputRejected,
+    InputRejectReason,
+    Malformed,
+    PlaceOrder,
+    SetTrailingStop,
+)
 from propfirm.journal.machine import CODEC, PriceRef, price_ref
 from propfirm.ledger import Entry, Posting
 from propfirm.market.guards import FreezeReason, GuardConfig
 from propfirm.market.types import PriceUpdate
-from propfirm.rules.events import AccountBreached, BreachReason, DayStarted, StagePassed
+from propfirm.rules.events import (
+    AccountBreached,
+    BreachReason,
+    DayStarted,
+    NewsExitViolation,
+    StagePassed,
+)
 from propfirm.trading.events import (
     AccountOpened,
     CloseReason,
@@ -28,8 +40,10 @@ from propfirm.trading.events import (
     StopsModified,
     SymbolFrozen,
     SymbolResumed,
+    TrailingLevelMoved,
+    TrailingStopSet,
 )
-from propfirm.trading.orders import OrderRequest, OrderType, Side
+from propfirm.trading.orders import OrderRequest, OrderType, Side, Trail
 from tests.journal_rig import engine_setup
 
 U = PriceUpdate("EUR/USD", 7, 1_790_000_000_000, 1_790_000_000_150, 110_123)
@@ -41,11 +55,28 @@ U_TEXT = (
 SAMPLES: list[object] = [
     U,
     PlaceOrder(OrderRequest("o1", "A", "EUR/USD", Side.BUY, OrderType.LIMIT, 100, 109_000), 5),
+    PlaceOrder(
+        OrderRequest(
+            "o2",
+            "A",
+            "EUR/USD",
+            Side.SELL,
+            OrderType.TRAILING,
+            100,
+            stop_loss=111_000,
+            trail=Trail(50, 5),
+            trailing_stop=Trail(80, 1),
+        ),
+        6,
+    ),
+    SetTrailingStop("A", "o1", Trail(30, 2), 7),
+    SetTrailingStop("A", "o1", None, 8),
     Malformed('{"x":"\\u00e9"}', "bad"),
     InputRejected(3, "OpenAccount", "A", InputRejectReason.DUPLICATE_ACCOUNT),
     AccountOpened(1, "A", 500_000, "v"),
     OrderRejected(1, "o1", "A", RejectReason.NEWS_WINDOW, "v"),
     OrderPlaced(1, "o1", "A", "EUR/USD", Side.SELL, OrderType.STOP, 10, 109_000),
+    OrderPlaced(1, "o2", "A", "EUR/USD", Side.BUY, OrderType.TRAILING, 10, 110_055, Trail(50, 1)),
     OrderCancelled(1, "o1", "A", None),
     OrderCancelled(1, "o1", "A", RejectReason.ACCOUNT_LOCKED),
     PositionOpened(1, "o1", "A", "EUR/USD", Side.BUY, 10, OrderType.MARKET, 1, 2, 3, 4, 5, "v"),
@@ -53,6 +84,9 @@ SAMPLES: list[object] = [
         1, "o1", "o1#1", "A", "X", Side.BUY, 1, 2, 3, 4, 5, 6, -7, 0, CloseReason.BREACH, "v"
     ),
     StopsModified(1, "o1", "A", None, 120_000),
+    TrailingStopSet(1, "o1", "A", Trail(100, 1), 109_895, 3),
+    TrailingStopSet(1, "o1", "A", None, None, 4),
+    TrailingLevelMoved(1, "o1", "A", 109_900, 5),
     SymbolFrozen(1, "EUR/USD", FreezeReason.OUTAGE),
     SymbolResumed(1, "EUR/USD"),
     FeedGap(1, "EUR/USD", 3, 4),
@@ -63,6 +97,7 @@ SAMPLES: list[object] = [
         1, "A", (BreachReason.DAILY_LOSS, BreachReason.MAX_LOSS), -1, 2, 3, "lite-s1-v1"
     ),
     StagePassed(1, "A", 2, 4, "lite-s1-v1"),
+    NewsExitViolation(1, "A", "o1/c1", "EUR/USD", CloseReason.TAKE_PROFIT, 700, 700, "lite-s1-v1"),
     Entry("e1", 1, "trade_pnl", (Posting("a", 5), Posting("b", -5)), "o1"),
     price_ref(U),
     GuardConfig(gap_threshold_ms={"XAU/USD": 9_000, "EUR/USD": 7_000}),

@@ -21,7 +21,7 @@ from propfirm._checks import require_int, require_text
 from propfirm.market.types import PriceUpdate
 from propfirm.rules.products import RuleSet
 from propfirm.rules.supervisor import Event, RuleSupervisor
-from propfirm.trading.orders import OrderRequest
+from propfirm.trading.orders import OrderRequest, Trail
 
 
 def _ts(value: int) -> None:
@@ -107,6 +107,23 @@ class ModifyStops:
 
 
 @dataclass(frozen=True, slots=True)
+class SetTrailingStop:
+    """Set, replace or (trail None) remove a position's trailing stop."""
+
+    account_id: str
+    position_id: str
+    trail: Trail | None
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("account_id", self.account_id)
+        require_text("position_id", self.position_id)
+        if self.trail is not None and not isinstance(self.trail, Trail):
+            raise TypeError("trail must be a Trail or None")
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
 class Advance:
     """Time passes with no other input (a clock tick): runs the gap guard
     and the 17:00 New York day roll."""
@@ -155,6 +172,7 @@ type Input = (
     | CancelOrder
     | ClosePosition
     | ModifyStops
+    | SetTrailingStop
     | Advance
     | Outage
     | Malformed
@@ -167,6 +185,7 @@ INPUT_TYPES = (
     CancelOrder,
     ClosePosition,
     ModifyStops,
+    SetTrailingStop,
     Advance,
     Outage,
     Malformed,
@@ -234,6 +253,10 @@ def apply(
                 sup.modify_stops(
                     item.account_id, item.position_id, item.stop_loss, item.take_profit, item.ts
                 )
+            )
+        case SetTrailingStop():
+            return list(
+                sup.set_trailing_stop(item.account_id, item.position_id, item.trail, item.ts)
             )
         case Advance():
             return list(sup.advance(item.ts))

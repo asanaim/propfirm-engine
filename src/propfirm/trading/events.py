@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from propfirm.market.guards import FreezeReason
-from propfirm.trading.orders import OrderType, Side
+from propfirm.trading.orders import OrderType, Side, Trail
 
 
 class RejectReason(StrEnum):
@@ -35,6 +35,7 @@ class CloseReason(StrEnum):
     CLIENT = "client"
     STOP_LOSS = "stop_loss"
     TAKE_PROFIT = "take_profit"
+    TRAILING_STOP = "trailing_stop"
     BREACH = "breach"
 
 
@@ -64,7 +65,8 @@ class OrderPlaced:
     side: Side
     order_type: OrderType
     volume: int
-    level: int
+    level: int  # a trailing order's starting level
+    trail: Trail | None = None  # trailing orders only
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +124,33 @@ class StopsModified:
 
 
 @dataclass(frozen=True, slots=True)
+class TrailingStopSet:
+    """A position's trailing stop was set, changed or (trail None) removed.
+    `level` is the stop price it starts from; `price_seq` the update it was
+    computed from."""
+
+    ts: int
+    position_id: str
+    account_id: str
+    trail: Trail | None
+    level: int | None
+    price_seq: int
+
+
+@dataclass(frozen=True, slots=True)
+class TrailingLevelMoved:
+    """A trailing level followed the market. `ref` is the pending order id
+    (trailing entry) or the position id (trailing stop); `price_seq` is the
+    feed update that moved it."""
+
+    ts: int
+    ref: str
+    account_id: str
+    level: int
+    price_seq: int
+
+
+@dataclass(frozen=True, slots=True)
 class SymbolFrozen:
     ts: int
     symbol: str
@@ -167,6 +196,8 @@ type EngineEvent = (
     | PositionOpened
     | PositionClosed
     | StopsModified
+    | TrailingStopSet
+    | TrailingLevelMoved
     | SymbolFrozen
     | SymbolResumed
     | FeedGap

@@ -28,6 +28,7 @@ from propfirm.journal.inputs import (
     OpenAccount,
     Outage,
     PlaceOrder,
+    SetTrailingStop,
     apply,
 )
 from propfirm.journal.machine import Machine, Record, StoredRecord, record_hash, source_key
@@ -42,7 +43,7 @@ from propfirm.rules.news import EventScope, RestrictedEvent, trade_blocks
 from propfirm.rules.products import RULESETS
 from propfirm.rules.supervisor import RuleSupervisor
 from propfirm.trading.instruments import default_instruments
-from propfirm.trading.orders import OrderRequest, OrderType, Side
+from propfirm.trading.orders import OrderRequest, OrderType, Side, Trail
 from tests.rules_rig import ny
 
 T0 = ny(2026, 10, 28, 16, 58)  # two minutes before the reset
@@ -141,6 +142,10 @@ def command(sup: RuleSupervisor, rng: random.Random, n: int, now: int) -> Input:
             return ModifyStops(account, position.position_id, max(1, sl), None, ts)
         volume = None if roll == 1 else max(1, position.volume // 2)
         return ClosePosition(account, position.position_id, ts, volume)
+    if positions and roll == 6:
+        position = rng.choice(positions)
+        trail = rng.choice([None, Trail(rng.randrange(20, 300), rng.choice([1, 10]))])
+        return SetTrailingStop(account, position.position_id, trail, ts)
     if pending and roll == 4:
         return CancelOrder(account, rng.choice(pending).request.order_id, ts)
     if roll == 5:
@@ -148,15 +153,20 @@ def command(sup: RuleSupervisor, rng: random.Random, n: int, now: int) -> Input:
     symbol = rng.choice(SYMS)
     quote = engine.quote(symbol)
     mid = quote.mid if quote else 1_000
-    order_type = rng.choice([OrderType.MARKET, OrderType.MARKET, OrderType.LIMIT, OrderType.STOP])
+    order_type = rng.choice(
+        [OrderType.MARKET, OrderType.MARKET, OrderType.LIMIT, OrderType.STOP, OrderType.TRAILING]
+    )
     side = rng.choice([Side.BUY, Side.SELL])
     level = None
-    if order_type is not OrderType.MARKET:
+    trail = None
+    if order_type is OrderType.TRAILING:
+        trail = Trail(rng.randrange(20, 200), 1)
+    elif order_type is not OrderType.MARKET:
         offset = rng.randrange(1, 200)
         below = (side is Side.BUY) == (order_type is OrderType.LIMIT)
         level = max(1, mid - offset if below else mid + offset)
     volume = rng.choice([10, 50, 100, 200])
-    request = OrderRequest(f"o{n}", account, symbol, side, order_type, volume, level)
+    request = OrderRequest(f"o{n}", account, symbol, side, order_type, volume, level, trail=trail)
     return PlaceOrder(request, ts)
 
 

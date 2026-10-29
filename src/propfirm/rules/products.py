@@ -20,6 +20,11 @@ Decisions taken here:
 - [DEFAULT] On 1-Step the consistency rule is also a pass condition for the
   evaluation, over the whole stage (D19 window open). On funded 1-Step and
   Instant it gates payouts, which come later.
+- [DEFAULT] D15 consequence: profit made by a stop-loss, take-profit or
+  trailing stop that closes inside a news trade block is excluded from the
+  profit target; losses stand, and the violation is not a breach
+  (`exclude_news_exit_profit`). Payout figures exclude it too once payouts
+  exist.
 """
 
 from dataclasses import dataclass
@@ -70,6 +75,7 @@ class RuleSet:
     target_basis: TargetBasis = TargetBasis.CLOSED_BALANCE
     flat_to_pass: bool = True
     tie_rule: TieRule = TieRule.BREACH_WINS
+    exclude_news_exit_profit: bool = True
 
     def __post_init__(self) -> None:
         require_text("rsv_id", self.rsv_id)

@@ -60,6 +60,16 @@ engine replays the journal and checks that every record comes out identical.
 Prices are kept in a separate, purgeable table and referenced by digest.
 See `src/propfirm/journal/`.
 
+## Trailing orders and news exits
+
+Trailing stops on positions and trailing entries (trailing buy, trailing
+sell) run in the engine, with distance and step set by the trader in points
+(Outline CC-3, D43); every level move is an event and replays identically.
+Stop-loss, take-profit and trailing-stop exits inside a news block execute,
+are recorded as violations, and their profit is kept out of the profit
+target (D15). See `src/propfirm/trading/engine.py` and
+`src/propfirm/rules/supervisor.py`.
+
 ## Conventions
 
 See `CLAUDE.md`. In short: money is integer cents, prices are integer

@@ -13,6 +13,11 @@ Every input goes through `_run`:
    max loss), then breach and pass in the order the tie rule sets (D11:
    breach wins).
 
+News exits (D15): a stop-loss, take-profit or trailing stop that closes a
+position inside a news trade block on its symbol is recorded as a
+`NewsExitViolation`. Its profit (never its loss) is kept out of the amount
+measured against the profit target when the rule set says so.
+
 Floors (all in integer cents, compared at-or-below):
 - daily floor = daily base - daily limit
 - static max floor = initial balance - max loss
@@ -38,13 +43,14 @@ from propfirm.rules.events import (
     AccountStatus,
     BreachReason,
     DayStarted,
+    NewsExitViolation,
     RuleEvent,
     StagePassed,
 )
 from propfirm.rules.products import MaxLossKind, RuleSet, TargetBasis, TieRule
 from propfirm.trading.engine import TradingEngine
 from propfirm.trading.events import CloseReason, EngineEvent, PositionClosed, PositionOpened
-from propfirm.trading.orders import OrderRequest
+from propfirm.trading.orders import OrderRequest, Trail
 
 type Event = EngineEvent | RuleEvent
 
@@ -59,6 +65,7 @@ class _State:
     high_water: int
     trading_days: set[int] = field(default_factory=set)  # day ids with an opening fill
     day_pnl: dict[int, int] = field(default_factory=dict)  # realized cents per day id
+    news_excluded: int = 0  # cents of news-exit profit kept out of the target (D15)
 
 
 class RuleSupervisor:
@@ -123,6 +130,13 @@ class RuleSupervisor:
             lambda: self._engine.modify_stops(account_id, position_id, stop_loss, take_profit, ts),
         )
 
+    def set_trailing_stop(
+        self, account_id: str, position_id: str, trail: Trail | None, ts: int
+    ) -> list[Event]:
+        return self._run(
+            ts, lambda: self._engine.set_trailing_stop(account_id, position_id, trail, ts)
+        )
+
     # --- queries ------------------------------------------------------------
 
     @property
@@ -152,6 +166,10 @@ class RuleSupervisor:
             return True
         return _consistent(state.day_pnl, share)
 
+    def news_excluded(self, account_id: str) -> int:
+        """Cents of news-exit profit kept out of the profit target (D15)."""
+        return self._state(account_id).news_excluded
+
     # --- internals ----------------------------------------------------------
 
     def _state(self, account_id: str) -> _State:
@@ -167,7 +185,7 @@ class RuleSupervisor:
         events = self._roll(ts)
         engine_events = action()
         events += engine_events
-        self._record(engine_events)
+        events += self._record(engine_events)
         for state in self._active():
             events += self._check(state)
         return events
@@ -200,8 +218,11 @@ class RuleSupervisor:
             boundary = self._clock.next_boundary(boundary)
         return events
 
-    def _record(self, events: list[EngineEvent]) -> None:
+    def _record(self, events: list[EngineEvent]) -> list[Event]:
+        """Update trading days and day P&L from the engine's fills; return
+        the news-exit violations among them."""
         assert self._day is not None
+        violations: list[Event] = []
         for event in events:
             state = self._accounts.get(getattr(event, "account_id", ""))
             if state is None:
@@ -210,6 +231,23 @@ class RuleSupervisor:
                 state.trading_days.add(self._day)
             elif isinstance(event, PositionClosed):
                 state.day_pnl[self._day] = state.day_pnl.get(self._day, 0) + event.pnl_cents
+                if event.reason in _NEWS_EXITS and self._engine.is_blocked(event.symbol):
+                    violations.append(self._news_exit(state, event))
+        return violations
+
+    def _news_exit(self, state: _State, close: PositionClosed) -> NewsExitViolation:
+        excluded = max(close.pnl_cents, 0) if state.rules.exclude_news_exit_profit else 0
+        state.news_excluded += excluded
+        return NewsExitViolation(
+            close.ts,
+            state.account_id,
+            close.close_id,
+            close.symbol,
+            close.reason,
+            close.pnl_cents,
+            excluded,
+            state.rules.rsv_id,
+        )
 
     def _check(self, state: _State) -> list[Event]:
         equity = self._engine.equity(state.account_id)
@@ -262,6 +300,7 @@ class RuleSupervisor:
         account_id = state.account_id
         balance = self._engine.balance(account_id)
         measured = balance if rules.target_basis is TargetBasis.CLOSED_BALANCE else equity
+        measured -= state.news_excluded
         target = state.initial_balance + rules.amount(rules.profit_target, state.initial_balance)
         if measured < target or len(state.trading_days) < rules.min_trading_days:
             return []
@@ -282,6 +321,9 @@ class RuleSupervisor:
         events += self._engine.lock_account(account_id, now)
         state.status = AccountStatus.PASSED
         return events
+
+
+_NEWS_EXITS = frozenset({CloseReason.STOP_LOSS, CloseReason.TAKE_PROFIT, CloseReason.TRAILING_STOP})
 
 
 def _consistent(day_pnl: dict[int, int], share: Fraction) -> bool:

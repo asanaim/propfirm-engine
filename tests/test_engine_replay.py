@@ -18,9 +18,9 @@ from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import Quote
 from propfirm.market.synthetic import Delay, Silence, SyntheticConfig, generate
 from propfirm.trading.engine import TradingEngine
-from propfirm.trading.events import EngineEvent, PositionClosed, PositionOpened
+from propfirm.trading.events import CloseReason, EngineEvent, PositionClosed, PositionOpened
 from propfirm.trading.instruments import default_instruments
-from propfirm.trading.orders import OrderRequest, OrderType, Side
+from propfirm.trading.orders import OrderRequest, OrderType, Side, Trail
 
 T0 = 1_790_000_000_000
 SYMS = ("EUR/USD", "USD/JPY", "XAU/USD", "BTC/USD")
@@ -94,7 +94,7 @@ def random_command(
 ) -> list[EngineEvent]:
     account = rng.choice(list(FUNDING))
     ts = now + rng.randrange(50)
-    action = rng.randrange(6)
+    action = rng.randrange(7)
     positions = engine.positions(account)
     if action == 4 and positions:
         position = rng.choice(positions)
@@ -107,15 +107,20 @@ def random_command(
         sl = rng.choice([None, mid - rng.randrange(1, 500), mid + rng.randrange(1, 500)])
         tp = rng.choice([None, mid - rng.randrange(1, 500), mid + rng.randrange(1, 500)])
         return engine.modify_stops(account, position.position_id, sl, tp, ts)
+    if action == 6 and positions:
+        position = rng.choice(positions)
+        trail = rng.choice([None, random_trail(rng)])
+        return engine.set_trailing_stop(account, position.position_id, trail, ts)
     pending = engine.pending_orders(account)
     if action == 3 and pending:
         return engine.cancel_order(account, rng.choice(pending).request.order_id, ts)
     symbol = rng.choice(SYMS)
     side = rng.choice([Side.BUY, Side.SELL])
-    order_type = rng.choice([OrderType.MARKET, OrderType.LIMIT, OrderType.STOP])
+    order_type = rng.choice([OrderType.MARKET, OrderType.LIMIT, OrderType.STOP, OrderType.TRAILING])
     quote = engine.quote(symbol)
     mid = quote.mid if quote else 1_000
-    level = None if order_type is OrderType.MARKET else mid + rng.randrange(-300, 301)
+    has_level = order_type in (OrderType.LIMIT, OrderType.STOP)
+    level = mid + rng.randrange(-300, 301) if has_level else None
     if level is not None and level < 1:
         level = 1
     sl = rng.choice([None, mid - rng.randrange(1, 600), mid + rng.randrange(1, 600)])
@@ -123,8 +128,16 @@ def random_command(
     sl = sl if sl is None or sl >= 1 else None
     tp = tp if tp is None or tp >= 1 else None
     volume = rng.choice([0, 1, 10, 100, 1_000, 6_000])
-    request = OrderRequest(f"o{n}", account, symbol, side, order_type, volume, level, sl, tp)
+    trail = random_trail(rng) if order_type is OrderType.TRAILING else None
+    trailing_stop = rng.choice([None, random_trail(rng)])
+    request = OrderRequest(
+        f"o{n}", account, symbol, side, order_type, volume, level, sl, tp, trail, trailing_stop
+    )
     return engine.place_order(request, ts)
+
+
+def random_trail(rng: random.Random) -> Trail:
+    return Trail(rng.randrange(1, 400), rng.choice([1, 1, 5, 25]))
 
 
 @settings(max_examples=12, deadline=None)
@@ -148,4 +161,8 @@ def test_sessions_actually_trade() -> None:
         "SymbolFrozen",
         "SymbolResumed",
         "StaleUpdate",
+        "TrailingStopSet",
+        "TrailingLevelMoved",
     } <= kinds
+    closes = {e.reason for e in run_session(7).events if isinstance(e, PositionClosed)}
+    assert CloseReason.TRAILING_STOP in closes

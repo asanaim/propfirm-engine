@@ -45,6 +45,7 @@ from propfirm.journal.inputs import (
     OpenAccount,
     Outage,
     PlaceOrder,
+    SetTrailingStop,
     apply,
 )
 from propfirm.journal.setup import EngineSetup, SetupError, build
@@ -53,7 +54,13 @@ from propfirm.market.guards import FreezeReason, GuardConfig
 from propfirm.market.spread import NewsWindow, SpreadConfig
 from propfirm.market.symbols import AssetClass, SymbolSpec
 from propfirm.market.types import PriceUpdate
-from propfirm.rules.events import AccountBreached, BreachReason, DayStarted, StagePassed
+from propfirm.rules.events import (
+    AccountBreached,
+    BreachReason,
+    DayStarted,
+    NewsExitViolation,
+    StagePassed,
+)
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage, TargetBasis, TieRule
 from propfirm.rules.supervisor import RuleSupervisor
 from propfirm.trading.events import (
@@ -71,11 +78,13 @@ from propfirm.trading.events import (
     StopsModified,
     SymbolFrozen,
     SymbolResumed,
+    TrailingLevelMoved,
+    TrailingStopSet,
 )
 from propfirm.trading.instruments import InstrumentSpec
-from propfirm.trading.orders import OrderRequest, OrderType, Side
+from propfirm.trading.orders import OrderRequest, OrderType, Side, Trail
 
-CHAIN_VERSION = "propfirm-journal-v1"
+CHAIN_VERSION = "propfirm-journal-v2"  # v2: trailing orders, news exit violations
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _SOURCE_ID = re.compile(r"(0|[1-9][0-9]*)-(0|[1-9][0-9]*)")
 
@@ -116,11 +125,13 @@ CODEC = Codec(
         CancelOrder,
         ClosePosition,
         ModifyStops,
+        SetTrailingStop,
         Advance,
         Outage,
         Malformed,
         PriceRef,
         OrderRequest,
+        Trail,
         InputRejected,
         InputRejectReason,
         # engine and rule events
@@ -131,6 +142,8 @@ CODEC = Codec(
         PositionOpened,
         PositionClosed,
         StopsModified,
+        TrailingStopSet,
+        TrailingLevelMoved,
         SymbolFrozen,
         SymbolResumed,
         FeedGap,
@@ -139,6 +152,7 @@ CODEC = Codec(
         DayStarted,
         AccountBreached,
         StagePassed,
+        NewsExitViolation,
         # ledger
         Entry,
         Posting,

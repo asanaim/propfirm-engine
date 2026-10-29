@@ -14,6 +14,7 @@ from propfirm.journal.inputs import (
     Malformed,
     ModifyStops,
     OpenAccount,
+    SetTrailingStop,
     apply,
 )
 from propfirm.journal.machine import CODEC, Machine, PriceRef, price_ref, source_key
@@ -78,6 +79,8 @@ def test_refused_inputs_leave_state_unchanged(
         lambda: Advance(-1),
         lambda: ModifyStops("A", "p", 0, None, T0),
         lambda: ClosePosition("A", "p", T0, True),
+        lambda: SetTrailingStop("A", "p", 50, T0),  # type: ignore[arg-type]
+        lambda: SetTrailingStop("A", " p", None, T0),
     ],
 )
 def test_inputs_validate_themselves(build_bad: object) -> None:

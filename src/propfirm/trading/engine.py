@@ -9,7 +9,8 @@ Fill rules:
   latest applied price update when the engine receives it.
 - [CONFIRMED] A pending order triggers when the bid (sells) or ask (buys)
   crosses its level: buy limit ask <= level, buy stop ask >= level, sell
-  limit bid >= level, sell stop bid <= level.
+  limit bid >= level, sell stop bid <= level. A trailing entry triggers like
+  a stop order at its current level.
 - [DEFAULT] A triggered order, stop-loss or take-profit fills at the bid or
   ask of the update that triggered it. When a price gaps past a level, that
   is the actual price, not the level; no other slippage model in v1.
@@ -17,17 +18,40 @@ Fill rules:
 - Every fill records the feed update it used: sequence number, source time
   and receive time.
 
+Trailing orders (CC-3, D43). The trader sets distance d and step s in
+points [CONFIRMED]. Each level follows the price its order would trade at:
+the bid for sells, the ask for buys [DEFAULT].
+- Trailing stop on a buy position: highest bid since it was set minus d;
+  closes the position when the bid falls to it. On a sell position: lowest
+  ask plus d; closes when the ask rises to it.
+- Trailing buy: lowest ask since placement plus d; fills when the ask rises
+  to it. Trailing sell: highest bid minus d; fills when the bid falls to it.
+- A level moves only towards the market, and only when the new value beats
+  it by at least s; every move is a `TrailingLevelMoved` event naming the
+  update that caused it. Each applied update first moves levels, then
+  checks triggers.
+- A fixed stop-loss can sit beside a trailing stop; the first reached
+  closes the position (both on one update: the stop-loss is named).
+- [DEFAULT] A trailing entry's fixed stop-loss and take-profit are checked
+  again when it triggers, against the exit price at the fill; if they are
+  then on the wrong side the order is cancelled (INVALID_STOPS), because
+  its fill price was unknown when it was placed.
+- A level that would start below 1 point is rejected (INVALID_LEVEL for an
+  entry, INVALID_STOPS for a stop).
+
 Guards (acceptance test 5): while a symbol is frozen it takes no new orders,
-closes or stop changes; its pending orders, stop-losses and take-profits are
-held, because frozen prices are never applied. Cancelling a pending order is
+closes or stop changes; its pending orders, stop-losses, take-profits and
+trailing levels are held, because frozen prices are never applied. Cancelling a pending order is
 always allowed. On the first fresh update the symbol resumes and anything that
 update crosses fills at its price.
 
 News trade blocks (Confirmed Configuration CC-3): inside a block on an
 affected symbol no trade is opened or closed: market orders, new pending
 orders and manual closes are rejected, and pending orders do not trigger
-(they are held until the block ends) [DEFAULT]. Stop-losses and take-profits
-still execute [DEFAULT]. Changing stops is allowed.
+(they are held until the block ends) [DEFAULT]. Stop-losses, take-profits
+and trailing stops still execute [DEFAULT]; the rules supervisor records
+those exits as news violations (D15). Trailing levels keep moving, and
+changing stops is allowed.
 
 Rules hooks (step 5): `close_all` closes every position of an account at the
 current prices, ignoring freezes and news blocks (breach close-out), and
@@ -74,9 +98,11 @@ from propfirm.trading.events import (
     StopsModified,
     SymbolFrozen,
     SymbolResumed,
+    TrailingLevelMoved,
+    TrailingStopSet,
 )
 from propfirm.trading.instruments import InstrumentSpec, conversion_route, scaled_cap
-from propfirm.trading.orders import OrderRequest, OrderType, PendingOrder, Position, Side
+from propfirm.trading.orders import OrderRequest, OrderType, PendingOrder, Position, Side, Trail
 
 FIRM_CAPITAL = "firm:capital"
 FIRM_TRADING_PNL = "firm:trading_pnl"
@@ -189,6 +215,7 @@ class TradingEngine:
             in_news(self._news, symbol, self._now),
         )
         self._quotes[symbol] = quote
+        events.extend(self._trail(quote))
         events.extend(self._trigger_orders(quote))
         events.extend(self._trigger_stops(quote))
         return events
@@ -216,10 +243,10 @@ class TradingEngine:
                 events.append(self._reject(request.order_id, request.account_id, opened))
             else:
                 self._used_ids.add(request.order_id)
-                events.append(opened)
+                events.extend(opened)
             return events
-        assert request.level is not None
-        self._orders[request.order_id] = PendingOrder(request, self._now)
+        level = _entry_level(request, quote)
+        self._orders[request.order_id] = PendingOrder(request, self._now, level)
         self._used_ids.add(request.order_id)
         events.append(
             OrderPlaced(
@@ -230,7 +257,8 @@ class TradingEngine:
                 request.side,
                 request.order_type,
                 request.volume,
-                request.level,
+                level,
+                request.trail,
             )
         )
         return events
@@ -300,6 +328,35 @@ class TradingEngine:
             position, stop_loss=stop_loss, take_profit=take_profit
         )
         events.append(StopsModified(self._now, position_id, account_id, stop_loss, take_profit))
+        return events
+
+    def set_trailing_stop(
+        self, account_id: str, position_id: str, trail: Trail | None, ts: int
+    ) -> list[EngineEvent]:
+        """Set, replace or (trail None) remove a position's trailing stop. A new
+        stop starts from the current exit price."""
+        if trail is not None and not isinstance(trail, Trail):
+            raise TypeError("trail must be a Trail or None")
+        events = self._advance(ts)
+        position = self._positions.get(position_id)
+        if position is None or position.account_id != account_id:
+            events.append(self._reject(position_id, account_id, RejectReason.UNKNOWN_POSITION))
+            return events
+        if account_id in self._locked:
+            events.append(self._reject(position_id, account_id, RejectReason.ACCOUNT_LOCKED))
+            return events
+        if self._guards.is_frozen(position.symbol):
+            events.append(self._reject(position_id, account_id, RejectReason.SYMBOL_FROZEN))
+            return events
+        quote = self._quotes[position.symbol]
+        level = None
+        if trail is not None:
+            level = _trail_start(_exit_side(position.side), quote, trail.distance)
+            if level < 1:
+                events.append(self._reject(position_id, account_id, RejectReason.INVALID_STOPS))
+                return events
+        self._positions[position_id] = replace(position, trailing_stop=trail, trailing_level=level)
+        events.append(TrailingStopSet(self._now, position_id, account_id, trail, level, quote.seq))
         return events
 
     def close_all(self, account_id: str, ts: int, reason: CloseReason) -> list[EngineEvent]:
@@ -431,10 +488,13 @@ class TradingEngine:
             if not _valid_stops(request.side, exit_price, request.stop_loss, request.take_profit):
                 return RejectReason.INVALID_STOPS
             return None
-        assert request.level is not None
-        if not _valid_level(request.side, request.order_type, request.level, quote):
+        level = _entry_level(request, quote)
+        if request.order_type is OrderType.TRAILING:
+            if level < 1:
+                return RejectReason.INVALID_LEVEL
+        elif not _valid_level(request.side, request.order_type, level, quote):
             return RejectReason.INVALID_LEVEL
-        if not _valid_stops(request.side, request.level, request.stop_loss, request.take_profit):
+        if not _valid_stops(request.side, level, request.stop_loss, request.take_profit):
             return RejectReason.INVALID_STOPS
         return None
 
@@ -451,9 +511,24 @@ class TradingEngine:
         )
         return open_volume + pending_volume
 
-    def _open_position(self, request: OrderRequest, quote: Quote) -> PositionOpened | RejectReason:
+    def _open_position(
+        self, request: OrderRequest, quote: Quote
+    ) -> list[EngineEvent] | RejectReason:
+        """Open the position `request` asks for at `quote`: the PositionOpened
+        event, then TrailingStopSet when the request carries a trailing stop."""
         spec = self._instruments[request.symbol]
         price = quote.ask if request.side is Side.BUY else quote.bid
+        exit_price = quote.bid if request.side is Side.BUY else quote.ask
+        if request.order_type is OrderType.TRAILING and not _valid_stops(
+            request.side, exit_price, request.stop_loss, request.take_profit
+        ):
+            return RejectReason.INVALID_STOPS
+        trail = request.trailing_stop
+        trailing_level = None
+        if trail is not None:
+            trailing_level = _trail_start(_exit_side(request.side), quote, trail.distance)
+            if trailing_level < 1:
+                return RejectReason.INVALID_STOPS
         try:
             margin = self._margin_usd(spec, price, request.volume)
             free = self.free_margin(request.account_id)
@@ -473,22 +548,66 @@ class TradingEngine:
             stop_loss=request.stop_loss,
             take_profit=request.take_profit,
             margin_usd=margin,
+            trailing_stop=trail,
+            trailing_level=trailing_level,
         )
-        return PositionOpened(
-            ts=self._now,
-            position_id=request.order_id,
-            account_id=request.account_id,
-            symbol=request.symbol,
-            side=request.side,
-            volume=request.volume,
-            order_type=request.order_type,
-            price=price,
-            price_seq=quote.seq,
-            price_source_ts=quote.source_ts,
-            price_receive_ts=quote.receive_ts,
-            margin_cents=margin_cents,
-            config_version=self._version,
-        )
+        events: list[EngineEvent] = [
+            PositionOpened(
+                ts=self._now,
+                position_id=request.order_id,
+                account_id=request.account_id,
+                symbol=request.symbol,
+                side=request.side,
+                volume=request.volume,
+                order_type=request.order_type,
+                price=price,
+                price_seq=quote.seq,
+                price_source_ts=quote.source_ts,
+                price_receive_ts=quote.receive_ts,
+                margin_cents=margin_cents,
+                config_version=self._version,
+            )
+        ]
+        if trail is not None:
+            events.append(
+                TrailingStopSet(
+                    self._now,
+                    request.order_id,
+                    request.account_id,
+                    trail,
+                    trailing_level,
+                    quote.seq,
+                )
+            )
+        return events
+
+    def _trail(self, quote: Quote) -> list[EngineEvent]:
+        """Move the trailing levels on `quote`'s symbol towards the market."""
+        events: list[EngineEvent] = []
+        for order_id, pending in list(self._orders.items()):
+            request = pending.request
+            if request.symbol != quote.symbol or request.trail is None:
+                continue
+            level = _trail_next(request.side, quote, request.trail, pending.level)
+            if level is not None:
+                self._orders[order_id] = replace(pending, level=level)
+                events.append(
+                    TrailingLevelMoved(self._now, order_id, request.account_id, level, quote.seq)
+                )
+        for position in list(self._positions.values()):
+            trail = position.trailing_stop
+            if position.symbol != quote.symbol or trail is None:
+                continue
+            assert position.trailing_level is not None
+            level = _trail_next(_exit_side(position.side), quote, trail, position.trailing_level)
+            if level is not None:
+                self._positions[position.position_id] = replace(position, trailing_level=level)
+                events.append(
+                    TrailingLevelMoved(
+                        self._now, position.position_id, position.account_id, level, quote.seq
+                    )
+                )
+        return events
 
     def _trigger_orders(self, quote: Quote) -> list[EngineEvent]:
         events: list[EngineEvent] = []
@@ -496,14 +615,14 @@ class TradingEngine:
             return events  # held: no trade opens inside a news block
         for order_id, pending in list(self._orders.items()):
             request = pending.request
-            if request.symbol != quote.symbol or not _triggered(request, quote):
+            if request.symbol != quote.symbol or not _triggered(pending, quote):
                 continue
             del self._orders[order_id]
             opened = self._open_position(request, quote)
             if isinstance(opened, RejectReason):
                 events.append(OrderCancelled(self._now, order_id, request.account_id, opened))
             else:
-                events.append(opened)
+                events.extend(opened)
         return events
 
     def _trigger_stops(self, quote: Quote) -> list[EngineEvent]:
@@ -511,16 +630,23 @@ class TradingEngine:
         for position in list(self._positions.values()):
             if position.symbol != quote.symbol:
                 continue
+            trailing = position.trailing_level
             if position.side is Side.BUY:
                 price = quote.bid
                 sl_hit = position.stop_loss is not None and price <= position.stop_loss
+                trail_hit = trailing is not None and price <= trailing
                 tp_hit = position.take_profit is not None and price >= position.take_profit
             else:
                 price = quote.ask
                 sl_hit = position.stop_loss is not None and price >= position.stop_loss
+                trail_hit = trailing is not None and price >= trailing
                 tp_hit = position.take_profit is not None and price <= position.take_profit
             if sl_hit:
                 events.append(self._close(position, position.volume, quote, CloseReason.STOP_LOSS))
+            elif trail_hit:
+                events.append(
+                    self._close(position, position.volume, quote, CloseReason.TRAILING_STOP)
+                )
             elif tp_hit:
                 events.append(
                     self._close(position, position.volume, quote, CloseReason.TAKE_PROFIT)
@@ -620,9 +746,37 @@ def _guard_event(change: GuardChange) -> SymbolFrozen | SymbolResumed:
     return SymbolFrozen(change.ts, change.symbol, change.reason)
 
 
-def _triggered(request: OrderRequest, quote: Quote) -> bool:
-    level = request.level
-    assert level is not None
+def _exit_side(side: Side) -> Side:
+    """The side of the trade that closes a position opened on `side`."""
+    return Side.SELL if side is Side.BUY else Side.BUY
+
+
+def _trail_start(trade_side: Side, quote: Quote, distance: int) -> int:
+    """Where a trailing level for a trade on `trade_side` stands at `quote`:
+    `distance` below the bid for sells, above the ask for buys."""
+    return quote.bid - distance if trade_side is Side.SELL else quote.ask + distance
+
+
+def _trail_next(trade_side: Side, quote: Quote, trail: Trail, level: int) -> int | None:
+    """The trailing level after `quote`, or None when it does not move: it
+    moves only towards the market, by at least `trail.step`."""
+    candidate = _trail_start(trade_side, quote, trail.distance)
+    gain = candidate - level if trade_side is Side.SELL else level - candidate
+    return candidate if gain >= trail.step else None
+
+
+def _entry_level(request: OrderRequest, quote: Quote) -> int:
+    """A pending order's starting level: its own, or a trailing order's start."""
+    if request.order_type is OrderType.TRAILING:
+        assert request.trail is not None
+        return _trail_start(request.side, quote, request.trail.distance)
+    assert request.level is not None
+    return request.level
+
+
+def _triggered(pending: PendingOrder, quote: Quote) -> bool:
+    request = pending.request
+    level = pending.level
     if request.side is Side.BUY:
         if request.order_type is OrderType.LIMIT:
             return quote.ask <= level
