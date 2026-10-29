@@ -3,26 +3,24 @@
 Identifiers are short and fixed-width: CIF00000001 (customer), ORD00000001
 (order), ACC00000001 (trading account), from database sequences.
 
-Schema changes are numbered migrations applied once, in order, under an
-advisory lock (`migrate`); a new change is a new number, never an edit.
+Schema changes are numbered migrations (`propfirm.pgschema`); a new change
+is a new number, never an edit.
 
 Money is whole cents (BIGINT); discount shares are stored as exact text
 ("1/10"); times are UTC milliseconds supplied by the caller.
 """
 
 import json
-import re
 from dataclasses import dataclass
 from datetime import date
 from fractions import Fraction
 from typing import Any, Self
 
 import asyncpg
-from asyncpg.pool import PoolConnectionProxy
 
-type Conn = asyncpg.Connection[asyncpg.Record] | PoolConnectionProxy[asyncpg.Record]
+from propfirm.pgschema import Conn, check_schema
+from propfirm.pgschema import migrate as _migrate
 
-_NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 _LOCK_CLASS = 0x63757374  # "cust"
 
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
@@ -152,32 +150,12 @@ class AccountRecord:
 
 
 def _check(name: str) -> str:
-    if not _NAME.fullmatch(name):
-        raise ValueError(f"schema must match {_NAME.pattern}")
-    return name
+    return check_schema(name)
 
 
 async def migrate(conn: Conn, schema: str) -> list[int]:
-    """Apply the migrations not yet applied; return their numbers."""
-    s = _check(schema)
-    applied: list[int] = []
-    async with conn.transaction():
-        await conn.execute("SELECT pg_advisory_xact_lock($1, hashtext($2))", _LOCK_CLASS, s)
-        await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {s}")
-        await conn.execute(
-            f"CREATE TABLE IF NOT EXISTS {s}.schema_migrations ("
-            f"version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
-        )
-        done = {
-            r["version"] for r in await conn.fetch(f"SELECT version FROM {s}.schema_migrations")
-        }
-        for version, sql in _MIGRATIONS:
-            if version in done:
-                continue
-            await conn.execute(sql.format(s=s))
-            await conn.execute(f"INSERT INTO {s}.schema_migrations (version) VALUES ($1)", version)
-            applied.append(version)
-    return applied
+    """Apply the customer migrations not yet applied; return their numbers."""
+    return await _migrate(conn, schema, _MIGRATIONS, _LOCK_CLASS)
 
 
 def _share(text: str) -> Fraction:

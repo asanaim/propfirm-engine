@@ -5,7 +5,8 @@ Every request except the public ones (/health, /catalogue, /access) carries
 token itself: RS256 signature against the realm's published keys, issuer,
 audience ("propfirm-api"), expiry and subject. Roles come from the realm
 roles in the token: `trader` (default for self-registered users), `staff`
-and `admin`.
+(employees) and `admin`; what each role may see is decided in
+`propfirm.api.app`.
 
 Keys are fetched from the realm's JWKS address and cached; an unknown key
 id triggers one refetch (Keycloak key rotation), at most every 30 seconds,

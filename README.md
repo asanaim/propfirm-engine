@@ -47,16 +47,41 @@ This starts Keycloak (login, http://localhost:8080), the engine, the
 projector, the API on http://127.0.0.1:8000, a synthetic price feeder and
 the clock/checkpoint scheduler. Payments and screening are sandbox
 stand-ins (no money moves). Test users: `trader1@example.com` /
-`dev-trader-password` and `staff1@example.com` / `dev-staff-password`
-(see `config/keycloak/README.md`). `docker compose --profile platform down` stops
+`dev-trader-password`, `staff1@example.com` / `dev-staff-password`
+(employee) and `admin1@example.com` / `dev-admin-password` (admin); see
+`config/keycloak/README.md`. `docker compose --profile platform down` stops
 them; add `-v` to delete the journal and start over.
+
+## Who sees what
+
+| View | Role | Sees and does |
+|---|---|---|
+| Public | none | products, sizes, prices, split, discounts, trading days, consistency; minimum age |
+| Trader (portal) | `trader` | own CIF, orders and accounts; buys; trades own accounts |
+| Employee (back office) | `staff` | every account, its history and inputs; trades none; no settings |
+| Admin (back office) | `admin` | what an employee sees, plus the admin-only settings below |
+
+Admin-only settings, viewed and changed through the API (each change is
+recorded with who, when and why: `GET /admin/settings/changes`):
+
+- country gating: `GET /admin/access`, `PUT /admin/access/country-gating`
+  with `{"country_gating": true, "blocked_countries": ["BD", "IN"], "reason": "..."}`;
+- a stage's profit target, daily loss limit and drawdown limit:
+  `GET /admin/catalogue`, `PUT /admin/products/{product}/stages/{s1|s2|funded}/limits`
+  with `{"profit_target_percent": "8", "daily_loss_percent": "4",
+  "max_loss_percent": "5", "max_loss_kind": "static", "reason": "..."}`
+  (`null` target for a funded stage). The change becomes a new rule-set
+  version (`one-step-s1-v1-a1`): accounts already open keep theirs.
+
+The policy file holds the starting values of these settings; once an
+admin has changed one, the admin value wins.
 
 ## Change products, prices and switches
 
-Every number and switch the firm can change lives in `config/policy.toml`:
-product targets, drawdowns, daily loss, trading days, consistency, sizes,
-prices, split and discounts; leverage, lot caps, spreads and feed guards;
-the country-gating switch; news windows, payouts and scaling.
+Every other number and switch the firm can change lives in
+`config/policy.toml`: trading days, consistency, sizes, prices, split and
+discounts; leverage, lot caps, spreads and feed guards; the minimum age;
+news windows, payouts and scaling.
 
 1. Edit the file. For a product stage, raise its `version`; for anything
    under `[trading]`, set a new `config_version`. (Published versions never
@@ -122,7 +147,8 @@ or rules uses floating point.
 ## Phase P2 progress (gate G2: challenge lifecycle on staging, scans, restore drill)
 
 - [x] Step 1: engine service, live state, history, trading API, policy file
-- [x] Step 2: customers and access (Keycloak login, CIF, country-gating switch, checkout)
+- [x] Step 2: customers and access (Keycloak login, CIF, country-gating switch, checkout,
+  trader / employee / admin views, admin-only settings)
 - [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
 - [ ] Step 4: trader portal
 - [ ] Step 5: back office

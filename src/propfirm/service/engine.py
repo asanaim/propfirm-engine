@@ -4,8 +4,9 @@
 
 Starts the runner on PostgreSQL and the Valkey input stream (rebuild,
 anchors, price key; see `propfirm.journal.runner`), sends the inputs that
-bring the engine in line with the policy file (`policy_changes`), then
-polls until SIGTERM or SIGINT. A new journal starts from the policy file.
+bring the engine in line with the policy in force (the policy file with the
+applied admin changes; `policy_changes`), then polls until SIGTERM or
+SIGINT. A new journal starts from the policy in force.
 After each batch it republishes the live state (at most every
 `publish_ms`). A stop request finishes the current batch first, so
 nothing is half done; a crash is safe anyway (acceptance test 4).
@@ -28,6 +29,7 @@ from propfirm.service.config import ServiceConfig
 from propfirm.service.feeder import now_ms
 from propfirm.service.live import LivePublisher
 from propfirm.service.setup import policy_changes, setup_from_policy
+from propfirm.settings.store import policy_in_force
 
 
 async def run(
@@ -76,7 +78,9 @@ async def _main() -> None:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
     config = ServiceConfig.from_env(os.environ)
-    policy = load_policy(config.policy_path)
+    policy = await policy_in_force(
+        config.database_url, config.settings_schema, load_policy(config.policy_path)
+    )
     await run(config, setup_from_policy(policy), stop, policy)
 
 

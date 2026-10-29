@@ -23,11 +23,11 @@
       },
       {
         "name": "staff",
-        "description": "Back office: reads all accounts, reviews cases"
+        "description": "Employee (back office): reads every account; no settings"
       },
       {
         "name": "admin",
-        "description": "Back office administration"
+        "description": "Admin (back office): what an employee reads, and the admin-only settings"
       },
       {
         "name": "default-roles-propfirm",
@@ -188,21 +188,37 @@
         "default-roles-propfirm",
         "staff"
       ]
+    },
+    {
+      "username": "admin1@example.com",
+      "email": "admin1@example.com",
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "Admin",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-admin-password",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-propfirm",
+        "admin"
+      ]
     }
   ],
   "scopeMappings": [
     {
       "client": "portal",
       "roles": [
-        "trader",
-        "staff",
-        "admin"
+        "trader"
       ]
     },
     {
       "client": "backoffice",
       "roles": [
-        "trader",
         "staff",
         "admin"
       ]

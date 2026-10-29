@@ -29,6 +29,8 @@ from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
 from propfirm.service.setup import setup_from_policy
+from propfirm.settings.service import Settings
+from propfirm.settings.store import SettingsStore
 from tests.auth_rig import bearer, verifier
 
 pytestmark = pytest.mark.integration
@@ -45,13 +47,19 @@ class Platform:
     writer: InputStreamWriter
     live: LiveReader
     config: ServiceConfig
+    settings: Settings
     engine: Callable[[], Awaitable[None]]  # start the engine (if stopped)
     stop_engine: Callable[[], Awaitable[None]]
 
     async def call(
-        self, method: str, url: str, user: str = "u1", body: object = None
+        self,
+        method: str,
+        url: str,
+        user: str = "u1",
+        body: object = None,
+        roles: tuple[str, ...] = ("trader",),
     ) -> httpx.Response:
-        return await self.api.request(method, url, json=body, headers=bearer(user))
+        return await self.api.request(method, url, json=body, headers=bearer(user, roles))
 
 
 @asynccontextmanager
@@ -72,6 +80,7 @@ async def platform(
         schema=schema,
         read_schema=f"{schema}_r",
         customer_schema=f"{schema}_c",
+        settings_schema=f"{schema}_s",
         stream=f"test:inputs:{uuid.uuid4().hex}",
         block_ms=50,
         publish_ms=1,
@@ -81,7 +90,9 @@ async def platform(
     writer = InputStreamWriter(client, config.stream)
     gateway = Gateway(writer, pool, config.schema)
     store = await CustomerStore.open(pool, config.customer_schema)
-    checkout = Checkout(store, policy, SandboxPayments(), SandboxScreener(), gateway, wait_s)
+    records = await SettingsStore.open(pool, config.settings_schema)
+    settings = Settings(policy, records, gateway, wait_s)
+    checkout = Checkout(store, settings, SandboxPayments(), SandboxScreener(), gateway, wait_s)
     live = LiveReader(client, config.live_prefix)
     deps = Deps(
         live=live,
@@ -90,7 +101,8 @@ async def platform(
         verifier=verifier(),
         customers=store,
         checkout=checkout,
-        policy=policy,
+        policy=settings,
+        settings=settings,
         sandbox=sandbox,
         country_header="X-Country",
         today=lambda: TODAY,
@@ -106,7 +118,8 @@ async def platform(
         nonlocal task, stop
         if task is None:
             stop = asyncio.Event()
-            task = asyncio.create_task(run(config, setup_from_policy(policy), stop, policy))
+            in_force = await settings.current()  # what the engine service reads at start
+            task = asyncio.create_task(run(config, setup_from_policy(in_force), stop, in_force))
 
     async def stop_engine() -> None:
         nonlocal task
@@ -118,12 +131,12 @@ async def platform(
     if start_engine:
         await engine()
     try:
-        yield Platform(api, store, writer, live, config, engine, stop_engine)
+        yield Platform(api, store, writer, live, config, settings, engine, stop_engine)
     finally:
         await stop_engine()
         await api.aclose()
         async with pool.acquire() as conn:
-            for s in (config.read_schema, config.customer_schema):
+            for s in (config.read_schema, config.customer_schema, config.settings_schema):
                 await conn.execute(f"DROP SCHEMA IF EXISTS {s} CASCADE")
         await pool.close()
         await client.delete(config.stream)

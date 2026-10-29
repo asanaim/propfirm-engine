@@ -2,7 +2,8 @@
 
 Registration creates a CIF only after the access checks pass (outline M03,
 M04): minimum age from the date of birth, and the country gate when it is
-switched on in the policy file. A refusal is recorded without a CIF.
+switched on (policy file, or an admin change). A refusal is recorded
+without a CIF. Every request reads the policy in force (`PolicySource`).
 
 Ordering: AML screening at the first purchase (CC-6), then the price from
 the policy (pricing), then an invoice from the payment provider.
@@ -28,7 +29,7 @@ from propfirm.customers.pricing import DiscountKind, PricingError, price
 from propfirm.customers.providers import PaymentProvider, Screener
 from propfirm.customers.store import CifRecord, CustomerStore, OrderRecord
 from propfirm.journal.inputs import Input, OpenAccount
-from propfirm.policy import Policy
+from propfirm.policy import PolicySource
 from propfirm.service.gateway import Outcome
 
 
@@ -55,7 +56,7 @@ class Checkout:
     def __init__(
         self,
         store: CustomerStore,
-        policy: Policy,
+        policy: PolicySource,
         payments: PaymentProvider,
         screener: Screener,
         gateway: Submitter,
@@ -84,7 +85,7 @@ class Checkout:
         name = " ".join(form.full_name.split())
         if not name:
             raise CheckoutError("name_required", "full name is required")
-        access = self._policy.access
+        access = (await self._policy.current()).access
         reasons: list[str] = []
         age = age_on(form.date_of_birth, today)
         if age < access.min_age:
@@ -112,7 +113,7 @@ class Checkout:
         if cif.status != "registered":
             raise CheckoutError("blocked", "this customer cannot buy")
         try:
-            product = self._policy.product(product_id)
+            product = (await self._policy.current()).product(product_id)
         except KeyError:
             raise CheckoutError("unknown_product", f"no product {product_id!r}") from None
         if not await self._store.screened_clear(cif.cif):

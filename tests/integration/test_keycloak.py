@@ -15,6 +15,7 @@ pytestmark = pytest.mark.integration
 USERS = {
     "trader1@example.com": "dev-trader-password",
     "staff1@example.com": "dev-staff-password",
+    "admin1@example.com": "dev-admin-password",
 }
 
 
@@ -46,8 +47,12 @@ def test_keycloak_tokens_verify_with_roles(keycloak_url: str) -> None:
             staff = await verifier.verify(
                 await password_token(http, keycloak_url, "staff1@example.com")
             )
+            admin = await verifier.verify(
+                await password_token(http, keycloak_url, "admin1@example.com")
+            )
             assert trader.roles == {"trader"} and trader.email == "trader1@example.com"
             assert staff.roles == {"trader", "staff"}
+            assert admin.roles == {"trader", "admin"}
             wrong_audience = TokenVerifier(issuer, "someone-else", JwksKeys(certs, http))
             with pytest.raises(AuthError):
                 await wrong_audience.verify(

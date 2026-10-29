@@ -1,12 +1,20 @@
-"""The platform API: customers, checkout and trading.
+"""The platform API: customers, checkout, trading and admin settings.
 
-Access:
-- public: /health, /catalogue, /access;
-- signed in (Keycloak access token): everything else. Quotes are shown to
-  signed-in users only (Twelve Data licence: display to logged-in users);
-- an account's data and trading belong to the CIF that bought it; staff
-  and admin may read any account but trade none. Someone else's account
-  answers 404, so account ids cannot be probed.
+Views, by Keycloak realm role (the portal's tokens carry `trader`, the back
+office's carry `staff` and `admin`):
+- public: /health; /catalogue (products, sizes, prices, split, discounts,
+  trading days, consistency; no profit targets or loss limits); /access
+  (the minimum age);
+- signed in, any role: /quotes (Twelve Data licence: display to logged-in
+  users only);
+- trader: their own CIF, orders and accounts; buying; trading their own
+  accounts. Someone else's account answers 404, so ids cannot be probed;
+- employee (role `staff`): reads every account, its history and inputs;
+  trades none; no settings;
+- admin: what an employee reads, and the admin-only settings: the
+  country-gating switch and list, each stage's profit target, daily loss
+  limit and drawdown limit (view and change), and the change history.
+A signed-in request outside its role's view answers 403.
 
 Trading: every change is an input submitted to the engine, and the response
 carries the events the engine recorded for it. An engine rejection is
@@ -22,7 +30,6 @@ from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from fractions import Fraction
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
@@ -38,15 +45,28 @@ from propfirm.customers.store import (
     OrderRecord,
 )
 from propfirm.journal.inputs import CancelOrder, ClosePosition, Input, ModifyStops, PlaceOrder
-from propfirm.policy import Policy, ProductPolicy
+from propfirm.policy import (
+    Policy,
+    PolicyError,
+    PolicySource,
+    ProductPolicy,
+    parse_countries,
+    percent_text,
+)
+from propfirm.rules.products import RuleSet
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
+from propfirm.settings.overlay import CountryGating, stage_limits, to_json
+from propfirm.settings.service import Settings, SettingsError
+from propfirm.settings.store import ChangeStatus
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
 ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 Ident = Annotated[str, Path(pattern=ID_PATTERN)]
 REJECTIONS = frozenset({"OrderRejected", "InputRejected"})
-STAFF_ROLES = frozenset({"staff", "admin"})
+TRADER_ROLES = frozenset({"trader"})
+STAFF_ROLES = frozenset({"staff", "admin"})  # staff: employees
+ADMIN_ROLES = frozenset({"admin"})
 
 
 class LiveSource(Protocol):
@@ -93,7 +113,8 @@ class Deps:
     verifier: TokenVerifier
     customers: Customers
     checkout: Checkout | None = None
-    policy: Policy | None = None
+    policy: PolicySource | None = None  # the policy in force
+    settings: Settings | None = None  # admin changes
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
     clock: Callable[[], int] = now_ms
@@ -135,32 +156,52 @@ class RegisterBody(_Body):
     residence_country: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
 
 
+PRODUCT_PATTERN = r"^[a-z][a-z0-9-]{0,30}$"
+Percent = Annotated[str, StringConstraints(pattern=r"^(0|[1-9][0-9]*)(\.[0-9]+)?$")]
+Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
 class PurchaseBody(_Body):
-    product_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9-]{0,30}$")]
+    product_id: Annotated[str, StringConstraints(pattern=PRODUCT_PATTERN)]
     size_cents: StrictInt
     code: Annotated[str, StringConstraints(pattern=r"^[A-Z0-9-]{3,32}$")] | None = None
+
+
+class CountryGatingBody(_Body):
+    country_gating: bool
+    blocked_countries: list[Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]]
+    reason: Reason
+
+
+class StageLimitsBody(_Body):
+    profit_target_percent: Percent | None  # null: no target (funded stages)
+    daily_loss_percent: Percent
+    max_loss_percent: Percent  # the drawdown limit
+    max_loss_kind: Literal["static", "trailing"]
+    reason: Reason
 
 
 # --- views ----------------------------------------------------------------------------
 
 
-def percent_text(share: Fraction | None) -> str | None:
-    """A share as exact percentage text: 7/200 -> "3.5"; never a float."""
-    if share is None:
-        return None
-    value = share * 100
-    for digits in range(13):
-        scaled = value * 10**digits
-        if scaled.denominator == 1:
-            if digits == 0:
-                return str(scaled.numerator)
-            sign = "-" if scaled < 0 else ""
-            text = str(abs(scaled.numerator)).rjust(digits + 1, "0")
-            return f"{sign}{text[:-digits]}.{text[-digits:]}"
-    return f"{value.numerator}/{value.denominator}"
+def stage_view(r: RuleSet, *, limits: bool) -> dict[str, Any]:
+    """A stage; `limits` adds the admin-only profit target and loss limits."""
+    shown: dict[str, Any] = {"stage": r.stage.value, "rsv_id": r.rsv_id}
+    if limits:
+        shown |= {
+            "profit_target_percent": percent_text(r.profit_target),
+            "max_loss_percent": percent_text(r.max_loss),
+            "max_loss_kind": r.max_loss_kind.value,
+            "daily_loss_percent": percent_text(r.daily_loss),
+        }
+    return shown | {
+        "min_trading_days": r.min_trading_days,
+        "consistency_percent": percent_text(r.consistency),
+        "consistency_at_pass": r.consistency_at_pass,
+    }
 
 
-def product_view(p: ProductPolicy) -> dict[str, Any]:
+def product_view(p: ProductPolicy, *, limits: bool = False) -> dict[str, Any]:
     return {
         "id": p.id,
         "name": p.name,
@@ -169,20 +210,24 @@ def product_view(p: ProductPolicy) -> dict[str, Any]:
         "repeat_discount_percent": [percent_text(d) for d in p.repeat_discounts],
         "fee_refund_with_payout": p.fee_refund_with_payout or None,
         "sizes": [{"size_cents": s, "price_cents": c} for s, c in p.prices_cents],
-        "stages": [
-            {
-                "stage": r.stage.value,
-                "rsv_id": r.rsv_id,
-                "profit_target_percent": percent_text(r.profit_target),
-                "max_loss_percent": percent_text(r.max_loss),
-                "max_loss_kind": r.max_loss_kind.value,
-                "daily_loss_percent": percent_text(r.daily_loss),
-                "min_trading_days": r.min_trading_days,
-                "consistency_percent": percent_text(r.consistency),
-                "consistency_at_pass": r.consistency_at_pass,
-            }
-            for r in p.rule_sets
-        ],
+        "stages": [stage_view(r, limits=limits) for r in p.rule_sets],
+    }
+
+
+def change_view(status: ChangeStatus) -> dict[str, Any]:
+    change = status.change
+    kind, value = to_json(change.setting)
+    return {
+        "id": change.id,
+        "kind": kind,
+        "value": value,
+        "author": change.author,
+        "author_email": change.author_email,
+        "reason": change.reason,
+        "created_at": change.ts,
+        "status": "pending" if status.applied_at is None else "applied",
+        "applied_at": status.applied_at,
+        "journal_seq": status.journal_seq,
     }
 
 
@@ -268,10 +313,35 @@ async def _principal(deps: D, authorization: Annotated[str | None, Header()] = N
 Me = Annotated[Principal, Depends(_principal)]
 
 
-def _policy(deps: Deps) -> Policy:
+def _role(me: Principal, roles: frozenset[str]) -> None:
+    if not me.roles & roles:
+        raise HTTPException(status_code=403, detail="not in this login's view")
+
+
+async def _trader(me: Me) -> Principal:
+    _role(me, TRADER_ROLES)
+    return me
+
+
+async def _admin(me: Me) -> Principal:
+    _role(me, ADMIN_ROLES)
+    return me
+
+
+Trader = Annotated[Principal, Depends(_trader)]
+Admin = Annotated[Principal, Depends(_admin)]
+
+
+async def _policy(deps: Deps) -> Policy:
     if deps.policy is None:
         raise HTTPException(status_code=503, detail="policy not loaded")
-    return deps.policy
+    return await deps.policy.current()
+
+
+def _settings(deps: Deps) -> Settings:
+    if deps.settings is None:
+        raise HTTPException(status_code=503, detail="settings not available")
+    return deps.settings
 
 
 def _checkout(deps: Deps) -> Checkout:
@@ -290,6 +360,7 @@ async def _cif(deps: Deps, me: Principal) -> CifRecord:
 async def _may_read(deps: Deps, me: Principal, account_id: str) -> None:
     if me.roles & STAFF_ROLES:
         return
+    _role(me, TRADER_ROLES)
     await _owns(deps, me, account_id)
 
 
@@ -339,23 +410,18 @@ def create_app(
 
     @app.get("/catalogue")
     async def catalogue(deps: D) -> list[dict[str, Any]]:
-        """Products as the policy file defines them (prices, rules)."""
-        return [product_view(p) for p in _policy(deps).products]
+        """Products in force: sizes, prices and terms; no targets or loss limits."""
+        return [product_view(p) for p in (await _policy(deps)).products]
 
     @app.get("/access")
     async def access(deps: D) -> dict[str, Any]:
-        """The country-gating switch, the countries it would refuse, the minimum age."""
-        gate = _policy(deps).access
-        return {
-            "country_gating": gate.country_gating,
-            "blocked_countries": sorted(gate.blocked_countries),
-            "min_age": gate.min_age,
-        }
+        """The minimum age to register (country gating is admin-only)."""
+        return {"min_age": (await _policy(deps)).access.min_age}
 
     # --- customer ---------------------------------------------------------------------
 
     @app.get("/me")
-    async def me(deps: D, me: Me) -> dict[str, Any]:
+    async def me(deps: D, me: Trader) -> dict[str, Any]:
         cif = await _cif(deps, me)
         accounts = await deps.customers.accounts_for(cif.cif)
         orders = await deps.customers.orders_for(cif.cif)
@@ -366,7 +432,7 @@ def create_app(
         }
 
     @app.post("/me", status_code=201)
-    async def register(deps: D, me: Me, body: RegisterBody, request: Request) -> dict[str, Any]:
+    async def register(deps: D, me: Trader, body: RegisterBody, request: Request) -> dict[str, Any]:
         try:
             dob = date.fromisoformat(body.date_of_birth)
         except ValueError as exc:
@@ -386,7 +452,7 @@ def create_app(
         return cif_view(cif)
 
     @app.post("/orders", status_code=201)
-    async def purchase(deps: D, me: Me, body: PurchaseBody) -> dict[str, Any]:
+    async def purchase(deps: D, me: Trader, body: PurchaseBody) -> dict[str, Any]:
         cif = await _cif(deps, me)
         try:
             order, pay_url = await _checkout(deps).place_order(
@@ -397,7 +463,7 @@ def create_app(
         return {**order_view(order), "pay_url": pay_url}
 
     @app.get("/orders/{ord_id}")
-    async def get_order(deps: D, me: Me, ord_id: Ident) -> dict[str, Any]:
+    async def get_order(deps: D, me: Trader, ord_id: Ident) -> dict[str, Any]:
         cif = await _cif(deps, me)
         order = await deps.customers.order(ord_id)
         if order is None or order.cif != cif.cif:
@@ -405,7 +471,7 @@ def create_app(
         return order_view(order)
 
     @app.post("/dev/payments/{ord_id}/complete")
-    async def sandbox_pay(deps: D, me: Me, ord_id: Ident) -> dict[str, Any]:
+    async def sandbox_pay(deps: D, me: Trader, ord_id: Ident) -> dict[str, Any]:
         """Sandbox only: pretend the customer paid the order."""
         if not deps.sandbox:
             raise HTTPException(status_code=404, detail="not found")
@@ -454,6 +520,7 @@ def create_app(
         accounts = {e.get("account_id") for e in result.events if isinstance(e, dict)}
         accounts.discard(None)
         if not me.roles & STAFF_ROLES:
+            _role(me, TRADER_ROLES)
             if not accounts:
                 raise HTTPException(status_code=404, detail="unknown input")
             for acc in accounts:
@@ -461,7 +528,7 @@ def create_app(
         return _answer(result)
 
     @app.post("/accounts/{account_id}/orders")
-    async def place(deps: D, me: Me, account_id: Ident, body: OrderBody) -> JSONResponse:
+    async def place(deps: D, me: Trader, account_id: Ident, body: OrderBody) -> JSONResponse:
         await _owns(deps, me, account_id)
 
         def build(ts: int) -> Input:
@@ -481,13 +548,13 @@ def create_app(
         return await submit(deps, build)
 
     @app.delete("/accounts/{account_id}/orders/{order_id}")
-    async def cancel(deps: D, me: Me, account_id: Ident, order_id: Ident) -> JSONResponse:
+    async def cancel(deps: D, me: Trader, account_id: Ident, order_id: Ident) -> JSONResponse:
         await _owns(deps, me, account_id)
         return await submit(deps, lambda ts: CancelOrder(account_id, order_id, ts))
 
     @app.post("/accounts/{account_id}/positions/{position_id}/close")
     async def close(
-        deps: D, me: Me, account_id: Ident, position_id: Ident, body: CloseBody
+        deps: D, me: Trader, account_id: Ident, position_id: Ident, body: CloseBody
     ) -> JSONResponse:
         await _owns(deps, me, account_id)
         return await submit(
@@ -496,12 +563,89 @@ def create_app(
 
     @app.put("/accounts/{account_id}/positions/{position_id}/stops")
     async def stops(
-        deps: D, me: Me, account_id: Ident, position_id: Ident, body: StopsBody
+        deps: D, me: Trader, account_id: Ident, position_id: Ident, body: StopsBody
     ) -> JSONResponse:
         await _owns(deps, me, account_id)
         return await submit(
             deps,
             lambda ts: ModifyStops(account_id, position_id, body.stop_loss, body.take_profit, ts),
         )
+
+    # --- admin: settings --------------------------------------------------------------
+
+    @app.get("/admin/access")
+    async def admin_access(deps: D, me: Admin) -> dict[str, Any]:
+        """The country-gating switch and list in force, and the minimum age."""
+        gate = (await _policy(deps)).access
+        return {
+            "country_gating": gate.country_gating,
+            "blocked_countries": sorted(gate.blocked_countries),
+            "min_age": gate.min_age,
+        }
+
+    @app.put("/admin/access/country-gating")
+    async def set_country_gating(deps: D, me: Admin, body: CountryGatingBody) -> dict[str, Any]:
+        settings = _settings(deps)
+        try:
+            countries = parse_countries(body.blocked_countries, "blocked_countries")
+        except PolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        setting = CountryGating(body.country_gating, countries)
+        status = await settings.set_country_gating(
+            me.subject, me.email, setting, body.reason, deps.clock()
+        )
+        return change_view(status)
+
+    @app.get("/admin/catalogue")
+    async def admin_catalogue(deps: D, me: Admin) -> list[dict[str, Any]]:
+        """Products in force with every stage's profit target and loss limits."""
+        return [product_view(p, limits=True) for p in (await _policy(deps)).products]
+
+    @app.put("/admin/products/{product_id}/stages/{stage}/limits")
+    async def set_stage_limits(
+        deps: D,
+        me: Admin,
+        product_id: Annotated[str, Path(pattern=PRODUCT_PATTERN)],
+        stage: Literal["s1", "s2", "funded"],
+        body: StageLimitsBody,
+    ) -> JSONResponse:
+        """New limits for one stage: a new rule-set version for new accounts.
+        200 when the engine has it (in force), 202 while it waits."""
+        settings = _settings(deps)
+        try:
+            setting = stage_limits(
+                product_id,
+                stage,
+                body.profit_target_percent,
+                body.daily_loss_percent,
+                body.max_loss_percent,
+                body.max_loss_kind,
+            )
+            status, rule_set = await settings.set_stage_limits(
+                me.subject, me.email, setting, body.reason, deps.clock()
+            )
+        except PolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except SettingsError as exc:
+            http_status = {"unknown": 404, "engine_refused": 502}.get(exc.code, 422)
+            raise HTTPException(
+                status_code=http_status, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
+        applied = status.applied_at is not None
+        return JSONResponse(
+            {
+                "change": change_view(status),
+                "rsv_id": rule_set.rsv_id,
+                "status": "applied" if applied else "pending",
+            },
+            status_code=200 if applied else 202,
+        )
+
+    @app.get("/admin/settings/changes")
+    async def setting_changes(
+        deps: D, me: Admin, limit: Annotated[int, Query(ge=1, le=1_000)] = 100
+    ) -> list[dict[str, Any]]:
+        """Every admin change, latest first, with who, why and when it took effect."""
+        return [change_view(s) for s in await _settings(deps).history(limit)]
 
     return app

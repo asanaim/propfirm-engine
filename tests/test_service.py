@@ -19,7 +19,7 @@ from propfirm.journal.inputs import (
     PlaceOrder,
 )
 from propfirm.market.types import PriceUpdate
-from propfirm.policy import load_policy
+from propfirm.policy import FixedPolicy, load_policy
 from propfirm.service.config import ConfigError, ServiceConfig
 from propfirm.service.feeder import feed
 from propfirm.service.gateway import Outcome
@@ -146,7 +146,7 @@ def call(
         gateway,
         verifier(),
         CUSTOMERS,
-        policy=policy,
+        policy=None if policy is None else FixedPolicy(policy),
         clock=lambda: NOW,
         new_id=lambda: "gen1",
     )
@@ -298,28 +298,25 @@ def test_scheduler_ticks_and_checkpoints() -> None:
     assert (ticks, checkpoints) == (6, 2)
 
 
-def test_catalogue_and_access_come_from_the_policy() -> None:
+def test_public_catalogue_and_access_hide_admin_only_settings() -> None:
     policy = load_policy()
-    products = call(FakeGateway(), "GET", "/catalogue", policy=policy).json()
+    products = call(FakeGateway(), "GET", "/catalogue", policy=policy, user=None).json()
     lite = products[0]
     assert (lite["id"], lite["name"], lite["profit_split_percent"]) == ("lite", "Lite", "80")
     assert lite["sizes"][1] == {"size_cents": 1_000_000, "price_cents": 4_400}
-    s1 = lite["stages"][0]
-    assert s1 == {
+    assert lite["stages"][0] == {  # no profit target, daily loss or drawdown limit
         "stage": "s1",
         "rsv_id": "lite-s1-v1",
-        "profit_target_percent": "6",
-        "max_loss_percent": "6",
-        "max_loss_kind": "static",
-        "daily_loss_percent": "3",
         "min_trading_days": 4,
         "consistency_percent": None,
         "consistency_at_pass": False,
     }
-    instant = products[-1]["stages"][0]
-    assert (instant["max_loss_kind"], instant["consistency_percent"]) == ("trailing", "50")
-    access = call(FakeGateway(), "GET", "/access", policy=policy).json()
-    assert access == {"country_gating": False, "blocked_countries": ["BD", "IN"], "min_age": 18}
+    assert products[-1]["stages"][0]["consistency_percent"] == "50"
+    for role in ("trader", "staff"):  # signed in: the same public view
+        signed_in = call(FakeGateway(), "GET", "/catalogue", policy=policy, roles=(role,))
+        assert signed_in.json() == products
+    access = call(FakeGateway(), "GET", "/access", policy=policy, user=None).json()
+    assert access == {"min_age": 18}  # no gating switch, no country list
     assert call(FakeGateway(), "GET", "/catalogue").status_code == 503  # no policy loaded
 
 
@@ -371,3 +368,32 @@ def test_staff_read_every_account_but_trade_none() -> None:
     assert call(g, "GET", "/inputs/5-0", user="staff-1", roles=staff).status_code == 200
     placed = call(g, "POST", "/accounts/B/orders", GOOD, user="staff-1", roles=staff)
     assert placed.status_code == 404 and g.sent == []
+
+
+@pytest.mark.parametrize("roles", [("staff",), ("admin",)])
+def test_back_office_tokens_read_accounts_and_have_no_customer_view(
+    roles: tuple[str, ...],
+) -> None:
+    g = FakeGateway(events=[{"type": "PositionOpened", "account_id": "A"}])
+    # user-1 owns A, but a back-office token (no trader role) is not the portal view
+    assert call(g, "GET", "/accounts/A", roles=roles).status_code == 200
+    assert call(g, "GET", "/accounts/A/history", roles=roles).status_code == 200
+    assert call(g, "GET", "/inputs/5-0", roles=roles).status_code == 200
+    for method, url, body in [
+        ("GET", "/me", None),
+        ("POST", "/orders", {"product_id": "lite", "size_cents": 1_000_000}),
+        ("GET", "/orders/ORD00000001", None),
+        ("POST", "/accounts/A/orders", GOOD),
+        ("DELETE", "/accounts/A/orders/o1", None),
+        ("POST", "/accounts/A/positions/p1/close", {}),
+        ("PUT", "/accounts/A/positions/p1/stops", {"stop_loss": 1, "take_profit": None}),
+    ]:
+        assert call(g, method, url, body, roles=roles).status_code == 403, url
+    assert g.sent == []
+
+
+def test_a_token_with_no_role_sees_only_public_data_and_quotes() -> None:
+    g = FakeGateway(events=[{"type": "PositionOpened", "account_id": "A"}])
+    assert call(g, "GET", "/quotes", roles=()).status_code == 200
+    for url in ("/me", "/accounts/A", "/accounts/A/history", "/inputs/5-0", "/admin/access"):
+        assert call(g, "GET", url, roles=()).status_code == 403, url
