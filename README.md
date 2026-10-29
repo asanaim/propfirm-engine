@@ -23,19 +23,22 @@ Specification: *Prop Firm Operating Engine — End-to-End Functional Outline*
 3. Run:
 
    ```
-   docker compose run --rm test
+   docker compose run --rm --build test
    ```
 
-   This starts PostgreSQL and Valkey, builds the engine image and runs every
-   test. The first run downloads images and takes a few minutes.
+   This starts PostgreSQL, Valkey and Keycloak, rebuilds the test image if
+   `pyproject.toml` or `uv.lock` changed (a `git pull` can change them) and
+   runs every test. The first run downloads images and takes a few minutes.
+   Without `--build`, an image built before a new dependency fails with
+   `ModuleNotFoundError` before any test runs.
 4. Stop the services afterwards:
 
    ```
    docker compose down
    ```
 
-After changing `pyproject.toml` or `uv.lock`, rebuild with
-`docker compose build test`.
+If only the Keycloak test fails to log in a test user, the Keycloak volume
+holds an older realm: remove it as `config/keycloak/README.md` describes.
 
 ## Run the platform locally (P2, synthetic prices)
 

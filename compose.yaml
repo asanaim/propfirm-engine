@@ -1,5 +1,5 @@
 # Local development stack. Ports bind to 127.0.0.1 only.
-# Run the full test suite:  docker compose run --rm test
+# Run the full test suite:  docker compose run --rm --build test
 
 services:
   postgres:
@@ -29,7 +29,7 @@ services:
       retries: 30
 
   test:
-    profiles: ["test"]  # started by `docker compose run --rm test`, not by `up`
+    profiles: ["test"]  # started by `docker compose run --rm --build test`, not by `up`
     build: .
     depends_on:
       postgres:
