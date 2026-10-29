@@ -29,6 +29,7 @@ from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader, Projector
 from propfirm.service.setup import development_setup, setup_from_policy
+from tests.auth_rig import FakeCustomers, bearer, verifier
 
 pytestmark = pytest.mark.integration
 
@@ -81,9 +82,11 @@ def test_trade_through_the_api_and_restart(
             live=live,
             history=HistoryReader(pool, config.read_schema),
             gateway=Gateway(writer, pool, config.schema),
+            verifier=verifier(),
+            customers=FakeCustomers(cifs={"u": "CIF00000001"}, owners={"A": "CIF00000001"}),
         )
         transport = httpx.ASGITransport(app=create_app(deps))
-        api = httpx.AsyncClient(transport=transport, base_url="http://api")
+        api = httpx.AsyncClient(transport=transport, base_url="http://api", headers=bearer("u"))
         try:
             t0 = now_ms()
             async with engine(config):
@@ -243,9 +246,11 @@ def test_trailing_stop_through_the_api(database_url: str, valkey_url: str, pg_sc
             live=live,
             history=HistoryReader(pool, config.read_schema),
             gateway=Gateway(writer, pool, config.schema),
+            verifier=verifier(),
+            customers=FakeCustomers(cifs={"u": "CIF00000001"}, owners={"A": "CIF00000001"}),
         )
         transport = httpx.ASGITransport(app=create_app(deps))
-        api = httpx.AsyncClient(transport=transport, base_url="http://api")
+        api = httpx.AsyncClient(transport=transport, base_url="http://api", headers=bearer("u"))
 
         async def price(seq: int, points: int) -> None:
             t = now_ms()

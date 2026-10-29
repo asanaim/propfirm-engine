@@ -23,19 +23,22 @@ Specification: *Prop Firm Operating Engine — End-to-End Functional Outline*
 3. Run:
 
    ```
-   docker compose run --rm test
+   docker compose run --rm --build test
    ```
 
-   This starts PostgreSQL and Valkey, builds the engine image and runs every
-   test. The first run downloads images and takes a few minutes.
+   This starts PostgreSQL, Valkey and Keycloak, rebuilds the test image if
+   `pyproject.toml` or `uv.lock` changed (a `git pull` can change them) and
+   runs every test. The first run downloads images and takes a few minutes.
+   Without `--build`, an image built before a new dependency fails with
+   `ModuleNotFoundError` before any test runs.
 4. Stop the services afterwards:
 
    ```
    docker compose down
    ```
 
-After changing `pyproject.toml` or `uv.lock`, rebuild with
-`docker compose build test`.
+If only the Keycloak test fails to log in a test user, the Keycloak volume
+holds an older realm: remove it as `config/keycloak/README.md` describes.
 
 ## Run the platform locally (P2, synthetic prices)
 
@@ -43,17 +46,48 @@ After changing `pyproject.toml` or `uv.lock`, rebuild with
 docker compose --profile platform up -d
 ```
 
-This starts the engine, the projector, the API on http://127.0.0.1:8000
-(localhost only: there is no login yet), a synthetic price feeder and the
-clock/checkpoint scheduler. `docker compose --profile platform down` stops
+This starts Keycloak (login, http://localhost:8080), the engine, the
+projector, the API on http://127.0.0.1:8000, a synthetic price feeder and
+the clock/checkpoint scheduler. Payments and screening are sandbox
+stand-ins (no money moves). Test users: `trader1@example.com` /
+`dev-trader-password`, `staff1@example.com` / `dev-staff-password`
+(employee) and `admin1@example.com` / `dev-admin-password` (admin); see
+`config/keycloak/README.md`. `docker compose --profile platform down` stops
 them; add `-v` to delete the journal and start over.
+
+## Who sees what
+
+| View | Role | Sees and does |
+|---|---|---|
+| Public | none | products, sizes, prices, split, discounts; each stage's profit target, daily loss limit, drawdown limit, trading days and consistency rule; minimum age |
+| Trader (portal) | `trader` | own CIF, orders and accounts (each account shows its own target, limits and floors); buys; trades own accounts |
+| Employee (back office) | `staff` | every account, its history and inputs; trades none; no settings |
+| Admin (back office) | `admin` | what an employee sees, plus the admin-only settings below |
+
+Admin-only settings, changed through the API (each change is recorded with
+who, when and why: `GET /admin/settings/changes`):
+
+- country gating, viewed and changed by admins only: `GET /admin/access`,
+  `PUT /admin/access/country-gating` with
+  `{"country_gating": true, "blocked_countries": ["BD", "IN"], "reason": "..."}`;
+- a stage's profit target, daily loss limit and drawdown limit, public to
+  view (`GET /catalogue`), changed by admins only:
+  `PUT /admin/products/{product}/stages/{s1|s2|funded}/limits`
+  with `{"profit_target_percent": "8", "daily_loss_percent": "4",
+  "max_loss_percent": "5", "max_loss_kind": "static", "reason": "..."}`
+  (`null` target for a funded stage; the daily limit may not exceed the
+  drawdown limit). The change becomes a new rule-set version
+  (`one-step-s1-v1-a1`): accounts already open keep theirs.
+
+The policy file holds the starting values of these settings; once an
+admin has changed one, the admin value wins.
 
 ## Change products, prices and switches
 
-Every number and switch the firm can change lives in `config/policy.toml`:
-product targets, drawdowns, daily loss, trading days, consistency, sizes,
-prices, split and discounts; leverage, lot caps, spreads and feed guards;
-the country-gating switch; news windows, payouts and scaling.
+Every other number and switch the firm can change lives in
+`config/policy.toml`: trading days, consistency, sizes, prices, split and
+discounts; leverage, lot caps, spreads and feed guards; the minimum age;
+news windows, payouts and scaling.
 
 1. Edit the file. For a product stage, raise its `version`; for anything
    under `[trading]`, set a new `config_version`. (Published versions never
@@ -111,6 +145,19 @@ are recorded as violations, and their profit is kept out of the profit
 target (D15). See `src/propfirm/trading/engine.py` and
 `src/propfirm/rules/supervisor.py`.
 
+## Customer and order records
+
+Every step of an order is an event in `order_events`, oldest first:
+created, invoiced, paid, payment_repeated, account_assigned,
+provision_attempted (one per try), provisioned, failed. The status shown
+for an order is a cache of that history, written in the same transaction
+and rebuilt when the API starts; a customer's status is likewise rebuilt
+from `cif_events`. The database refuses edits and deletions of the order
+history, of account ownership (`accounts`) and of an order's facts
+(product, size, prices, discount, rule set). Customer personal data (`cif`,
+`cif_events`, `screenings`) is never edited by the code but is not locked,
+so it stays erasable on a lawful request. See `src/propfirm/customers/`.
+
 ## Conventions
 
 See `CLAUDE.md`. In short: money is integer cents, prices are integer
@@ -129,7 +176,8 @@ or rules uses floating point.
 ## Phase P2 progress (gate G2: challenge lifecycle on staging, scans, restore drill)
 
 - [x] Step 1: engine service, live state, history, trading API, policy file
-- [ ] Step 2: customers and access (Keycloak, customer record, gating, checkout)
+- [x] Step 2: customers and access (Keycloak login, CIF, country-gating switch, checkout,
+  trader / employee / admin views, admin-only settings)
 - [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
 - [ ] Step 4: trader portal
 - [ ] Step 5: back office

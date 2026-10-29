@@ -1,0 +1,678 @@
+"""Customer records in PostgreSQL (schema `customers` by default).
+
+Identifiers are short and fixed-width: CIF00000001 (customer), ORD00000001
+(order), ACC00000001 (trading account), from database sequences.
+
+Schema changes are numbered migrations (`propfirm.pgschema`); a new change
+is a new number, never an edit.
+
+Records and caches (CLAUDE.md: records are append-only):
+- `order_events` is the record of every order; the status columns of
+  `orders` (status, provider_ref, acc, failure, paid_at, provisioned_at) are
+  a cache of `history.order_state`, written in the same transaction as each
+  event and rebuilt by `rebuild_status`. Triggers refuse UPDATE and DELETE
+  on `order_events` and `accounts`, and any change to an order's facts.
+- `cif_events` is the record of every customer; `cif.status` is a cache of
+  `history.cif_status`. `cif`, `cif_events` and `screenings` hold personal
+  data, so they carry no such trigger: the code never updates or deletes
+  them, and they stay erasable on a lawful request (data-protection work).
+
+Money is whole cents (BIGINT); discount shares are stored as exact text
+("1/10"); times are UTC milliseconds supplied by the caller.
+"""
+
+import json
+from dataclasses import dataclass
+from datetime import date
+from fractions import Fraction
+from typing import Any, Self
+
+import asyncpg
+
+from propfirm.customers.history import (
+    ORDER_KINDS,
+    OrderEvent,
+    cif_status,
+    order_state,
+    placeholder_ref,
+)
+from propfirm.pgschema import Conn, check_schema
+from propfirm.pgschema import migrate as _migrate
+
+_LOCK_CLASS = 0x63757374  # "cust"
+
+_MIGRATIONS: tuple[tuple[int, str], ...] = (
+    (
+        1,
+        """
+        CREATE SEQUENCE {s}.cif_seq;
+        CREATE SEQUENCE {s}.ord_seq;
+        CREATE SEQUENCE {s}.acc_seq;
+        CREATE TABLE {s}.cif (
+            cif text PRIMARY KEY,
+            subject text NOT NULL UNIQUE,
+            email text NOT NULL,
+            full_name text NOT NULL,
+            date_of_birth date NOT NULL,
+            residence_country text NOT NULL CHECK (residence_country ~ '^[A-Z]{{2}}$'),
+            status text NOT NULL CHECK (status IN ('registered', 'blocked')),
+            created_at bigint NOT NULL
+        );
+        CREATE TABLE {s}.cif_events (
+            id bigserial PRIMARY KEY,
+            cif text REFERENCES {s}.cif (cif),
+            subject text NOT NULL,
+            ts bigint NOT NULL,
+            kind text NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.cif_events (subject, id);
+        CREATE TABLE {s}.screenings (
+            id bigserial PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            provider text NOT NULL,
+            result text NOT NULL CHECK (result IN ('clear', 'hit')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE TABLE {s}.discount_codes (
+            code text PRIMARY KEY CHECK (code ~ '^[A-Z0-9-]{{3,32}}$'),
+            discount text NOT NULL,
+            active boolean NOT NULL,
+            created_at bigint NOT NULL
+        );
+        CREATE TABLE {s}.orders (
+            ord text PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            product_id text NOT NULL,
+            size_cents bigint NOT NULL CHECK (size_cents > 0),
+            list_price_cents bigint NOT NULL CHECK (list_price_cents > 0),
+            discount_kind text NOT NULL,
+            discount text NOT NULL,
+            discount_code text REFERENCES {s}.discount_codes (code),
+            price_cents bigint NOT NULL CHECK (price_cents >= 0),
+            rsv_id text NOT NULL,
+            status text NOT NULL
+                CHECK (status IN ('pending', 'paid', 'provisioned', 'failed')),
+            provider text NOT NULL,
+            provider_ref text NOT NULL UNIQUE,
+            acc text UNIQUE,
+            failure text,
+            created_at bigint NOT NULL,
+            paid_at bigint,
+            provisioned_at bigint
+        );
+        CREATE INDEX ON {s}.orders (cif, product_id);
+        CREATE TABLE {s}.accounts (
+            acc text PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            ord text NOT NULL UNIQUE REFERENCES {s}.orders (ord),
+            product_id text NOT NULL,
+            rsv_id text NOT NULL,
+            size_cents bigint NOT NULL,
+            created_at bigint NOT NULL
+        );
+        CREATE INDEX ON {s}.accounts (cif);
+        """,
+    ),
+    (
+        2,
+        """
+        CREATE TABLE {s}.order_events (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            kind text NOT NULL CHECK (kind IN ('created', 'invoiced', 'paid',
+                'payment_repeated', 'account_assigned', 'provision_attempted',
+                'provisioned', 'failed')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.order_events (ord, id);
+        CREATE FUNCTION {s}.append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+        END $$;
+        CREATE TRIGGER order_events_append_only BEFORE UPDATE OR DELETE ON {s}.order_events
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER accounts_append_only BEFORE UPDATE OR DELETE ON {s}.accounts
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE FUNCTION {s}.order_facts_fixed() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'orders are append-only';
+            END IF;
+            IF (NEW.ord, NEW.cif, NEW.product_id, NEW.size_cents, NEW.list_price_cents,
+                NEW.discount_kind, NEW.discount, NEW.discount_code, NEW.price_cents,
+                NEW.rsv_id, NEW.provider, NEW.created_at)
+               IS DISTINCT FROM
+               (OLD.ord, OLD.cif, OLD.product_id, OLD.size_cents, OLD.list_price_cents,
+                OLD.discount_kind, OLD.discount, OLD.discount_code, OLD.price_cents,
+                OLD.rsv_id, OLD.provider, OLD.created_at) THEN
+                RAISE EXCEPTION 'order facts never change';
+            END IF;
+            RETURN NEW;
+        END $$;
+        CREATE TRIGGER orders_facts_fixed BEFORE UPDATE OR DELETE ON {s}.orders
+            FOR EACH ROW EXECUTE FUNCTION {s}.order_facts_fixed();
+
+        -- history for orders made before this migration, from their columns
+        INSERT INTO {s}.order_events (ord, kind, ts, detail)
+        SELECT ord, 'created', created_at, jsonb_build_object(
+            'product_id', product_id, 'size_cents', size_cents,
+            'list_price_cents', list_price_cents, 'discount_kind', discount_kind,
+            'discount', discount, 'discount_code', discount_code,
+            'price_cents', price_cents, 'rsv_id', rsv_id, 'provider', provider,
+            'backfilled', true)
+        FROM {s}.orders ORDER BY ord;
+        INSERT INTO {s}.order_events (ord, kind, ts, detail)
+        SELECT ord, 'invoiced', created_at,
+            jsonb_build_object('provider_ref', provider_ref, 'backfilled', true)
+        FROM {s}.orders WHERE provider_ref <> 'pending-' || ord ORDER BY ord;
+        INSERT INTO {s}.order_events (ord, kind, ts, detail)
+        SELECT ord, 'paid', paid_at, jsonb_build_object('backfilled', true)
+        FROM {s}.orders WHERE paid_at IS NOT NULL ORDER BY ord;
+        INSERT INTO {s}.order_events (ord, kind, ts, detail)
+        SELECT ord, 'account_assigned', coalesce(paid_at, created_at),
+            jsonb_build_object('acc', acc, 'backfilled', true)
+        FROM {s}.orders WHERE acc IS NOT NULL ORDER BY ord;
+        INSERT INTO {s}.order_events (ord, kind, ts, detail)
+        SELECT ord, 'provisioned', provisioned_at,
+            jsonb_build_object('acc', acc, 'journal_seq', NULL, 'backfilled', true)
+        FROM {s}.orders WHERE status = 'provisioned' ORDER BY ord;
+        INSERT INTO {s}.order_events (ord, kind, ts, detail)
+        SELECT ord, 'failed', coalesce(paid_at, created_at),
+            jsonb_build_object('reason', failure, 'journal_seq', NULL, 'backfilled', true)
+        FROM {s}.orders WHERE status = 'failed' ORDER BY ord;
+        """,
+    ),
+)
+
+
+class AlreadyRegisteredError(Exception):
+    """This login identity already has a CIF."""
+
+
+@dataclass(frozen=True, slots=True)
+class CifRecord:
+    cif: str
+    subject: str
+    email: str
+    full_name: str
+    date_of_birth: date
+    residence_country: str
+    status: str
+    created_at: int
+
+
+@dataclass(frozen=True, slots=True)
+class OrderRecord:
+    ord: str
+    cif: str
+    product_id: str
+    size_cents: int
+    list_price_cents: int
+    discount_kind: str
+    discount: Fraction
+    discount_code: str | None
+    price_cents: int
+    rsv_id: str
+    status: str
+    provider: str
+    provider_ref: str
+    acc: str | None
+    failure: str | None
+    created_at: int
+    paid_at: int | None
+    provisioned_at: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class AccountRecord:
+    acc: str
+    cif: str
+    ord: str
+    product_id: str
+    rsv_id: str
+    size_cents: int
+    created_at: int
+
+
+def _check(name: str) -> str:
+    return check_schema(name)
+
+
+async def migrate(conn: Conn, schema: str) -> list[int]:
+    """Apply the customer migrations not yet applied; return their numbers."""
+    return await _migrate(conn, schema, _MIGRATIONS, _LOCK_CLASS)
+
+
+def _share(text: str) -> Fraction:
+    return Fraction(text)
+
+
+def _order(row: asyncpg.Record) -> OrderRecord:
+    return OrderRecord(
+        ord=row["ord"],
+        cif=row["cif"],
+        product_id=row["product_id"],
+        size_cents=row["size_cents"],
+        list_price_cents=row["list_price_cents"],
+        discount_kind=row["discount_kind"],
+        discount=_share(row["discount"]),
+        discount_code=row["discount_code"],
+        price_cents=row["price_cents"],
+        rsv_id=row["rsv_id"],
+        status=row["status"],
+        provider=row["provider"],
+        provider_ref=row["provider_ref"],
+        acc=row["acc"],
+        failure=row["failure"],
+        created_at=row["created_at"],
+        paid_at=row["paid_at"],
+        provisioned_at=row["provisioned_at"],
+    )
+
+
+def _cif(row: asyncpg.Record) -> CifRecord:
+    return CifRecord(
+        cif=row["cif"],
+        subject=row["subject"],
+        email=row["email"],
+        full_name=row["full_name"],
+        date_of_birth=row["date_of_birth"],
+        residence_country=row["residence_country"],
+        status=row["status"],
+        created_at=row["created_at"],
+    )
+
+
+class CustomerStore:
+    def __init__(self, pool: asyncpg.Pool, schema: str) -> None:
+        self._pool = pool
+        self._s = _check(schema)
+
+    @classmethod
+    async def open(cls, pool: asyncpg.Pool, schema: str) -> Self:
+        async with pool.acquire() as conn:
+            await migrate(conn, schema)
+        return cls(pool, schema)
+
+    # --- CIF ------------------------------------------------------------------------
+
+    async def register(
+        self,
+        subject: str,
+        email: str,
+        full_name: str,
+        date_of_birth: date,
+        residence_country: str,
+        ts: int,
+        detail: dict[str, Any],
+    ) -> CifRecord:
+        s = self._s
+        async with self._pool.acquire() as conn, conn.transaction():
+            if await conn.fetchval(f"SELECT 1 FROM {s}.cif WHERE subject = $1", subject):
+                raise AlreadyRegisteredError(subject)
+            number = await conn.fetchval(f"SELECT nextval('{s}.cif_seq')")
+            cif = f"CIF{number:08d}"
+            try:
+                row = await conn.fetchrow(
+                    f"INSERT INTO {s}.cif (cif, subject, email, full_name, date_of_birth, "
+                    f"residence_country, status, created_at) "
+                    f"VALUES ($1, $2, $3, $4, $5, $6, 'registered', $7) RETURNING *",
+                    cif,
+                    subject,
+                    email,
+                    full_name,
+                    date_of_birth,
+                    residence_country,
+                    ts,
+                )
+            except asyncpg.UniqueViolationError as exc:
+                raise AlreadyRegisteredError(subject) from exc
+            await self._event(conn, cif, subject, ts, "registered", detail)
+            assert row is not None
+            return _cif(row)
+
+    async def refused(self, subject: str, ts: int, detail: dict[str, Any]) -> None:
+        """Record a refused registration (no CIF is created)."""
+        async with self._pool.acquire() as conn:
+            await self._event(conn, None, subject, ts, "registration_refused", detail)
+
+    async def cif_by_subject(self, subject: str) -> CifRecord | None:
+        row = await self._pool.fetchrow(f"SELECT * FROM {self._s}.cif WHERE subject = $1", subject)
+        return None if row is None else _cif(row)
+
+    async def block(self, cif: str, subject: str, ts: int, detail: dict[str, Any]) -> None:
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute(f"SELECT 1 FROM {self._s}.cif WHERE cif = $1 FOR UPDATE", cif)
+            await self._event(conn, cif, subject, ts, "blocked", detail)
+            await self._cache_cif(conn, cif)
+
+    async def _cache_cif(self, conn: Conn, cif: str) -> bool:
+        """Write `cif.status` from the customer's events; True if it changed."""
+        s = self._s
+        kinds = [
+            r["kind"]
+            for r in await conn.fetch(
+                f"SELECT kind FROM {s}.cif_events WHERE cif = $1 ORDER BY id", cif
+            )
+        ]
+        result: str = await conn.execute(
+            f"UPDATE {s}.cif SET status = $2 WHERE cif = $1 AND status <> $2",
+            cif,
+            cif_status(cif, kinds),
+        )
+        return result.endswith(" 1")
+
+    async def events(self, subject: str) -> list[dict[str, Any]]:
+        rows = await self._pool.fetch(
+            f"SELECT cif, ts, kind, detail::text AS detail FROM {self._s}.cif_events "
+            f"WHERE subject = $1 ORDER BY id",
+            subject,
+        )
+        return [
+            {"cif": r["cif"], "ts": r["ts"], "kind": r["kind"], "detail": json.loads(r["detail"])}
+            for r in rows
+        ]
+
+    async def _event(
+        self,
+        conn: Conn,
+        cif: str | None,
+        subject: str,
+        ts: int,
+        kind: str,
+        detail: dict[str, Any],
+    ) -> None:
+        await conn.execute(
+            f"INSERT INTO {self._s}.cif_events (cif, subject, ts, kind, detail) "
+            f"VALUES ($1, $2, $3, $4, $5::jsonb)",
+            cif,
+            subject,
+            ts,
+            kind,
+            json.dumps(detail, sort_keys=True),
+        )
+
+    # --- screening ------------------------------------------------------------------
+
+    async def record_screening(
+        self, cif: str, provider: str, result: str, ts: int, detail: dict[str, Any]
+    ) -> None:
+        await self._pool.execute(
+            f"INSERT INTO {self._s}.screenings (cif, provider, result, ts, detail) "
+            f"VALUES ($1, $2, $3, $4, $5::jsonb)",
+            cif,
+            provider,
+            result,
+            ts,
+            json.dumps(detail, sort_keys=True),
+        )
+
+    async def screened_clear(self, cif: str) -> bool:
+        found = await self._pool.fetchval(
+            f"SELECT 1 FROM {self._s}.screenings WHERE cif = $1 AND result = 'clear'", cif
+        )
+        return found is not None
+
+    # --- discount codes -------------------------------------------------------------
+
+    async def add_code(self, code: str, discount: Fraction, ts: int) -> None:
+        await self._pool.execute(
+            f"INSERT INTO {self._s}.discount_codes (code, discount, active, created_at) "
+            f"VALUES ($1, $2, true, $3)",
+            code,
+            str(discount),
+            ts,
+        )
+
+    async def code_discount(self, code: str) -> Fraction | None:
+        text = await self._pool.fetchval(
+            f"SELECT discount FROM {self._s}.discount_codes WHERE code = $1 AND active", code
+        )
+        return None if text is None else _share(text)
+
+    # --- orders and accounts --------------------------------------------------------
+
+    async def prior_accounts(self, cif: str, product_id: str) -> int:
+        count: int = await self._pool.fetchval(
+            f"SELECT count(*) FROM {self._s}.orders WHERE cif = $1 AND product_id = $2 "
+            f"AND status IN ('paid', 'provisioned')",
+            cif,
+            product_id,
+        )
+        return count
+
+    async def create_order(
+        self,
+        cif: str,
+        product_id: str,
+        size_cents: int,
+        list_price_cents: int,
+        discount_kind: str,
+        discount: Fraction,
+        discount_code: str | None,
+        price_cents: int,
+        rsv_id: str,
+        provider: str,
+        ts: int,
+    ) -> OrderRecord:
+        s = self._s
+        async with self._pool.acquire() as conn, conn.transaction():
+            number = await conn.fetchval(f"SELECT nextval('{s}.ord_seq')")
+            ord_id = f"ORD{number:08d}"
+            await conn.execute(
+                f"INSERT INTO {s}.orders (ord, cif, product_id, size_cents, list_price_cents, "
+                f"discount_kind, discount, discount_code, price_cents, rsv_id, status, provider, "
+                f"provider_ref, created_at) "
+                f"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $13)",
+                ord_id,
+                cif,
+                product_id,
+                size_cents,
+                list_price_cents,
+                discount_kind,
+                str(discount),
+                discount_code,
+                price_cents,
+                rsv_id,
+                provider,
+                placeholder_ref(ord_id),
+                ts,
+            )
+            facts = {
+                "product_id": product_id,
+                "size_cents": size_cents,
+                "list_price_cents": list_price_cents,
+                "discount_kind": discount_kind,
+                "discount": str(discount),
+                "discount_code": discount_code,
+                "price_cents": price_cents,
+                "rsv_id": rsv_id,
+                "provider": provider,
+            }
+            return await self._append(conn, ord_id, "created", ts, facts)
+
+    async def set_provider_ref(self, ord_id: str, provider_ref: str, ts: int) -> OrderRecord:
+        """The invoice exists: record the provider's reference."""
+        async with self._pool.acquire() as conn, conn.transaction():
+            await self._locked(conn, ord_id)
+            return await self._append(conn, ord_id, "invoiced", ts, {"provider_ref": provider_ref})
+
+    async def order(self, ord_id: str) -> OrderRecord | None:
+        row = await self._pool.fetchrow(f"SELECT * FROM {self._s}.orders WHERE ord = $1", ord_id)
+        return None if row is None else _order(row)
+
+    async def order_by_ref(self, provider: str, provider_ref: str) -> OrderRecord | None:
+        row = await self._pool.fetchrow(
+            f"SELECT * FROM {self._s}.orders WHERE provider = $1 AND provider_ref = $2",
+            provider,
+            provider_ref,
+        )
+        return None if row is None else _order(row)
+
+    async def orders_for(self, cif: str) -> list[OrderRecord]:
+        rows = await self._pool.fetch(
+            f"SELECT * FROM {self._s}.orders WHERE cif = $1 ORDER BY ord", cif
+        )
+        return [_order(r) for r in rows]
+
+    async def order_history(self, ord_id: str) -> list[OrderEvent]:
+        """The order's events, oldest first: the record its status comes from."""
+        async with self._pool.acquire() as conn:
+            return await self._events(conn, ord_id)
+
+    async def mark_paid(self, ord_id: str, ts: int) -> bool:
+        """pending -> paid; False when it was not pending (a repeated notice,
+        recorded as payment_repeated)."""
+        async with self._pool.acquire() as conn, conn.transaction():
+            order = await self._locked(conn, ord_id)
+            first = order.status == "pending"
+            kind = "paid" if first else "payment_repeated"
+            await self._append(conn, ord_id, kind, ts, {"provider_ref": order.provider_ref})
+            return first
+
+    async def assign_account(self, ord_id: str, ts: int) -> str:
+        """The order's ACC id, allocated once and kept, so a retried
+        provisioning opens the same account."""
+        s = self._s
+        async with self._pool.acquire() as conn, conn.transaction():
+            order = await self._locked(conn, ord_id)
+            if order.acc is not None:
+                return order.acc
+            number = await conn.fetchval(f"SELECT nextval('{s}.acc_seq')")
+            acc = f"ACC{number:08d}"
+            await self._append(conn, ord_id, "account_assigned", ts, {"acc": acc})
+            return acc
+
+    async def provision_attempted(self, ord_id: str, acc: str, entry_id: str, ts: int) -> None:
+        """OpenAccount was sent to the engine as stream entry `entry_id`."""
+        async with self._pool.acquire() as conn, conn.transaction():
+            await self._locked(conn, ord_id)
+            await self._append(
+                conn, ord_id, "provision_attempted", ts, {"acc": acc, "entry_id": entry_id}
+            )
+
+    async def mark_provisioned(
+        self, order: OrderRecord, acc: str, ts: int, journal_seq: int | None
+    ) -> None:
+        """paid -> provisioned, with the account's owner record; nothing
+        when the order is no longer paid."""
+        s = self._s
+        async with self._pool.acquire() as conn, conn.transaction():
+            current = await self._locked(conn, order.ord)
+            if current.status != "paid":
+                return
+            await conn.execute(
+                f"INSERT INTO {s}.accounts (acc, cif, ord, product_id, rsv_id, size_cents, "
+                f"created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                acc,
+                current.cif,
+                current.ord,
+                current.product_id,
+                current.rsv_id,
+                current.size_cents,
+                ts,
+            )
+            await self._append(
+                conn, order.ord, "provisioned", ts, {"acc": acc, "journal_seq": journal_seq}
+            )
+
+    async def mark_failed(
+        self, ord_id: str, failure: str, ts: int, journal_seq: int | None
+    ) -> None:
+        """paid -> failed; nothing when the order is no longer paid."""
+        async with self._pool.acquire() as conn, conn.transaction():
+            if (await self._locked(conn, ord_id)).status != "paid":
+                return
+            await self._append(
+                conn, ord_id, "failed", ts, {"reason": failure, "journal_seq": journal_seq}
+            )
+
+    async def rebuild_status(self) -> list[str]:
+        """Rewrite every cached status from the records; return the ORD and
+        CIF ids whose cache was wrong (none, unless someone edited it)."""
+        s = self._s
+        fixed: list[str] = []
+        ords = [
+            r["ord"] for r in await self._pool.fetch(f"SELECT ord FROM {s}.orders ORDER BY ord")
+        ]
+        for ord_id in ords:
+            async with self._pool.acquire() as conn, conn.transaction():
+                before = await self._locked(conn, ord_id)
+                if await self._write_cache(conn, ord_id) != before:
+                    fixed.append(ord_id)
+        cifs = [r["cif"] for r in await self._pool.fetch(f"SELECT cif FROM {s}.cif ORDER BY cif")]
+        for cif in cifs:
+            async with self._pool.acquire() as conn, conn.transaction():
+                await conn.execute(f"SELECT 1 FROM {s}.cif WHERE cif = $1 FOR UPDATE", cif)
+                if await self._cache_cif(conn, cif):
+                    fixed.append(cif)
+        return fixed
+
+    async def _locked(self, conn: Conn, ord_id: str) -> OrderRecord:
+        row = await conn.fetchrow(
+            f"SELECT * FROM {self._s}.orders WHERE ord = $1 FOR UPDATE", ord_id
+        )
+        if row is None:
+            raise KeyError(f"unknown order {ord_id!r}")
+        return _order(row)
+
+    async def _events(self, conn: Conn, ord_id: str) -> list[OrderEvent]:
+        rows = await conn.fetch(
+            f"SELECT kind, ts, detail::text AS detail FROM {self._s}.order_events "
+            f"WHERE ord = $1 ORDER BY id",
+            ord_id,
+        )
+        return [OrderEvent(ord_id, r["kind"], r["ts"], json.loads(r["detail"])) for r in rows]
+
+    async def _append(
+        self, conn: Conn, ord_id: str, kind: str, ts: int, detail: dict[str, Any]
+    ) -> OrderRecord:
+        """Record an event, then write the cache from the whole history (one
+        transaction): the cache can only ever be what the record says."""
+        assert kind in ORDER_KINDS
+        await conn.execute(
+            f"INSERT INTO {self._s}.order_events (ord, kind, ts, detail) "
+            f"VALUES ($1, $2, $3, $4::jsonb)",
+            ord_id,
+            kind,
+            ts,
+            json.dumps(detail, sort_keys=True),
+        )
+        return await self._write_cache(conn, ord_id)
+
+    async def _write_cache(self, conn: Conn, ord_id: str) -> OrderRecord:
+        state = order_state(ord_id, await self._events(conn, ord_id))
+        row = await conn.fetchrow(
+            f"UPDATE {self._s}.orders SET status = $2, provider_ref = $3, acc = $4, "
+            f"failure = $5, paid_at = $6, provisioned_at = $7 WHERE ord = $1 RETURNING *",
+            ord_id,
+            state.status,
+            state.provider_ref,
+            state.acc,
+            state.failure,
+            state.paid_at,
+            state.provisioned_at,
+        )
+        assert row is not None
+        return _order(row)
+
+    async def unprovisioned(self) -> list[OrderRecord]:
+        rows = await self._pool.fetch(
+            f"SELECT * FROM {self._s}.orders WHERE status = 'paid' ORDER BY ord"
+        )
+        return [_order(r) for r in rows]
+
+    async def accounts_for(self, cif: str) -> list[AccountRecord]:
+        rows = await self._pool.fetch(
+            f"SELECT * FROM {self._s}.accounts WHERE cif = $1 ORDER BY acc", cif
+        )
+        return [AccountRecord(**dict(r)) for r in rows]
+
+    async def account_owner(self, acc: str) -> str | None:
+        owner: str | None = await self._pool.fetchval(
+            f"SELECT cif FROM {self._s}.accounts WHERE acc = $1", acc
+        )
+        return owner

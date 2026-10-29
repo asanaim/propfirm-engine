@@ -48,13 +48,21 @@ class Gateway:
         entry_id = await self._writer.publish(item)
         return await self.outcome(entry_id, wait_s)
 
+    async def publish(self, item: Input) -> str:
+        """Send without waiting; the stream entry id finds the outcome later."""
+        return await self._writer.publish(item)
+
     async def outcome(self, entry_id: str, wait_s: float) -> Outcome:
         deadline = time.monotonic() + wait_s
         delay = 0.005
         while True:
-            row = await self._pool.fetchrow(
-                f"SELECT seq, events FROM {self._schema}.journal WHERE source_id = $1", entry_id
-            )
+            try:
+                row = await self._pool.fetchrow(
+                    f"SELECT seq, events FROM {self._schema}.journal WHERE source_id = $1",
+                    entry_id,
+                )
+            except asyncpg.UndefinedTableError:
+                row = None  # the engine has not created its journal yet
             if row is not None:
                 events = CODEC.decode(row["events"])
                 assert isinstance(events, tuple)

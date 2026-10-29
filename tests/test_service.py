@@ -20,7 +20,7 @@ from propfirm.journal.inputs import (
     SetTrailingStop,
 )
 from propfirm.market.types import PriceUpdate
-from propfirm.policy import load_policy
+from propfirm.policy import FixedPolicy, load_policy
 from propfirm.service.config import ConfigError, ServiceConfig
 from propfirm.service.feeder import feed
 from propfirm.service.gateway import Outcome
@@ -28,6 +28,7 @@ from propfirm.service.jsonview import view
 from propfirm.service.scheduler import schedule
 from propfirm.service.setup import development_setup
 from propfirm.trading.orders import OrderType, Position, Side, Trail
+from tests.auth_rig import FakeCustomers, bearer, verifier
 
 ENV = {"DATABASE_URL": "postgresql://u:p@h/db", "VALKEY_URL": "redis://h:6379/0"}
 NOW = 1_790_000_000_000
@@ -90,7 +91,9 @@ def test_json_view_is_exact_and_plain() -> None:
 
 class FakeLive:
     def __init__(self) -> None:
-        self.accounts: dict[str, dict[str, Any]] = {"A": {"account_id": "A", "status": "active"}}
+        self.accounts: dict[str, dict[str, Any]] = {
+            a: {"account_id": a, "status": "active"} for a in ("A", "B")
+        }
 
     async def head(self) -> dict[str, Any] | None:
         return {"seq": 7}
@@ -122,24 +125,45 @@ class FakeGateway:
         return Outcome(entry_id, self.seq, self.events)
 
 
+CUSTOMERS = FakeCustomers(
+    cifs={"user-1": "CIF00000001", "user-2": "CIF00000002"},
+    owners={"A": "CIF00000001", "B": "CIF00000002"},
+)
+
+
 def call(
-    gateway: FakeGateway, method: str, url: str, body: object = None, policy: Any = None
+    gateway: FakeGateway,
+    method: str,
+    url: str,
+    body: object = None,
+    policy: Any = None,
+    *,
+    user: str | None = "user-1",
+    roles: tuple[str, ...] = ("trader",),
 ) -> httpx.Response:
     deps = Deps(
-        FakeLive(), FakeHistory(), gateway, policy, clock=lambda: NOW, new_id=lambda: "gen1"
+        FakeLive(),
+        FakeHistory(),
+        gateway,
+        verifier(),
+        CUSTOMERS,
+        policy=None if policy is None else FixedPolicy(policy),
+        clock=lambda: NOW,
+        new_id=lambda: "gen1",
     )
     app = create_app(deps)
+    headers = bearer(user, roles) if user else {}
 
     async def go() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://api") as client:
-            return await client.request(method, url, json=body)
+            return await client.request(method, url, json=body, headers=headers)
 
     return asyncio.run(go())
 
 
 def test_reads() -> None:
-    g = FakeGateway()
+    g = FakeGateway(events=[{"type": "PositionOpened", "account_id": "A"}])
     assert call(g, "GET", "/health").json() == {"status": "ok", "journal_seq": 7}
     assert call(g, "GET", "/accounts/A").json()["status"] == "active"
     assert call(g, "GET", "/accounts/Z").status_code == 404
@@ -312,14 +336,13 @@ def test_scheduler_ticks_and_checkpoints() -> None:
     assert (ticks, checkpoints) == (6, 2)
 
 
-def test_catalogue_and_access_come_from_the_policy() -> None:
+def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
     policy = load_policy()
-    products = call(FakeGateway(), "GET", "/catalogue", policy=policy).json()
+    products = call(FakeGateway(), "GET", "/catalogue", policy=policy, user=None).json()
     lite = products[0]
     assert (lite["id"], lite["name"], lite["profit_split_percent"]) == ("lite", "Lite", "80")
     assert lite["sizes"][1] == {"size_cents": 1_000_000, "price_cents": 4_400}
-    s1 = lite["stages"][0]
-    assert s1 == {
+    assert lite["stages"][0] == {
         "stage": "s1",
         "rsv_id": "lite-s1-v1",
         "profit_target_percent": "6",
@@ -332,6 +355,96 @@ def test_catalogue_and_access_come_from_the_policy() -> None:
     }
     instant = products[-1]["stages"][0]
     assert (instant["max_loss_kind"], instant["consistency_percent"]) == ("trailing", "50")
-    access = call(FakeGateway(), "GET", "/access", policy=policy).json()
-    assert access == {"country_gating": False, "blocked_countries": ["BD", "IN"]}
+    assert instant["profit_target_percent"] is None  # funded: no target
+    for role in ("trader", "staff"):  # signed in: the same public view
+        signed_in = call(FakeGateway(), "GET", "/catalogue", policy=policy, roles=(role,))
+        assert signed_in.json() == products
+    access = call(FakeGateway(), "GET", "/access", policy=policy, user=None).json()
+    assert access == {"min_age": 18}  # no gating switch, no country list
     assert call(FakeGateway(), "GET", "/catalogue").status_code == 503  # no policy loaded
+
+
+# --- access control -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("method", "url"),
+    [
+        ("GET", "/quotes"),
+        ("GET", "/me"),
+        ("GET", "/accounts/A"),
+        ("GET", "/accounts/A/history"),
+        ("POST", "/accounts/A/orders"),
+        ("DELETE", "/accounts/A/orders/o1"),
+        ("GET", "/inputs/5-0"),
+        ("PUT", "/accounts/A/positions/p1/trailing-stop"),
+        ("DELETE", "/accounts/A/positions/p1/trailing-stop"),
+    ],
+)
+def test_signed_out_requests_are_refused(method: str, url: str) -> None:
+    g = FakeGateway()
+    body = {"POST": GOOD, "PUT": {"distance": 50, "step": 1}}.get(method)
+    response = call(g, method, url, body, user=None)
+    assert response.status_code == 401 and response.headers["www-authenticate"] == "Bearer"
+    assert g.sent == []
+
+
+def test_public_endpoints_need_no_login() -> None:
+    policy = load_policy()
+    for url in ("/health", "/catalogue", "/access"):
+        assert call(FakeGateway(), "GET", url, policy=policy, user=None).status_code == 200
+
+
+def test_someone_elses_account_looks_like_no_account() -> None:
+    g = FakeGateway(events=[{"type": "PositionOpened", "account_id": "B"}])
+    assert call(g, "GET", "/accounts/B").status_code == 404
+    assert call(g, "GET", "/accounts/B/history").status_code == 404
+    assert call(g, "POST", "/accounts/B/orders", GOOD).status_code == 404
+    assert call(g, "POST", "/accounts/B/positions/p1/close", {}).status_code == 404
+    trailing = "/accounts/B/positions/p1/trailing-stop"
+    assert call(g, "PUT", trailing, {"distance": 50, "step": 1}).status_code == 404
+    assert call(g, "DELETE", trailing).status_code == 404
+    assert call(g, "GET", "/inputs/5-0").status_code == 404  # its events are B's
+    assert call(g, "GET", "/accounts/B", user="user-2").status_code == 200
+    assert call(g, "GET", "/accounts/A", user="nobody").status_code == 404  # no CIF
+    assert g.sent == []
+
+
+def test_staff_read_every_account_but_trade_none() -> None:
+    g = FakeGateway(events=[{"type": "PositionOpened", "account_id": "B"}])
+    staff = ("trader", "staff")
+    assert call(g, "GET", "/accounts/B", user="staff-1", roles=staff).status_code == 200
+    assert call(g, "GET", "/inputs/5-0", user="staff-1", roles=staff).status_code == 200
+    placed = call(g, "POST", "/accounts/B/orders", GOOD, user="staff-1", roles=staff)
+    assert placed.status_code == 404 and g.sent == []
+
+
+@pytest.mark.parametrize("roles", [("staff",), ("admin",)])
+def test_back_office_tokens_read_accounts_and_have_no_customer_view(
+    roles: tuple[str, ...],
+) -> None:
+    g = FakeGateway(events=[{"type": "PositionOpened", "account_id": "A"}])
+    # user-1 owns A, but a back-office token (no trader role) is not the portal view
+    assert call(g, "GET", "/accounts/A", roles=roles).status_code == 200
+    assert call(g, "GET", "/accounts/A/history", roles=roles).status_code == 200
+    assert call(g, "GET", "/inputs/5-0", roles=roles).status_code == 200
+    for method, url, body in [
+        ("GET", "/me", None),
+        ("POST", "/orders", {"product_id": "lite", "size_cents": 1_000_000}),
+        ("GET", "/orders/ORD00000001", None),
+        ("POST", "/accounts/A/orders", GOOD),
+        ("DELETE", "/accounts/A/orders/o1", None),
+        ("POST", "/accounts/A/positions/p1/close", {}),
+        ("PUT", "/accounts/A/positions/p1/stops", {"stop_loss": 1, "take_profit": None}),
+        ("PUT", "/accounts/A/positions/p1/trailing-stop", {"distance": 50, "step": 1}),
+        ("DELETE", "/accounts/A/positions/p1/trailing-stop", None),
+    ]:
+        assert call(g, method, url, body, roles=roles).status_code == 403, url
+    assert g.sent == []
+
+
+def test_a_token_with_no_role_sees_only_public_data_and_quotes() -> None:
+    g = FakeGateway(events=[{"type": "PositionOpened", "account_id": "A"}])
+    assert call(g, "GET", "/quotes", roles=()).status_code == 200
+    for url in ("/me", "/accounts/A", "/accounts/A/history", "/inputs/5-0", "/admin/access"):
+        assert call(g, "GET", url, roles=()).status_code == 403, url
