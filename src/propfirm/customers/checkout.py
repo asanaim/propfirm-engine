@@ -8,6 +8,9 @@ without a CIF. Every request reads the policy in force (`PolicySource`).
 Ordering: AML screening at the first purchase (CC-6), then the price from
 the policy (pricing), then an invoice from the payment provider.
 
+Every step is an event in the order's append-only history
+(`customers.history`); the order's status is a cache of that history.
+
 Payment and provisioning, a saga with a retry (outline M08, M09):
 1. the provider reports the payment: pending -> paid (a repeated report
    changes nothing);
@@ -34,7 +37,9 @@ from propfirm.service.gateway import Outcome
 
 
 class Submitter(Protocol):
-    async def submit(self, item: Input, wait_s: float = 5.0) -> Outcome: ...
+    async def publish(self, item: Input) -> str: ...
+
+    async def outcome(self, entry_id: str, wait_s: float) -> Outcome: ...
 
 
 class CheckoutError(Exception):
@@ -151,9 +156,7 @@ class Checkout:
             ts=ts,
         )
         invoice = await self._payments.create_invoice(order.ord, order.price_cents)
-        await self._store.set_provider_ref(order.ord, invoice.provider_ref)
-        stored = await self._store.order(order.ord)
-        assert stored is not None
+        stored = await self._store.set_provider_ref(order.ord, invoice.provider_ref, ts)
         return stored, invoice.pay_url
 
     # --- payment and provisioning ---------------------------------------------------
@@ -171,15 +174,15 @@ class Checkout:
             raise CheckoutError("unknown_order", ord_id)
         if order.status != "paid":
             return order
-        acc = await self._store.assign_account(order.ord)
-        outcome = await self._gateway.submit(
-            OpenAccount(acc, order.rsv_id, order.size_cents, ts), self._wait_s
-        )
+        acc = await self._store.assign_account(order.ord, ts)
+        entry_id = await self._gateway.publish(OpenAccount(acc, order.rsv_id, order.size_cents, ts))
+        await self._store.provision_attempted(order.ord, acc, entry_id, ts)  # before the wait
+        outcome = await self._gateway.outcome(entry_id, self._wait_s)
         if outcome.seq is not None:
             if _opened(outcome.events, acc):
-                await self._store.mark_provisioned(order, acc, ts)
+                await self._store.mark_provisioned(order, acc, ts, outcome.seq)
             else:
-                await self._store.mark_failed(order.ord, _reason(outcome.events))
+                await self._store.mark_failed(order.ord, _reason(outcome.events), ts, outcome.seq)
         updated = await self._store.order(order.ord)
         assert updated is not None
         return updated

@@ -132,6 +132,19 @@ snapshots together.
 
 See `src/propfirm/journal/`.
 
+## Customer and order records
+
+Every step of an order is an event in `order_events`, oldest first:
+created, invoiced, paid, payment_repeated, account_assigned,
+provision_attempted (one per try), provisioned, failed. The status shown
+for an order is a cache of that history, written in the same transaction
+and rebuilt when the API starts; a customer's status is likewise rebuilt
+from `cif_events`. The database refuses edits and deletions of the order
+history, of account ownership (`accounts`) and of an order's facts
+(product, size, prices, discount, rule set). Customer personal data (`cif`,
+`cif_events`, `screenings`) is never edited by the code but is not locked,
+so it stays erasable on a lawful request. See `src/propfirm/customers/`.
+
 ## Conventions
 
 See `CLAUDE.md`. In short: money is integer cents, prices are integer

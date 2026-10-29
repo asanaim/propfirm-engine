@@ -273,6 +273,16 @@ def test_payment_while_the_engine_is_down_is_provisioned_later(
             assert await checkout.reconcile(now_ms()) == 1
             done = (await p.call("GET", f"/orders/{order['ord']}")).json()
             assert (done["status"], done["acc"]) == ("provisioned", "ACC00000001")
+            kinds = [e.kind for e in await p.store.order_history(order["ord"])]
+            assert kinds == [  # the unanswered attempt and the retry are both on record
+                "created",
+                "invoiced",
+                "paid",
+                "account_assigned",
+                "provision_attempted",
+                "provision_attempted",
+                "provisioned",
+            ]
 
     asyncio.run(scenario())
 
@@ -296,7 +306,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1]
+            assert await migrate(conn, schema) == [1, 2]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
