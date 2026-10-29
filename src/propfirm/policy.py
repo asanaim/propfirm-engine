@@ -166,6 +166,18 @@ def percent_text(share: Fraction | None) -> str | None:
     return f"{value.numerator}/{value.denominator}"
 
 
+_RSV_STAGE = re.compile(r"-(s1|s2|funded)-v[0-9]+(?:-a[0-9]+)?$")
+
+
+def stage_of(rsv_id: str) -> Stage:
+    """The stage a rule-set id names: every id is `<product>-<stage>-v<n>`,
+    with `-a<change>` for an admin change (`one-step-s1-v1-a7` -> s1)."""
+    found = _RSV_STAGE.search(rsv_id)
+    if found is None:
+        raise ValueError(f"{rsv_id!r} is not a rule-set id")
+    return Stage(found.group(1))
+
+
 def rule_set_view(r: RuleSet) -> dict[str, Any]:
     """A stage's numbers as shown to everyone: percentages as exact text."""
     return {

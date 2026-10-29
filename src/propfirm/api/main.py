@@ -7,9 +7,11 @@ Needs OIDC_ISSUER and OIDC_JWKS_URL (the Keycloak realm). Checkout runs
 only with PROPFIRM_SANDBOX=1 until the real payment and screening
 providers are connected (C6, C7); without it, checkout answers 503.
 A background task retries paid orders whose account is not open yet, and
-admin stage-limit changes the engine has not journaled yet. At start the
-cached order and customer statuses are rebuilt from their histories; a
-correction (the cache was edited by hand) is logged as a warning.
+admin stage-limit changes the engine has not journaled yet; another, every
+second, turns new stage passes into progressions and opens the next
+evaluation accounts. At start the cached order, customer and progression
+statuses are rebuilt from their histories; a correction (the cache was
+edited by hand) is logged as a warning.
 """
 
 import asyncio
@@ -26,6 +28,8 @@ from fastapi import FastAPI
 from propfirm.api.app import Deps, create_app
 from propfirm.api.auth import JwksKeys, TokenVerifier
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.lifecycle import Lifecycle
+from propfirm.customers.lifecycle_store import ProgressionStore
 from propfirm.customers.providers import SandboxPayments, SandboxScreener
 from propfirm.customers.store import CustomerStore
 from propfirm.journal.stream import InputStreamWriter
@@ -39,6 +43,7 @@ from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
 
 RECONCILE_S = 10.0
+LIFECYCLE_S = 1.0
 log = logging.getLogger(__name__)
 
 
@@ -57,6 +62,16 @@ async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> N
             log.exception("provisioning retry failed")
 
 
+async def _lifecycle_forever(lifecycle: Lifecycle) -> None:
+    while True:
+        await asyncio.sleep(LIFECYCLE_S)
+        try:
+            await lifecycle.poll(now_ms())
+            await lifecycle.advance(now_ms())
+        except Exception:  # retried next round; passes wait in the journal
+            log.exception("stage progression round failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     config = ServiceConfig.from_env(os.environ)
@@ -65,19 +80,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     client = avalkey.Valkey.from_url(config.valkey_url)
     pool = await asyncpg.create_pool(config.database_url, min_size=1, max_size=10)
     http = httpx.AsyncClient()
-    task: asyncio.Task[None] | None = None
+    tasks: list[asyncio.Task[None]] = []
     try:
         policy = load_policy(config.policy_path)
         gateway = Gateway(InputStreamWriter(client, config.stream), pool, config.schema)
         customers = await CustomerStore.open(pool, config.customer_schema)
-        fixed = await customers.rebuild_status()
+        progressions = ProgressionStore(pool, config.customer_schema, config.schema)
+        fixed = await customers.rebuild_status() + await progressions.rebuild_status()
         if fixed:
             log.warning("cached status differed from the history and was rebuilt: %s", fixed)
         settings = Settings(policy, await SettingsStore.open(pool, config.settings_schema), gateway)
         checkout = None
         if config.sandbox:
             checkout = Checkout(customers, settings, SandboxPayments(), SandboxScreener(), gateway)
-        task = asyncio.create_task(_reconcile_forever(checkout, settings))
+        lifecycle = Lifecycle(progressions, settings, gateway)
+        tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
+        tasks.append(asyncio.create_task(_lifecycle_forever(lifecycle)))
         app.state.deps = Deps(
             live=LiveReader(client, config.live_prefix),
             history=HistoryReader(pool, config.read_schema),
@@ -89,12 +107,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             checkout=checkout,
             policy=settings,
             settings=settings,
+            lifecycle=lifecycle,
             sandbox=config.sandbox,
             country_header=config.country_header,
         )
         yield
     finally:
-        if task is not None:
+        for task in tasks:
             task.cancel()
         await http.aclose()
         await pool.close()
