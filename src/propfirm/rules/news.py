@@ -73,15 +73,18 @@ def affected_symbols(event: RestrictedEvent, symbols: Iterable[SymbolSpec]) -> f
     return frozenset(out)
 
 
+def event_window(event: RestrictedEvent, symbols: Iterable[SymbolSpec]) -> NewsWindow | None:
+    """The block `event` creates on `symbols` (both edges inclusive), or None
+    when it affects none of them."""
+    affected = affected_symbols(event, symbols)
+    if not affected:
+        return None
+    return NewsWindow(affected, event.ts - event.before_ms, event.ts + event.after_ms + 1)
+
+
 def trade_blocks(
     events: Iterable[RestrictedEvent], symbols: Mapping[str, SymbolSpec]
 ) -> tuple[NewsWindow, ...]:
     """One block per event that affects at least one configured symbol."""
-    blocks: list[NewsWindow] = []
-    for event in events:
-        affected = affected_symbols(event, symbols.values())
-        if affected:
-            start = event.ts - event.before_ms
-            end = event.ts + event.after_ms + 1  # inclusive edge
-            blocks.append(NewsWindow(affected, start, end))
-    return tuple(blocks)
+    windows = (event_window(event, symbols.values()) for event in events)
+    return tuple(w for w in windows if w is not None)

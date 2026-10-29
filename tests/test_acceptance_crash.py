@@ -29,10 +29,10 @@ from tests.journal_rig import (
     Item,
     MemoryJournal,
     MemoryStream,
-    engine_setup,
     observe,
     run_memory,
     session,
+    start,
 )
 
 ITEMS = session(1, seconds=30)
@@ -85,13 +85,11 @@ def test_an_entry_lost_from_the_stream_is_recorded_not_skipped() -> None:
         store, stream = MemoryJournal(), MemoryStream()
         ids = stream.publish(ITEMS)
         crash = Fault.AFTER_READ
-        first = await Runner.start(
-            FaultyStore(store, crash, 1), FaultySource(stream.reader(), crash, 1), engine_setup()
-        )
+        first = await start(FaultyStore(store, crash, 1), FaultySource(stream.reader(), crash, 1))
         with pytest.raises(Crash):
             await first.drain(5)
         stream.delete(ids[2])
-        final = await Runner.start(store, stream.reader(), engine_setup())
+        final = await start(store, stream.reader())
         await final.drain(5)
         return store, ITEMS
 

@@ -2,13 +2,15 @@
 
 - `engine_setup()`: four symbols, every product rule set, a US news block.
 - `session(seed)`: a seeded list of inputs that crosses the 17:00 New York
-  reset and the news block, with stale prices, a silence, an outage, feed
-  duplicates, refused inputs and malformed messages. Commands are chosen
+  reset and the news blocks, with stale prices, a silence, an outage, feed
+  duplicates, refused inputs, malformed messages, a rule-set version and
+  news events added as inputs, and checkpoints. Commands are chosen
   by driving a scratch engine, so they are plausible for the state they
   meet; the list itself is fixed per seed.
 - `MemoryStream` / `MemoryJournal`: in-memory stand-ins with the same
   delivery and commit rules as Valkey and PostgreSQL.
 - `FaultyStore` / `FaultySource`: simulated process death at a chosen call.
+- `start(...)`: Runner.start with a fixed price key, so journals compare.
 - `observe(machine)`: every query the engine answers, for state comparison.
 """
 
@@ -16,24 +18,38 @@ import random
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from fractions import Fraction
 
 import valkey.asyncio as avalkey
 
+from propfirm.journal.anchor import AnchorStore
 from propfirm.journal.inputs import (
+    AddRuleSet,
     Advance,
+    CancelNews,
     CancelOrder,
+    Checkpoint,
     ClosePosition,
     Input,
     ModifyStops,
     OpenAccount,
     Outage,
     PlaceOrder,
+    ScheduleNews,
     apply,
 )
-from propfirm.journal.machine import Machine, Record, StoredRecord, record_hash, source_key
+from propfirm.journal.machine import (
+    Machine,
+    Record,
+    Snapshot,
+    StoredRecord,
+    record_hash,
+    source_key,
+)
 from propfirm.journal.runner import InputSource, JournalStore, Runner
 from propfirm.journal.setup import EngineSetup, build, installed_tzdata
 from propfirm.journal.stream import InputMessage, decode_input, encode_input
+from propfirm.ledger import Entry
 from propfirm.market.guards import GuardConfig
 from propfirm.market.symbols import SYMBOLS
 from propfirm.market.synthetic import Delay, Silence, SyntheticConfig, generate
@@ -48,12 +64,16 @@ from tests.rules_rig import ny
 T0 = ny(2026, 10, 28, 16, 58)  # two minutes before the reset
 SYMS = ("EUR/USD", "USD/JPY", "XAU/USD", "BTC/USD")
 NEWS = (RestrictedEvent("usd", T0 + 200_000, EventScope.CURRENCY, "USD"),)  # blocks T0+80s..
+LITE_V2 = replace(RULESETS["lite-s1-v1"], rsv_id="lite-s1-v2", daily_loss=Fraction(4, 100))
 ACCOUNTS = {
     "A": ("lite-s1-v1", 500_000),
     "B": ("instant-funded-v1", 500_000),
     "C": ("classic-s1-v1", 1_000_000),
+    "F": ("lite-s1-v2", 500_000),  # opened on a version published by input
 }
 CONSUMER = "engine-1"
+TEST_KEY = bytes(range(32))
+CHECKPOINT_EVERY = 400  # inputs
 
 
 def engine_setup() -> EngineSetup:
@@ -88,10 +108,16 @@ def session(seed: int, seconds: int = 240) -> list[Item]:
     items: list[Item] = []
 
     def feed(item: Item) -> None:
-        if not isinstance(item, Raw):
+        if not isinstance(item, Raw | Checkpoint):
             apply(sup, rule_sets, item)
         items.append(item)
 
+    feed(AddRuleSet(LITE_V2, T0))
+    feed(AddRuleSet(LITE_V2, T0))  # versions are immutable: refused
+    feed(ScheduleNews(RestrictedEvent("ecb", T0 + 170_000, EventScope.CURRENCY, "EUR"), T0))
+    feed(ScheduleNews(RestrictedEvent("boj", T0 + 300_000, EventScope.CURRENCY, "JPY"), T0))
+    feed(ScheduleNews(RestrictedEvent("eia", T0 + 90_000, EventScope.OIL_INVENTORY), T0))  # no oil
+    feed(ScheduleNews(RestrictedEvent("ecb", T0 + 1, EventScope.CURRENCY, "EUR"), T0))  # dup id
     for account, (rsv, size) in ACCOUNTS.items():
         feed(OpenAccount(account, rsv, size, T0))
     feed(OpenAccount("A", "lite-s1-v1", 500_000, T0))  # duplicate account
@@ -108,6 +134,7 @@ def session(seed: int, seconds: int = 240) -> list[Item]:
     )
     updates = list(generate(config, T0, T0 + seconds * 1_000))
     n = 0
+    cancelled = False
     for index, update in enumerate(updates):
         feed(update)
         roll = rng.randrange(60)
@@ -119,6 +146,13 @@ def session(seed: int, seconds: int = 240) -> list[Item]:
             feed(PriceUpdate("GBP/USD", index + 1, update.source_ts, update.receive_ts, 127_000))
         if index == len(updates) // 2:
             feed(Outage(update.receive_ts))
+        if update.receive_ts >= T0 + 60_000 and not cancelled:
+            cancelled = True
+            feed(CancelNews("boj", update.receive_ts))  # not started: removed
+            feed(CancelNews("ecb", update.receive_ts))  # started at T0+50s: refused
+            feed(CancelNews("nope", update.receive_ts))
+        if len(items) % CHECKPOINT_EVERY == 0:
+            feed(Checkpoint(update.receive_ts))
         if rng.randrange(3) == 0:
             n += 1
             feed(command(sup, rng, n, update.receive_ts))
@@ -224,11 +258,29 @@ class MemoryReader:
 
 
 class MemoryJournal:
-    """Keeps PostgreSQL's constraints: contiguous seq, unique source ids."""
+    """Keeps PostgreSQL's constraints: contiguous seq, unique source ids,
+    snapshots only at journaled records, key ids increasing."""
 
     def __init__(self) -> None:
         self.setup_text: str | None = None
         self.rows: list[StoredRecord] = []
+        self.snapshots: list[Snapshot] = []
+        self.keys: dict[int, bytes] = {}
+        self._next_key = 1
+
+    def copy(self) -> MemoryJournal:
+        other = MemoryJournal()
+        other.setup_text = self.setup_text
+        other.rows = list(self.rows)
+        other.snapshots = list(self.snapshots)
+        other.keys = dict(self.keys)
+        other._next_key = self._next_key
+        return other
+
+    def purge_licensed(self) -> None:
+        self.rows = [replace(r, price=None) for r in self.rows]
+        self.snapshots = []
+        self.keys = {}
 
     async def setup(self) -> str | None:
         return self.setup_text
@@ -238,11 +290,31 @@ class MemoryJournal:
             raise ValueError("setup already stored")
         self.setup_text = text
 
-    async def records(self) -> AsyncIterator[StoredRecord]:
+    async def records(self, after: int = 0) -> AsyncIterator[StoredRecord]:
         for row in list(self.rows):
-            yield row
+            if row.record.seq > after:
+                yield row
 
-    async def append(self, batch: Sequence[StoredRecord]) -> None:
+    async def record(self, seq: int) -> Record | None:
+        return next((r.record for r in self.rows if r.record.seq == seq), None)
+
+    async def entries_until(self, seq: int) -> list[Entry]:
+        return [e for r in self.rows if r.record.seq <= seq for e in r.record.entries]
+
+    async def latest_snapshot(self) -> Snapshot | None:
+        return max(self.snapshots, key=lambda s: s.seq, default=None)
+
+    async def price_keys(self) -> dict[int, bytes]:
+        return dict(self.keys)
+
+    async def add_price_key(self, secret: bytes) -> int:
+        key_id, self._next_key = self._next_key, self._next_key + 1
+        self.keys[key_id] = secret
+        return key_id
+
+    async def append(
+        self, batch: Sequence[StoredRecord], snapshots: Sequence[Snapshot] = ()
+    ) -> None:
         seen = {r.record.source_id for r in self.rows}
         for offset, stored in enumerate(batch):
             if stored.record.seq != len(self.rows) + offset + 1:
@@ -250,7 +322,11 @@ class MemoryJournal:
             if stored.record.source_id in seen:
                 raise ValueError("duplicate source id")
             seen.add(stored.record.source_id)
+        top = len(self.rows) + len(batch)
+        if any(not 1 <= snap.seq <= top for snap in snapshots):
+            raise ValueError("snapshot of an unknown record")
         self.rows.extend(batch)
+        self.snapshots.extend(snapshots)
 
 
 def rechain(rows: list[StoredRecord], start: int) -> None:
@@ -287,15 +363,32 @@ class FaultyStore:
     async def init_setup(self, text: str) -> None:
         await self._inner.init_setup(text)
 
-    def records(self) -> AsyncIterator[StoredRecord]:
-        return self._inner.records()
+    def records(self, after: int = 0) -> AsyncIterator[StoredRecord]:
+        return self._inner.records(after)
 
-    async def append(self, batch: Sequence[StoredRecord]) -> None:
+    async def record(self, seq: int) -> Record | None:
+        return await self._inner.record(seq)
+
+    async def entries_until(self, seq: int) -> list[Entry]:
+        return await self._inner.entries_until(seq)
+
+    async def latest_snapshot(self) -> Snapshot | None:
+        return await self._inner.latest_snapshot()
+
+    async def price_keys(self) -> dict[int, bytes]:
+        return await self._inner.price_keys()
+
+    async def add_price_key(self, secret: bytes) -> int:
+        return await self._inner.add_price_key(secret)
+
+    async def append(
+        self, batch: Sequence[StoredRecord], snapshots: Sequence[Snapshot] = ()
+    ) -> None:
         self._calls += 1
         hit = self._calls == self._at
         if hit and self._fault is Fault.BEFORE_COMMIT:
             raise Crash
-        await self._inner.append(batch)
+        await self._inner.append(batch, snapshots)
         if hit and self._fault is Fault.AFTER_COMMIT:
             raise Crash
 
@@ -324,6 +417,24 @@ class FaultySource:
         return acked
 
 
+async def start(
+    store: JournalStore,
+    source: InputSource,
+    *,
+    anchors: AnchorStore | None = None,
+    full_replay: bool = False,
+) -> Runner:
+    """Runner.start with the rig's setup and a fixed price key."""
+    return await Runner.start(
+        store,
+        source,
+        engine_setup(),
+        anchors=anchors,
+        full_replay=full_replay,
+        new_price_key=lambda: TEST_KEY,
+    )
+
+
 async def run_memory(
     items: Sequence[Item], faults: Sequence[tuple[Fault, int]] = (), batch: int = 50
 ) -> tuple[MemoryJournal, MemoryStream, Runner, int]:
@@ -333,14 +444,14 @@ async def run_memory(
     stream.publish(items)
     crashes = 0
     for fault, at in faults:
-        runner = await Runner.start(
-            FaultyStore(store, fault, at), FaultySource(stream.reader(), fault, at), engine_setup()
+        runner = await start(
+            FaultyStore(store, fault, at), FaultySource(stream.reader(), fault, at)
         )
         try:
             await runner.drain(batch)
         except Crash:
             crashes += 1
-    final = await Runner.start(store, stream.reader(), engine_setup())
+    final = await start(store, stream.reader())
     await final.drain(batch)
     return store, stream, final, crashes
 
@@ -375,6 +486,7 @@ def observe(machine: Machine) -> dict[str, object]:
         "seq": machine.seq,
         "head": machine.head,
         "source_id": machine.source_id,
+        "state": machine.state(),  # everything the engine remembers, in its own order
     }
 
 

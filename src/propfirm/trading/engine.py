@@ -53,9 +53,10 @@ from fractions import Fraction
 
 from propfirm._checks import is_int, require_int, require_text
 from propfirm.ledger import Ledger, transfer
-from propfirm.market.guards import FeedGuards, GuardChange, GuardConfig
+from propfirm.market.guards import FeedGuards, GuardChange, GuardConfig, GuardState
 from propfirm.market.sequence import SeqStatus, SequenceTracker
-from propfirm.market.spread import NewsWindow, Quote, SpreadModel, in_news
+from propfirm.market.spread import NewsWindow, Quote, SpreadModel, SpreadState, in_news
+from propfirm.market.symbols import SymbolSpec
 from propfirm.market.types import PriceUpdate
 from propfirm.money import cents_ceil, cents_half_even
 from propfirm.trading.events import (
@@ -64,6 +65,8 @@ from propfirm.trading.events import (
     DuplicateUpdate,
     EngineEvent,
     FeedGap,
+    NewsCancelled,
+    NewsScheduled,
     OrderCancelled,
     OrderPlaced,
     OrderRejected,
@@ -91,6 +94,26 @@ def balance_account(account_id: str) -> str:
 class _Account:
     account_id: str
     initial_balance: int
+
+
+@dataclass(frozen=True, slots=True)
+class EngineState:
+    """Everything the engine remembers between inputs (its configuration
+    comes from the setup). Ordered collections keep the engine's own order,
+    which decides the order of events."""
+
+    now: int
+    accounts: tuple[tuple[str, int], ...]  # (account id, initial balance), opening order
+    locked: tuple[str, ...]  # sorted
+    used_ids: tuple[str, ...]  # sorted
+    quotes: tuple[Quote, ...]
+    orders: tuple[PendingOrder, ...]  # placement order
+    positions: tuple[Position, ...]  # opening order
+    guards: GuardState
+    sequences: tuple[tuple[str, int], ...]
+    spreads: tuple[tuple[str, SpreadState], ...]  # configured order
+    calendar: tuple[tuple[str, NewsWindow], ...]  # scheduled, not yet ended
+    calendar_ids: tuple[str, ...]  # sorted: every event id ever scheduled
 
 
 class _NoRate(Exception):
@@ -131,6 +154,8 @@ class TradingEngine:
         self._positions: dict[str, Position] = {}  # open, in opening order
         self._used_ids: set[str] = set()
         self._locked: set[str] = set()
+        self._calendar: dict[str, NewsWindow] = {}  # event id -> window, both uses
+        self._calendar_ids: set[str] = set()
         self._now = 0
 
     # --- inputs -------------------------------------------------------------
@@ -186,7 +211,7 @@ class TradingEngine:
             update.seq,
             update.source_ts,
             update.receive_ts,
-            in_news(self._news, symbol, self._now),
+            self._spread_news(symbol),
         )
         self._quotes[symbol] = quote
         events.extend(self._trigger_orders(quote))
@@ -260,7 +285,7 @@ class TradingEngine:
         if self._guards.is_frozen(position.symbol):
             events.append(self._reject(position_id, account_id, RejectReason.SYMBOL_FROZEN))
             return events
-        if in_news(self._blocks, position.symbol, self._now):
+        if self.is_blocked(position.symbol):
             events.append(self._reject(position_id, account_id, RejectReason.NEWS_WINDOW))
             return events
         amount = position.volume if volume is None else volume
@@ -314,6 +339,29 @@ class TradingEngine:
             )
         return events
 
+    def schedule_news(self, event_id: str, window: NewsWindow, ts: int) -> list[EngineEvent]:
+        """Add a restricted event: inside its window the affected symbols take
+        no trades and their spreads widen [DEFAULT: one window for both]."""
+        require_text("event_id", event_id)
+        if event_id in self._calendar_ids:
+            raise ValueError(f"news event {event_id!r} already scheduled")
+        events = self._advance(ts)
+        self._calendar[event_id] = window
+        self._calendar_ids.add(event_id)
+        symbols = tuple(sorted(window.symbols))
+        events.append(NewsScheduled(self._now, event_id, symbols, window.start_ts, window.end_ts))
+        return events
+
+    def cancel_news(self, event_id: str, ts: int) -> list[EngineEvent]:
+        """Remove a scheduled event whose window has not started."""
+        events = self._advance(ts)
+        window = self._calendar.get(event_id)
+        if window is None or window.start_ts <= self._now:
+            raise ValueError(f"news event {event_id!r} is unknown, started or over")
+        del self._calendar[event_id]
+        events.append(NewsCancelled(self._now, event_id))
+        return events
+
     def lock_account(self, account_id: str, ts: int) -> list[EngineEvent]:
         """Cancel the account's pending orders and reject all further trading."""
         self._account(account_id)
@@ -338,6 +386,63 @@ class TradingEngine:
         """The configured symbols."""
         return frozenset(self._instruments)
 
+    @property
+    def symbol_specs(self) -> dict[str, SymbolSpec]:
+        return {name: spec.symbol for name, spec in self._instruments.items()}
+
+    def news_event(self, event_id: str) -> NewsWindow | None:
+        """A scheduled event's window, until the window ends."""
+        return self._calendar.get(event_id)
+
+    def knows_news(self, event_id: str) -> bool:
+        """Whether this event id was ever scheduled."""
+        return event_id in self._calendar_ids
+
+    def state(self) -> EngineState:
+        return EngineState(
+            now=self._now,
+            accounts=tuple((a.account_id, a.initial_balance) for a in self._accounts.values()),
+            locked=tuple(sorted(self._locked)),
+            used_ids=tuple(sorted(self._used_ids)),
+            quotes=tuple(self._quotes.values()),
+            orders=tuple(self._orders.values()),
+            positions=tuple(self._positions.values()),
+            guards=self._guards.state(),
+            sequences=tuple(self._sequences.snapshot().items()),
+            spreads=tuple((s, m.state()) for s, m in self._spreads.items()),
+            calendar=tuple(self._calendar.items()),
+            calendar_ids=tuple(sorted(self._calendar_ids)),
+        )
+
+    def restore(self, state: EngineState) -> None:
+        """Load a state taken by `state()` from an engine with the same
+        configuration. Only a fresh engine may be restored."""
+        if self._now or self._accounts or self._quotes:
+            raise RuntimeError("restore needs a fresh engine")
+        known = set(self._instruments)
+        if [s for s, _ in state.spreads] != list(self._spreads):
+            raise ValueError("spread state is for other symbols")
+        if not {q.symbol for q in state.quotes} <= known:
+            raise ValueError("quote for an unconfigured symbol")
+        accounts = {a: _Account(a, balance) for a, balance in state.accounts}
+        if len(accounts) != len(state.accounts):
+            raise ValueError("duplicate account in state")
+        self._guards.restore(state.guards)
+        for symbol, spread in state.spreads:
+            self._spreads[symbol].restore(spread)
+        self._sequences = SequenceTracker(dict(state.sequences))
+        self._now = require_int("now", state.now, minimum=0)
+        self._accounts = accounts
+        self._locked = set(state.locked)
+        self._used_ids = set(state.used_ids)
+        self._quotes = {q.symbol: q for q in state.quotes}
+        self._orders = {o.request.order_id: o for o in state.orders}
+        self._positions = {p.position_id: p for p in state.positions}
+        self._calendar = dict(state.calendar)
+        self._calendar_ids = set(state.calendar_ids)
+        if not set(self._calendar) <= self._calendar_ids:
+            raise ValueError("scheduled event without an id record")
+
     def quote(self, symbol: str) -> Quote | None:
         return self._quotes.get(symbol)
 
@@ -346,7 +451,9 @@ class TradingEngine:
 
     def is_blocked(self, symbol: str) -> bool:
         """Whether a news trade block covers `symbol` at engine time."""
-        return in_news(self._blocks, symbol, self._now)
+        return in_news(self._blocks, symbol, self._now) or in_news(
+            self._calendar.values(), symbol, self._now
+        )
 
     def is_locked(self, account_id: str) -> bool:
         self._account(account_id)
@@ -389,7 +496,15 @@ class TradingEngine:
     def _advance(self, ts: int) -> list[EngineEvent]:
         require_int("ts", ts, minimum=0)
         self._now = max(self._now, ts)
+        for event_id, window in list(self._calendar.items()):
+            if window.end_ts <= self._now:  # time only moves forward: never covers again
+                del self._calendar[event_id]
         return [_guard_event(c) for c in self._guards.advance(self._now)]
+
+    def _spread_news(self, symbol: str) -> bool:
+        return in_news(self._news, symbol, self._now) or in_news(
+            self._calendar.values(), symbol, self._now
+        )
 
     def _account(self, account_id: str) -> _Account:
         try:
@@ -416,7 +531,7 @@ class TradingEngine:
             return RejectReason.UNKNOWN_SYMBOL
         if self._guards.is_frozen(request.symbol):
             return RejectReason.SYMBOL_FROZEN
-        if in_news(self._blocks, request.symbol, self._now):
+        if self.is_blocked(request.symbol):
             return RejectReason.NEWS_WINDOW
         if request.volume < 1:
             return RejectReason.INVALID_VOLUME
@@ -492,7 +607,7 @@ class TradingEngine:
 
     def _trigger_orders(self, quote: Quote) -> list[EngineEvent]:
         events: list[EngineEvent] = []
-        if in_news(self._blocks, quote.symbol, self._now):
+        if self.is_blocked(quote.symbol):
             return events  # held: no trade opens inside a news block
         for order_id, pending in list(self._orders.items()):
             request = pending.request

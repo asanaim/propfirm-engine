@@ -57,7 +57,21 @@ engine through one Valkey stream and is journaled in PostgreSQL with the
 events and ledger entries it caused, in one transaction, before it is
 acknowledged. Records are hash-chained from the engine setup. On start the
 engine replays the journal and checks that every record comes out identical.
-Prices are kept in a separate, purgeable table and referenced by digest.
+Prices are kept in a separate, purgeable table and referenced by a keyed
+digest (HMAC-SHA256); purging deletes the prices, their keys and the
+snapshots together.
+
+- News events and new rule-set versions arrive as inputs, so the calendar
+  and the product catalogue change without a new journal.
+- A `Checkpoint` input stores a snapshot of the whole engine state, pinned
+  by its digest in the chain; start-up resumes from the latest snapshot and
+  replays only the records after it.
+- After each checkpoint the head hash is anchored outside the database
+  (`FileAnchorStore` for now); start-up refuses a journal that was rolled
+  back or replaced. An anchor outage does not stop trading.
+- Audits: `verify_chain` (hashes only, works after a purge) and a full
+  replay (`rebuild(store, full=True)`).
+
 See `src/propfirm/journal/`.
 
 ## Conventions
