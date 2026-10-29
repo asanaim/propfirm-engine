@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 
 from propfirm._checks import require_text
+from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import NewsWindow
 from propfirm.market.types import PriceUpdate
 from propfirm.rules.clock import NEW_YORK_17, TradingClock
@@ -45,6 +46,7 @@ from propfirm.rules.events import (
 from propfirm.rules.products import MaxLossKind, RuleSet, TargetBasis, TieRule
 from propfirm.trading.engine import TradingEngine
 from propfirm.trading.events import CloseReason, EngineEvent, PositionClosed, PositionOpened
+from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest
 
 type Event = EngineEvent | RuleEvent
@@ -148,6 +150,17 @@ class RuleSupervisor:
     def cancel_news(self, event_id: str, ts: int) -> list[Event]:
         return self._run(ts, lambda: self._engine.cancel_news(event_id, ts))
 
+    def reconfigure(
+        self,
+        config_version: str,
+        instruments: tuple[InstrumentSpec, ...],
+        guard: GuardConfig | None,
+        ts: int,
+    ) -> list[Event]:
+        return self._run(
+            ts, lambda: self._engine.reconfigure(config_version, instruments, guard, ts)
+        )
+
     # --- state --------------------------------------------------------------
 
     def state(self) -> SupervisorState:
@@ -198,6 +211,13 @@ class RuleSupervisor:
 
     def has_account(self, account_id: str) -> bool:
         return account_id in self._accounts
+
+    def accounts(self) -> tuple[str, ...]:
+        """Every account id, in opening order."""
+        return tuple(self._accounts)
+
+    def rule_set(self, account_id: str) -> RuleSet:
+        return self._state(account_id).rules
 
     def status(self, account_id: str) -> AccountStatus:
         return self._state(account_id).status

@@ -177,6 +177,18 @@ class NewsCancelled:
     event_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class TradingConfigChanged:
+    """New trading settings apply from `ts`: leverage, lot caps and spread
+    parameters of `symbols`, and the feed-guard thresholds when
+    `guard_changed`. Open positions keep the margin fixed when they opened."""
+
+    ts: int
+    config_version: str
+    symbols: tuple[str, ...]  # sorted
+    guard_changed: bool
+
+
 type EngineEvent = (
     AccountOpened
     | OrderRejected
@@ -192,4 +204,5 @@ type EngineEvent = (
     | StaleUpdate
     | NewsScheduled
     | NewsCancelled
+    | TradingConfigChanged
 )

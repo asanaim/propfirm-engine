@@ -1,0 +1,425 @@
+"""The firm policy file: every number and switch the firm can change.
+
+`load_policy(path)` reads `config/policy.toml` strictly: unknown or missing
+keys, floats (percentages are text, money is whole cents) and inconsistent
+values are errors, so a typo cannot silently change a rule.
+
+What reads which part:
+- `products`: the rule sets the engine enforces, and the catalogue
+  (sizes, prices, split, discounts) the API shows and checkout will use.
+- `trading`: leverage, lot caps, spreads and feed-guard thresholds.
+- `access`: the country-gating switch (customer registration, step 2).
+- `news`, `payouts`, `scaling`: read by later P2 steps.
+
+The engine never reads this file directly: the engine service turns
+differences into journaled inputs (`policy_changes`), so every decision
+records the settings it was made under.
+"""
+
+import re
+import tomllib
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from fractions import Fraction
+from pathlib import Path
+from typing import Any
+
+from propfirm.market.guards import GuardConfig
+from propfirm.market.spread import SpreadConfig
+from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass
+from propfirm.rules.products import MaxLossKind, RuleSet, Stage
+from propfirm.trading.instruments import InstrumentSpec, default_instrument
+
+DEFAULT_POLICY = Path(__file__).resolve().parents[2] / "config" / "policy.toml"
+_PERCENT = re.compile(r"(0|[1-9][0-9]*)(\.[0-9]+)?")
+_COUNTRY = re.compile(r"[A-Z]{2}")
+_PRODUCT_ID = re.compile(r"[a-z][a-z0-9-]{0,30}")
+_STAGE_ORDER = {Stage.S1: 0, Stage.S2: 1, Stage.FUNDED: 2}
+
+
+class PolicyError(ValueError):
+    """The policy file is invalid, or a change to it cannot be applied."""
+
+
+# --- parsed policy ---------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AccessPolicy:
+    country_gating: bool
+    blocked_countries: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class NewsPolicy:
+    before_ms: int
+    after_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class PayoutPolicy:
+    minimum_cents: int
+    first_after_days: int
+    pay_days: tuple[str, ...]  # "1".."28" or "last"
+    approvals_required: int
+
+
+@dataclass(frozen=True, slots=True)
+class ScalingPolicy:
+    review_months: int
+    min_net_profit: Fraction
+    min_paid_payouts: int
+    step: Fraction
+    split_after_step: int
+    split_after: Fraction
+    max_allocation_cents: int
+
+
+@dataclass(frozen=True, slots=True)
+class TradingPolicy:
+    config_version: str
+    instruments: tuple[InstrumentSpec, ...]  # launch-symbol order
+    guard: GuardConfig
+
+
+@dataclass(frozen=True, slots=True)
+class ProductPolicy:
+    id: str
+    name: str
+    prices_cents: tuple[tuple[int, int], ...]  # (size, price), in size order
+    profit_split: Fraction
+    code_discount_max: Fraction
+    repeat_discounts: tuple[Fraction, ...]
+    fee_refund_with_payout: int  # 0: none
+    rule_sets: tuple[RuleSet, ...]  # stage order
+
+    def rule_set(self, stage: Stage) -> RuleSet | None:
+        return next((r for r in self.rule_sets if r.stage is stage), None)
+
+
+@dataclass(frozen=True, slots=True)
+class Policy:
+    access: AccessPolicy
+    news: NewsPolicy
+    payouts: PayoutPolicy
+    scaling: ScalingPolicy
+    trading: TradingPolicy
+    products: tuple[ProductPolicy, ...]
+
+    def rule_sets(self) -> tuple[RuleSet, ...]:
+        return tuple(r for p in self.products for r in p.rule_sets)
+
+    def product(self, product_id: str) -> ProductPolicy:
+        for p in self.products:
+            if p.id == product_id:
+                return p
+        raise KeyError(f"unknown product {product_id!r}")
+
+
+# --- reading ---------------------------------------------------------------------
+
+
+class _Table:
+    """One TOML table, read strictly: every key must be used exactly once."""
+
+    def __init__(self, data: object, where: str) -> None:
+        if not isinstance(data, dict):
+            raise PolicyError(f"{where} must be a table")
+        self._data: dict[str, Any] = data
+        self._where = where
+        self._used: set[str] = set()
+
+    def _get(self, key: str) -> Any:
+        if key not in self._data:
+            raise PolicyError(f"{self._where}.{key} is missing")
+        self._used.add(key)
+        return self._data[key]
+
+    def name(self, key: str) -> str:
+        return f"{self._where}.{key}"
+
+    def table(self, key: str) -> _Table:
+        return _Table(self._get(key), self.name(key))
+
+    def tables(self, key: str) -> list[_Table]:
+        value = self._get(key)
+        if not isinstance(value, list) or not value:
+            raise PolicyError(f"{self.name(key)} must be a non-empty list of tables")
+        return [_Table(v, f"{self.name(key)}[{i}]") for i, v in enumerate(value)]
+
+    def boolean(self, key: str) -> bool:
+        value = self._get(key)
+        if not isinstance(value, bool):
+            raise PolicyError(f"{self.name(key)} must be true or false")
+        return value
+
+    def integer(self, key: str, minimum: int = 0) -> int:
+        value = self._get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise PolicyError(f"{self.name(key)} must be a whole number >= {minimum}")
+        return value
+
+    def text(self, key: str) -> str:
+        value = self._get(key)
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise PolicyError(f"{self.name(key)} must be non-empty text")
+        return value
+
+    def percent(self, key: str, *, optional: bool = False) -> Fraction | None:
+        value = self._get(key)
+        return _percent(value, self.name(key), optional)
+
+    def required_percent(self, key: str) -> Fraction:
+        value = self.percent(key)
+        assert value is not None
+        return value
+
+    def ratio(self, key: str) -> Fraction:
+        """A plain decimal written as text, e.g. "3.33" -> 333/100."""
+        value = self._get(key)
+        if not isinstance(value, str) or not _PERCENT.fullmatch(value):
+            raise PolicyError(f'{self.name(key)} must be a decimal written as text, e.g. "1.5"')
+        return Fraction(value)
+
+    def integers(self, key: str, minimum: int = 0) -> tuple[int, ...]:
+        value = self._get(key)
+        if not isinstance(value, list) or not all(
+            isinstance(v, int) and not isinstance(v, bool) and v >= minimum for v in value
+        ):
+            raise PolicyError(f"{self.name(key)} must be a list of whole numbers >= {minimum}")
+        return tuple(value)
+
+    def texts(self, key: str) -> tuple[str, ...]:
+        value = self._get(key)
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise PolicyError(f"{self.name(key)} must be a list of text values")
+        return tuple(value)
+
+    def mapping(self, key: str) -> dict[str, Any]:
+        value = self._get(key)
+        if not isinstance(value, dict):
+            raise PolicyError(f"{self.name(key)} must be a table")
+        return dict(value)
+
+    def done(self) -> None:
+        extra = set(self._data) - self._used
+        if extra:
+            raise PolicyError(f"{self._where}: unknown keys {sorted(extra)}")
+
+
+def _percent(value: object, where: str, optional: bool) -> Fraction | None:
+    if optional and value == "":
+        return None
+    if not isinstance(value, str) or not _PERCENT.fullmatch(value):
+        raise PolicyError(f'{where} must be a percentage written as text, e.g. "6" or "3.5"')
+    return Fraction(value) / 100
+
+
+def load_policy(path: Path = DEFAULT_POLICY) -> Policy:
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        raise PolicyError(f"{path}: {exc}") from exc
+    return parse_policy(data)
+
+
+def parse_policy(data: Mapping[str, Any]) -> Policy:
+    root = _Table(dict(data), "policy")
+    try:
+        policy = Policy(
+            access=_access(root.table("access")),
+            news=_news(root.table("news")),
+            payouts=_payouts(root.table("payouts")),
+            scaling=_scaling(root.table("scaling")),
+            trading=_trading(root.table("trading")),
+            products=tuple(_product(t) for t in root.tables("products")),
+        )
+    except (TypeError, ValueError) as exc:
+        if isinstance(exc, PolicyError):
+            raise
+        raise PolicyError(str(exc)) from exc
+    root.done()
+    ids = [p.id for p in policy.products]
+    if len(set(ids)) != len(ids):
+        raise PolicyError("product ids must be unique")
+    return policy
+
+
+def _access(t: _Table) -> AccessPolicy:
+    gating = t.boolean("country_gating")
+    countries = t.texts("blocked_countries")
+    for code in countries:
+        if not _COUNTRY.fullmatch(code):
+            raise PolicyError(f"{t.name('blocked_countries')}: {code!r} is not ISO alpha-2")
+    t.done()
+    return AccessPolicy(gating, frozenset(countries))
+
+
+def _news(t: _Table) -> NewsPolicy:
+    policy = NewsPolicy(t.integer("before_minutes") * 60_000, t.integer("after_minutes") * 60_000)
+    t.done()
+    return policy
+
+
+def _payouts(t: _Table) -> PayoutPolicy:
+    days = t.texts("pay_days")
+    for day in days:
+        if day != "last" and not (day.isdigit() and 1 <= int(day) <= 28):
+            raise PolicyError(f'{t.name("pay_days")}: {day!r} must be 1 to 28 or "last"')
+    if not days or len(set(days)) != len(days):
+        raise PolicyError(f"{t.name('pay_days')} must list distinct days")
+    policy = PayoutPolicy(
+        minimum_cents=t.integer("minimum_cents", 1),
+        first_after_days=t.integer("first_after_days"),
+        pay_days=days,
+        approvals_required=t.integer("approvals_required", 1),
+    )
+    t.done()
+    return policy
+
+
+def _scaling(t: _Table) -> ScalingPolicy:
+    policy = ScalingPolicy(
+        review_months=t.integer("review_months", 1),
+        min_net_profit=t.required_percent("min_net_profit_percent"),
+        min_paid_payouts=t.integer("min_paid_payouts"),
+        step=t.required_percent("step_percent"),
+        split_after_step=t.integer("split_after_step", 1),
+        split_after=t.required_percent("split_percent_after"),
+        max_allocation_cents=t.integer("max_allocation_cents", 1),
+    )
+    t.done()
+    if not 0 < policy.split_after <= 1:
+        raise PolicyError("scaling.split_percent_after must be in (0, 100]")
+    return policy
+
+
+def _trading(t: _Table) -> TradingPolicy:
+    config_version = t.text("config_version")
+    delay = t.integer("delay_threshold_ms")
+    gap = t.integer("gap_threshold_ms", 1)
+    by_symbol = t.mapping("gap_threshold_ms_by_symbol")
+    leverage_t, caps_t, spread_t = t.table("leverage"), t.table("lot_caps"), t.table("spread")
+    t.done()
+    leverage = {c: leverage_t.ratio(c.value) for c in AssetClass}
+    leverage_t.done()
+    caps: dict[AssetClass, tuple[int, int]] = {}
+    for c in AssetClass:
+        pair = caps_t.integers(c.value, 1)
+        if len(pair) != 2:
+            raise PolicyError(f"{caps_t.name(c.value)} must be [per order, per symbol]")
+        caps[c] = (pair[0], pair[1])
+    caps_t.done()
+    window = spread_t.integer("window", 1)
+    vol = spread_t.ratio("vol_multiplier")
+    news = spread_t.integer("news_multiplier", 1)
+    mins_t = spread_t.table("min_points")
+    spread_t.done()
+    instruments: list[InstrumentSpec] = []
+    for symbol in LAUNCH_SYMBOLS:
+        base = default_instrument(symbol)
+        order_cap, symbol_cap = caps[symbol.asset_class]
+        instruments.append(
+            replace(
+                base,
+                leverage=leverage[symbol.asset_class],
+                max_order_volume_per_100k=order_cap,
+                max_symbol_volume_per_100k=symbol_cap,
+                spread=SpreadConfig(
+                    min_points=mins_t.integer(symbol.name, 1),
+                    window=window,
+                    vol_multiplier=vol,
+                    news_multiplier=news,
+                ),
+            )
+        )
+    mins_t.done()
+    names = {s.name for s in LAUNCH_SYMBOLS}
+    for name, ms in by_symbol.items():
+        if name not in names:
+            raise PolicyError(f"trading.gap_threshold_ms_by_symbol: unknown symbol {name!r}")
+        if isinstance(ms, bool) or not isinstance(ms, int) or ms < 1:
+            raise PolicyError(f"trading.gap_threshold_ms_by_symbol.{name} must be >= 1")
+    guard = GuardConfig(delay, gap, dict(sorted(by_symbol.items())) or None)
+    return TradingPolicy(config_version, tuple(instruments), guard)
+
+
+def _product(t: _Table) -> ProductPolicy:
+    product_id = t.text("id")
+    if not _PRODUCT_ID.fullmatch(product_id):
+        raise PolicyError(f"{t.name('id')} must match {_PRODUCT_ID.pattern}")
+    name = t.text("name")
+    sizes = t.integers("sizes_cents", 1)
+    prices = t.integers("prices_cents", 1)
+    if not sizes or len(sizes) != len(prices) or list(sizes) != sorted(set(sizes)):
+        raise PolicyError(f"{t.name('sizes_cents')}: one price per size, sizes ascending")
+    split = t.required_percent("profit_split_percent")
+    code_max = t.required_percent("code_discount_max_percent")
+    repeats = tuple(
+        _percent(v, t.name("repeat_discount_percent"), False)
+        for v in t.texts("repeat_discount_percent")
+    )
+    refund = t.integer("fee_refund_with_payout")
+    stages = [_stage(s, product_id, sizes) for s in t.tables("stages")]
+    t.done()
+    if not 0 < split <= 1 or not 0 <= code_max < 1:
+        raise PolicyError(f"{t.name('id')}: split must be in (0, 100], discounts below 100")
+    order = [_STAGE_ORDER[r.stage] for r in stages]
+    if order != sorted(set(order)) or stages[-1].stage is not Stage.FUNDED:
+        raise PolicyError(f"{product_id}: stages must be distinct, in order, ending funded")
+    return ProductPolicy(
+        id=product_id,
+        name=name,
+        prices_cents=tuple(zip(sizes, prices, strict=True)),
+        profit_split=split,
+        code_discount_max=code_max,
+        repeat_discounts=tuple(r for r in repeats if r is not None),
+        fee_refund_with_payout=refund,
+        rule_sets=tuple(stages),
+    )
+
+
+def _stage(t: _Table, product_id: str, sizes: tuple[int, ...]) -> RuleSet:
+    stage_text = t.text("stage")
+    try:
+        stage = Stage(stage_text)
+    except ValueError:
+        raise PolicyError(f"{t.name('stage')} must be s1, s2 or funded") from None
+    version = t.integer("version", 1)
+    kind_text = t.text("max_loss_kind")
+    try:
+        kind = MaxLossKind(kind_text)
+    except ValueError:
+        raise PolicyError(f"{t.name('max_loss_kind')} must be static or trailing") from None
+    try:
+        rule_set = _rule_set(t, product_id, stage, version, kind, sizes)
+    except (TypeError, ValueError) as exc:
+        if isinstance(exc, PolicyError):
+            raise
+        raise PolicyError(f"{t.name('stage')} {stage.value}: {exc}") from exc
+    t.done()
+    return rule_set
+
+
+def _rule_set(
+    t: _Table,
+    product_id: str,
+    stage: Stage,
+    version: int,
+    kind: MaxLossKind,
+    sizes: tuple[int, ...],
+) -> RuleSet:
+    return RuleSet(
+        rsv_id=f"{product_id}-{stage.value}-v{version}",
+        product=product_id,
+        stage=stage,
+        profit_target=t.percent("profit_target_percent", optional=True),
+        max_loss=t.required_percent("max_loss_percent"),
+        max_loss_kind=kind,
+        daily_loss=t.required_percent("daily_loss_percent"),
+        min_trading_days=t.integer("min_trading_days"),
+        consistency=t.percent("consistency_percent", optional=True),
+        consistency_at_pass=t.boolean("consistency_at_pass"),
+        sizes_cents=sizes,
+    )

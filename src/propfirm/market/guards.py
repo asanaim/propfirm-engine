@@ -75,6 +75,16 @@ class FeedGuards:
         self._reason: dict[str, FreezeReason | None] = {s: FreezeReason.NO_PRICE for s in symbols}
         self._last_fresh: dict[str, int] = {}
 
+    @property
+    def config(self) -> GuardConfig:
+        return self._config
+
+    def reconfigure(self, config: GuardConfig) -> None:
+        """New thresholds from the next check on; freeze states are kept."""
+        if not isinstance(config, GuardConfig):
+            raise TypeError("config must be a GuardConfig")
+        self._config = config
+
     def state(self) -> GuardState:
         return GuardState(tuple(self._reason.items()), tuple(self._last_fresh.items()))
 

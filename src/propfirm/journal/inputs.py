@@ -18,10 +18,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from propfirm._checks import require_int, require_text
+from propfirm.market.guards import GuardConfig
 from propfirm.market.types import PriceUpdate
 from propfirm.rules.news import RestrictedEvent, event_window
 from propfirm.rules.products import RuleSet
 from propfirm.rules.supervisor import Event, RuleSupervisor
+from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest
 
 
@@ -189,6 +191,30 @@ class CancelNews:
 
 
 @dataclass(frozen=True, slots=True)
+class UpdateTrading:
+    """New trading settings from `ts` on (from the policy file): leverage, lot
+    caps and spread parameters of the instruments listed, and the feed-guard
+    thresholds unless `guard` is None. `config_version` names the new
+    settings; engine events record it."""
+
+    config_version: str
+    instruments: tuple[InstrumentSpec, ...]
+    guard: GuardConfig | None
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("config_version", self.config_version)
+        if not isinstance(self.instruments, tuple):
+            raise TypeError("instruments must be a tuple")
+        for spec in self.instruments:
+            if not isinstance(spec, InstrumentSpec):
+                raise TypeError("instruments must hold InstrumentSpec values")
+        if self.guard is not None and not isinstance(self.guard, GuardConfig):
+            raise TypeError("guard must be a GuardConfig or None")
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
 class Checkpoint:
     """Record a digest of the whole engine state in the chain and store a
     snapshot of it, so start-up can resume from here (sent by the scheduler)."""
@@ -211,6 +237,7 @@ type Input = (
     | AddRuleSet
     | ScheduleNews
     | CancelNews
+    | UpdateTrading
     | Checkpoint
     | Malformed
 )
@@ -227,6 +254,7 @@ INPUT_TYPES = (
     AddRuleSet,
     ScheduleNews,
     CancelNews,
+    UpdateTrading,
     Checkpoint,
     Malformed,
 )
@@ -243,6 +271,7 @@ class InputRejectReason(StrEnum):
     UNKNOWN_NEWS_EVENT = "unknown_news_event"
     NEWS_STARTED = "news_started"  # a window that started or ended cannot be cancelled
     NO_AFFECTED_SYMBOLS = "no_affected_symbols"
+    INVALID_TRADING_CONFIG = "invalid_trading_config"
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,6 +370,11 @@ def apply(
             if scheduled is None or scheduled.start_ts <= max(sup.engine.now, item.ts):
                 return reject(item.event_id, InputRejectReason.NEWS_STARTED)
             return list(sup.cancel_news(item.event_id, item.ts))
+        case UpdateTrading():
+            refusal = sup.engine.check_reconfigure(item.config_version, item.instruments)
+            if refusal is not None:
+                return reject(item.config_version, InputRejectReason.INVALID_TRADING_CONFIG)
+            return list(sup.reconfigure(item.config_version, item.instruments, item.guard, item.ts))
         case Checkpoint():
             raise TypeError("Checkpoint is applied by the journal machine")
         case Malformed():
