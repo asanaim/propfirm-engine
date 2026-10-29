@@ -61,11 +61,39 @@ class GuardConfig:
         return (self.gap_threshold_ms or {}).get(symbol, self.default_gap_threshold_ms)
 
 
+@dataclass(frozen=True, slots=True)
+class GuardState:
+    """Freeze reason per symbol (configured order) and last fresh update time."""
+
+    reasons: tuple[tuple[str, FreezeReason | None], ...]
+    last_fresh: tuple[tuple[str, int], ...]
+
+
 class FeedGuards:
     def __init__(self, config: GuardConfig, symbols: Iterable[str]) -> None:
         self._config = config
         self._reason: dict[str, FreezeReason | None] = {s: FreezeReason.NO_PRICE for s in symbols}
         self._last_fresh: dict[str, int] = {}
+
+    def state(self) -> GuardState:
+        return GuardState(tuple(self._reason.items()), tuple(self._last_fresh.items()))
+
+    def restore(self, state: GuardState) -> None:
+        symbols = [s for s, _ in state.reasons]
+        if symbols != list(self._reason):
+            raise ValueError("guard state is for other symbols")
+        fresh = dict(state.last_fresh)
+        if len(fresh) != len(state.last_fresh) or not set(fresh) <= set(symbols):
+            raise ValueError("bad last-fresh times")
+        for symbol, reason in state.reasons:
+            if reason is not None and not isinstance(reason, FreezeReason):
+                raise TypeError("reason must be a FreezeReason or None")
+            if reason is None and symbol not in fresh:
+                raise ValueError(f"{symbol} is live without a fresh update")
+        for symbol, ts in state.last_fresh:
+            require_int(f"last_fresh[{symbol}]", ts, minimum=0)
+        self._reason = dict(state.reasons)
+        self._last_fresh = fresh
 
     def reason(self, symbol: str) -> FreezeReason | None:
         return self._reason[symbol]

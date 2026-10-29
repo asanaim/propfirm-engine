@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 
 from propfirm._checks import require_text
+from propfirm.market.spread import NewsWindow
 from propfirm.market.types import PriceUpdate
 from propfirm.rules.clock import NEW_YORK_17, TradingClock
 from propfirm.rules.events import (
@@ -59,6 +60,24 @@ class _State:
     high_water: int
     trading_days: set[int] = field(default_factory=set)  # day ids with an opening fill
     day_pnl: dict[int, int] = field(default_factory=dict)  # realized cents per day id
+
+
+@dataclass(frozen=True, slots=True)
+class AccountState:
+    account_id: str
+    rules: RuleSet
+    initial_balance: int
+    status: AccountStatus
+    day_base: int
+    high_water: int
+    trading_days: tuple[int, ...]  # sorted day ids
+    day_pnl: tuple[tuple[int, int], ...]  # (day id, realized cents), sorted
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorState:
+    accounts: tuple[AccountState, ...]  # opening order: decides event order
+    day: int | None
 
 
 class RuleSupervisor:
@@ -122,6 +141,54 @@ class RuleSupervisor:
             ts,
             lambda: self._engine.modify_stops(account_id, position_id, stop_loss, take_profit, ts),
         )
+
+    def schedule_news(self, event_id: str, window: NewsWindow, ts: int) -> list[Event]:
+        return self._run(ts, lambda: self._engine.schedule_news(event_id, window, ts))
+
+    def cancel_news(self, event_id: str, ts: int) -> list[Event]:
+        return self._run(ts, lambda: self._engine.cancel_news(event_id, ts))
+
+    # --- state --------------------------------------------------------------
+
+    def state(self) -> SupervisorState:
+        return SupervisorState(
+            accounts=tuple(
+                AccountState(
+                    s.account_id,
+                    s.rules,
+                    s.initial_balance,
+                    s.status,
+                    s.day_base,
+                    s.high_water,
+                    tuple(sorted(s.trading_days)),
+                    tuple(sorted(s.day_pnl.items())),
+                )
+                for s in self._accounts.values()
+            ),
+            day=self._day,
+        )
+
+    def restore(self, state: SupervisorState) -> None:
+        """Load a state taken by `state()`; the engine is restored separately."""
+        if self._accounts or self._day is not None:
+            raise RuntimeError("restore needs a fresh supervisor")
+        accounts = {
+            a.account_id: _State(
+                account_id=a.account_id,
+                rules=a.rules,
+                initial_balance=a.initial_balance,
+                status=a.status,
+                day_base=a.day_base,
+                high_water=a.high_water,
+                trading_days=set(a.trading_days),
+                day_pnl=dict(a.day_pnl),
+            )
+            for a in state.accounts
+        }
+        if len(accounts) != len(state.accounts):
+            raise ValueError("duplicate account in state")
+        self._accounts = accounts
+        self._day = state.day
 
     # --- queries ------------------------------------------------------------
 

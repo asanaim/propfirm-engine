@@ -159,6 +159,24 @@ class StaleUpdate:
     lag_ms: int
 
 
+@dataclass(frozen=True, slots=True)
+class NewsScheduled:
+    """A restricted event entered the calendar: no trades on `symbols` and
+    wider spreads while engine time is in [start_ts, end_ts)."""
+
+    ts: int
+    event_id: str
+    symbols: tuple[str, ...]  # sorted
+    start_ts: int
+    end_ts: int
+
+
+@dataclass(frozen=True, slots=True)
+class NewsCancelled:
+    ts: int
+    event_id: str
+
+
 type EngineEvent = (
     AccountOpened
     | OrderRejected
@@ -172,4 +190,6 @@ type EngineEvent = (
     | FeedGap
     | DuplicateUpdate
     | StaleUpdate
+    | NewsScheduled
+    | NewsCancelled
 )

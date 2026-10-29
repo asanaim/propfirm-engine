@@ -30,7 +30,7 @@ from propfirm.trading.events import (
     SymbolResumed,
 )
 from propfirm.trading.orders import OrderRequest, OrderType, Side
-from tests.journal_rig import engine_setup
+from tests.journal_rig import TEST_KEY, engine_setup
 
 U = PriceUpdate("EUR/USD", 7, 1_790_000_000_000, 1_790_000_000_150, 110_123)
 U_TEXT = (
@@ -64,7 +64,7 @@ SAMPLES: list[object] = [
     ),
     StagePassed(1, "A", 2, 4, "lite-s1-v1"),
     Entry("e1", 1, "trade_pnl", (Posting("a", 5), Posting("b", -5)), "o1"),
-    price_ref(U),
+    price_ref(U, 1, TEST_KEY),
     GuardConfig(gap_threshold_ms={"XAU/USD": 9_000, "EUR/USD": 7_000}),
     engine_setup(),
     (1, "a", None, True, False, Fraction(-3, 7), frozenset({"b", "a"}), ()),
@@ -90,7 +90,8 @@ def test_pinned_encoding_and_digest() -> None:
     """Golden values: any change to the format breaks every stored journal."""
     assert CODEC.encode(U) == U_TEXT
     assert digest(U_TEXT) == "f621370a6c9cc7effca397e9558c052ef540717c909729bf49f48b3550f85bfc"
-    assert price_ref(U) == PriceRef("EUR/USD", 7, digest(U_TEXT))
+    hmac_hex = "3654c2d6205831740346a8b1a4885b032032480cabef5ce9c6775cb90acd112a"
+    assert price_ref(U, 3, TEST_KEY) == PriceRef("EUR/USD", 7, 3, hmac_hex)  # HMAC-SHA256
 
 
 def test_64_bit_limits_are_inclusive() -> None:

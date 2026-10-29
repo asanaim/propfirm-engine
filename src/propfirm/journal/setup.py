@@ -9,9 +9,10 @@ always replays under the configuration it was written with.
 move a 17:00 New York boundary and change outcomes, so the engine refuses to
 run a journal under another release.
 
-Limits in P1 [DEFAULT]: the setup is fixed for the life of a journal. The
-restricted-events calendar (trade blocks, news spreads) and new rule-set
-versions will become inputs, so they can change without a new journal.
+The setup is fixed for the life of a journal. What must change while the
+engine runs arrives as inputs instead: news events (ScheduleNews,
+CancelNews) and new rule-set versions (AddRuleSet). The setup's own rule
+sets and news windows are the starting catalogue and calendar.
 """
 
 from dataclasses import dataclass

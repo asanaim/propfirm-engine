@@ -40,14 +40,12 @@ STORE, LIVE = live()
 
 
 def rebuilt(store: MemoryJournal) -> dict[str, object]:
-    return observe(asyncio.run(rebuild(store)))
+    """Full replay from record 1 (the audit path; snapshots ignored)."""
+    return observe(asyncio.run(rebuild(store, full=True)))
 
 
 def copy() -> MemoryJournal:
-    store = MemoryJournal()
-    store.setup_text = STORE.setup_text
-    store.rows = list(STORE.rows)
-    return store
+    return STORE.copy()
 
 
 def tampered(edit: str) -> MemoryJournal:
@@ -175,7 +173,8 @@ REPLAY = "replay differs"
         ("engine time", HASH),
         ("record dropped", "expected record"),
         ("records swapped", "expected record"),
-        ("records swapped, chain rewritten", "source id not increasing"),
+        # whichever comes first: the earlier input's result, or the id order
+        ("records swapped, chain rewritten", "replay differs|source id not increasing"),
         ("price changed", "price store differs"),
         ("setup changed", "record 1: chain broken"),
     ],
@@ -204,12 +203,12 @@ def test_chain_check_detects_changes_without_replaying(edit: str, match: str) ->
 
 def test_purged_prices_stop_replay_but_not_the_chain_check() -> None:
     store = copy()
-    store.rows = [replace(r, price=None) for r in store.rows]
+    store.purge_licensed()
     with pytest.raises(PricesUnavailableError):
         rebuilt(store)
     assert asyncio.run(verify_chain(store)) == (LIVE["seq"], LIVE["head"])
     forged = tampered("ledger entry")
-    forged.rows = [replace(r, price=None) for r in forged.rows]
+    forged.purge_licensed()
     with pytest.raises(JournalIntegrityError, match=HASH):
         asyncio.run(verify_chain(forged))
 

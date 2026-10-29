@@ -24,7 +24,7 @@ import valkey.asyncio as avalkey
 
 from propfirm.journal.machine import JournalIntegrityError, PricesUnavailableError
 from propfirm.journal.postgres import JournalLockedError, PostgresJournal
-from propfirm.journal.runner import Runner, rebuild
+from propfirm.journal.runner import rebuild, verify_chain
 from propfirm.journal.stream import InputStreamReader
 from tests.journal_rig import (
     CONSUMER,
@@ -33,11 +33,11 @@ from tests.journal_rig import (
     FaultySource,
     FaultyStore,
     MemoryStream,
-    engine_setup,
     observe,
     publish_valkey,
     run_memory,
     session,
+    start,
 )
 from tests.journal_worker import GROUP
 
@@ -63,7 +63,7 @@ async def journal_live(database_url: str, schema: str) -> dict[str, object]:
     try:
         stream = MemoryStream()
         stream.publish(ITEMS)
-        runner = await Runner.start(store, stream.reader(), engine_setup())
+        runner = await start(store, stream.reader())
         await runner.drain(200)
         return observe(runner.machine)
     finally:
@@ -161,7 +161,9 @@ def test_tampering_behind_disabled_triggers_is_detected(
         store = await PostgresJournal.connect(database_url, pg_schema)
         try:
             with pytest.raises(JournalIntegrityError, match="hash does not match"):
-                await rebuild(store)
+                await rebuild(store, full=True)  # the audit replays every record
+            with pytest.raises(JournalIntegrityError, match="hash does not match"):
+                await verify_chain(store)
         finally:
             await store.close()
 
@@ -180,22 +182,58 @@ def test_one_writer_per_journal(database_url: str, pg_schema: str) -> None:
     asyncio.run(scenario())
 
 
-def test_purging_prices_keeps_the_journal_but_stops_replay(
-    database_url: str, pg_schema: str
-) -> None:
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "UPDATE {s}.prices SET price = price + 1",
+        "UPDATE {s}.price_keys SET secret = secret",
+        "UPDATE {s}.snapshots SET state = state",
+        "TRUNCATE {s}.snapshots",
+    ],
+)
+def test_licensed_tables_take_no_updates(database_url: str, pg_schema: str, statement: str) -> None:
     async def scenario() -> None:
         await journal_live(database_url, pg_schema)
         async with sql(database_url) as conn:
             with pytest.raises(asyncpg.PostgresError, match="append-only"):
-                await conn.execute(f"UPDATE {pg_schema}.prices SET price = price + 1")
+                await conn.execute(statement.format(s=pg_schema))
+
+    asyncio.run(scenario())
+
+
+def test_start_resumes_from_the_postgres_snapshot(database_url: str, pg_schema: str) -> None:
+    async def scenario() -> None:
+        live = await journal_live(database_url, pg_schema)
         store = await PostgresJournal.connect(database_url, pg_schema)
         try:
-            purged = await store.purge_prices()
-            assert purged == sum(1 for r in REFERENCE.rows if r.price is not None)
+            snapshot = await store.latest_snapshot()
+            assert snapshot == REFERENCE.snapshots[-1]
+            assert observe(await rebuild(store)) == live
+            assert observe(await rebuild(store, full=True)) == live
+        finally:
+            await store.close()
+
+    asyncio.run(scenario())
+
+
+def test_purging_licensed_data_keeps_the_journal_but_stops_replay(
+    database_url: str, pg_schema: str
+) -> None:
+    async def scenario() -> None:
+        await journal_live(database_url, pg_schema)
+        store = await PostgresJournal.connect(database_url, pg_schema)
+        try:
+            purged = await store.purge_licensed()
+            assert purged == {
+                "prices": sum(1 for r in REFERENCE.rows if r.price is not None),
+                "price_keys": 1,
+                "snapshots": len(REFERENCE.snapshots),
+            }
             with pytest.raises(PricesUnavailableError):
                 await rebuild(store)
             rows = [r async for r in store.records()]
             assert [r.record for r in rows] == [r.record for r in REFERENCE.rows]
+            assert await verify_chain(store) == (len(rows), rows[-1].record.hash)
         finally:
             await store.close()
 
@@ -219,7 +257,7 @@ async def finish(
     store = await connect_retrying(database_url, schema)
     try:
         reader = InputStreamReader(client, stream, GROUP, CONSUMER)
-        runner = await Runner.start(store, reader, engine_setup())
+        runner = await start(store, reader)
         await runner.drain(100)
         state = observe(runner.machine)
     finally:
@@ -262,10 +300,8 @@ def test_crash_points_against_valkey_and_postgres(
                 store = await PostgresJournal.connect(database_url, pg_schema)
                 try:
                     reader = InputStreamReader(client, stream, GROUP, CONSUMER)
-                    runner = await Runner.start(
-                        FaultyStore(store, fault, at),
-                        FaultySource(reader, fault, at),
-                        engine_setup(),
+                    runner = await start(
+                        FaultyStore(store, fault, at), FaultySource(reader, fault, at)
                     )
                     with pytest.raises(Crash):
                         await runner.drain(25)
