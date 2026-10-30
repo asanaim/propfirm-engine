@@ -38,15 +38,18 @@ Prices and levels are integer points, volumes integer hundredths of a lot,
 money integer cents, times integer UTC milliseconds; floats are refused.
 """
 
+import asyncio
+import json
+import time
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
@@ -79,6 +82,7 @@ from propfirm.policy import (
 )
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
+from propfirm.service.projector import INTERVALS
 from propfirm.settings.overlay import CountryGating, stage_limits, to_json
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.store import ChangeStatus
@@ -104,6 +108,10 @@ class HistorySource(Protocol):
     async def account_events(
         self, account_id: str, after_seq: int = 0, limit: int = 200
     ) -> list[dict[str, Any]]: ...
+
+    async def bars(
+        self, symbol: str, interval: str, limit: int = 300, before: int | None = None
+    ) -> list[dict[str, int]]: ...
 
 
 class Submitter(Protocol):
@@ -153,7 +161,22 @@ class Deps:
     today: Callable[[], date] = _today
     new_id: Callable[[], str] = lambda: uuid.uuid4().hex
     wait_s: float = 5.0
+    price_source: str = "synthetic"  # "synthetic" or "twelve_data": named beside prices
+    stream_poll_s: float = 0.5  # how often a stream looks for changes
+    stream_max_s: float = 300.0  # a stream ends then (an access token lasts 5 minutes)
 
+
+# shown beside every chart and price table. Twelve Data's attribution
+# guidelines: "Data provided by Twelve Data", with "Twelve Data" a followed
+# (dofollow) link to https://twelvedata.com/ near the data, in each section.
+ATTRIBUTION: dict[str, dict[str, str | None]] = {
+    "synthetic": {"text": "Synthetic prices (development)", "link": None, "url": None},
+    "twelve_data": {
+        "text": "Data provided by Twelve Data",
+        "link": "Twelve Data",
+        "url": "https://twelvedata.com/",
+    },
+}
 
 # --- request bodies -----------------------------------------------------------------
 
@@ -922,6 +945,68 @@ def create_app(
     @app.get("/quotes")
     async def quotes(deps: D, me: Me) -> dict[str, dict[str, Any]]:
         return await deps.live.quotes()
+
+    @app.get("/market")
+    async def market(deps: D, me: Me) -> dict[str, Any]:
+        """Where prices come from (to name beside every chart and price
+        table), the symbols, and the bar sizes."""
+        policy = await _policy(deps)
+        return {
+            "source": deps.price_source,
+            "attribution": ATTRIBUTION[deps.price_source],
+            "symbols": [{"symbol": i.name, "digits": i.digits} for i in policy.trading.instruments],
+            "intervals": list(INTERVALS),
+        }
+
+    @app.get("/bars")
+    async def bars(
+        deps: D,
+        me: Me,
+        symbol: Annotated[str, Query(pattern=r"^[A-Z0-9]{2,10}/[A-Z0-9]{2,10}$")],
+        interval: Annotated[str, Query(pattern="^(" + "|".join(INTERVALS) + ")$")] = "1m",
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 300,
+        before: Annotated[int | None, Query(ge=0)] = None,
+    ) -> list[dict[str, int]]:
+        """Bars of one symbol from the firm's own prices (points; `time`:
+        the bar's start, ms UTC). Signed-in users only (price licence)."""
+        policy = await _policy(deps)
+        if symbol not in {i.name for i in policy.trading.instruments}:
+            raise HTTPException(status_code=404, detail="unknown symbol")
+        return await deps.history.bars(symbol, interval, limit, before)
+
+    @app.get("/accounts/{account_id}/stream")
+    async def stream(request: Request, deps: D, me: Me, account_id: Ident) -> StreamingResponse:
+        """Server-sent events: `account` (the live state) and `quotes`
+        whenever they change, a comment every 15 s otherwise, and `end`
+        after `stream_max_s` (the client connects again with a fresh token)."""
+        await _may_read(deps, me, account_id)
+        if await deps.live.account(account_id) is None:
+            raise HTTPException(status_code=404, detail="unknown account")
+
+        async def events() -> AsyncIterator[str]:
+            sent: dict[str, str] = {}
+            started = last = time.monotonic()
+            while time.monotonic() - started < deps.stream_max_s:
+                if await request.is_disconnected():
+                    return
+                found = {
+                    "account": await deps.live.account(account_id),
+                    "quotes": await deps.live.quotes(),
+                }
+                for name, value in found.items():
+                    text = json.dumps(value, sort_keys=True, separators=(",", ":"))
+                    if sent.get(name) != text:
+                        sent[name] = text
+                        last = time.monotonic()
+                        yield f"event: {name}\ndata: {text}\n\n"
+                if time.monotonic() - last >= 15:
+                    last = time.monotonic()
+                    yield ": keep-alive\n\n"
+                await asyncio.sleep(deps.stream_poll_s)
+            yield "event: end\ndata: {}\n\n"
+
+        headers = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
+        return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
 
     @app.get("/accounts/{account_id}")
     async def account(deps: D, me: Me, account_id: Ident) -> dict[str, Any]:

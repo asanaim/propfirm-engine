@@ -76,12 +76,39 @@ npm run typecheck && npm run lint && npm run build
   to sign in again, or to set up an authenticator.
 - Pages: overview (registration on the first visit), challenges (the
   catalogue and checkout; sandbox payment under `PROPFIRM_SANDBOX=1`),
-  accounts and orders, security.
+  accounts and orders, security, open-source notices.
+- Account dashboard (`/accounts/{acc}`), live: balance, equity, the daily
+  and maximum loss left with their floors, the profit target, trading days,
+  the countdown to the 17:00 New York reset with the daily floor from then
+  and a warning when equity at the reset would breach (audit, M12), open
+  positions and pending orders, prices, and a candle chart. Every figure
+  comes from the engine's live state (`GET /accounts/{acc}`), so the portal
+  computes no rule of its own (I14).
+- Live updates: `GET /accounts/{acc}/stream`, server-sent events (`account`
+  and `quotes` when they change; `end` after 5 minutes, and the portal
+  opens it again with a fresh token).
+- Chart: TradingView Lightweight Charts 5.2.1 drawn from the firm's own
+  prices: `GET /bars?symbol=EUR/USD&interval=1m` (1m, 5m, 15m, 1h, 4h, and
+  1d by the 17:00 New York trading day), built by the projector from the
+  price store into one-minute bars. The price source is named beside every
+  chart and price table (`GET /market`; `PROPFIRM_PRICE_SOURCE` =
+  `synthetic` or `twelve_data`: "Data provided by Twelve Data", with "Twelve
+  Data" a followed link to twelvedata.com, as Twelve Data's attribution
+  guidelines ask); the chart carries TradingView's attribution logo and
+  link, and the notices page the NOTICE text of Lightweight Charts 5.2.1.
+- Third-party notices: `npm run build` (and `npm run dev`) writes
+  `public/third-party-notices.txt` with the licence and notice texts of every
+  package shipped to the browser, and fails if one is not permissively
+  licensed or has no text (`portal/notices/` keeps texts an npm package
+  lacks, copied from the upstream release).
 - The portal calls the API under `/api` on its own origin: Vite forwards it
   in development (`PROPFIRM_API_URL`, default http://127.0.0.1:8000), the
   web server in production; no CORS.
-- Design (D44): calm, one accent colour, light and dark themes, Inter (SIL
-  OFL) and Lucide icons (ISC); no platform-vendor fonts, icons or names.
+- Design (D44): Apple-inspired, nothing of Apple's or anyone else's: calm,
+  one accent colour (the firm's own blue, not a platform system colour),
+  light and dark themes, self-hosted Inter (SIL OFL) with no platform-font
+  fallback, Lucide icons (ISC); a clearance test fails the build on Apple
+  or other vendor names, fonts, icon sets or system colours in the portal.
   WCAG 2.2 AA: the colour tokens are checked by a contrast test; every page
   was checked with axe-core in both themes.
 
@@ -368,8 +395,8 @@ or rules uses floating point.
   - [x] 3c: payable profit and payout eligibility
   - [x] 3d: payout processing (two-person approval; sandbox payout provider until C6)
 - [ ] Step 4: trader portal
-  - [ ] 4a: foundation, login (PKCE, optional 2FA, step-up), registration, checkout, accounts
-  - [ ] 4b: account dashboard, live prices, chart
+  - [x] 4a: foundation, login (PKCE, optional 2FA, step-up), registration, checkout, accounts
+  - [x] 4b: account dashboard, live prices, chart
   - [ ] 4c: order ticket, positions, history, rulebook, news calendar
   - [ ] 4d: funded onboarding, wallet, payouts
 - [ ] Step 5: back office

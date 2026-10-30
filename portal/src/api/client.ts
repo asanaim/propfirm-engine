@@ -29,6 +29,29 @@ export type TokenSource = () => Promise<string | null>;
 export interface Api {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body?: unknown) => Promise<T>;
+  /** Server-sent events from `path` until the server ends the stream. */
+  events: (path: string, onEvent: (name: string, data: unknown) => void, signal: AbortSignal) => Promise<void>;
+}
+
+/** Split a server-sent event stream into (event, data) pairs; returns the
+unfinished rest of the buffer. Comments (":") are keep-alives. */
+export function parseEvents(buffer: string, onEvent: (name: string, data: unknown) => void): string {
+  const blocks = buffer.split("\n\n");
+  const rest = blocks.pop() ?? "";
+  for (const block of blocks) {
+    let name = "message";
+    const data: string[] = [];
+    for (const line of block.split("\n")) {
+      if (line.startsWith(":")) continue;
+      const colon = line.indexOf(":");
+      const field = colon < 0 ? line : line.slice(0, colon);
+      const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
+      if (field === "event") name = value;
+      else if (field === "data") data.push(value);
+    }
+    if (data.length) onEvent(name, JSON.parse(data.join("\n")) as unknown);
+  }
+  return rest;
 }
 
 function detailOf(body: unknown): { code: string | null; message: string } {
@@ -73,8 +96,31 @@ export function createApi(base: string, token: TokenSource, fetcher: typeof fetc
     }
     return parsed as T;
   }
+  async function events(
+    path: string,
+    onEvent: (name: string, data: unknown) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    const bearer = await token();
+    if (bearer !== null) headers.Authorization = `Bearer ${bearer}`;
+    const response = await fetcher(`${base}${path}`, { headers, signal });
+    if (!response.ok || response.body === null) {
+      const text = await response.text();
+      const { code, message } = detailOf(text ? (JSON.parse(text) as unknown) : null);
+      throw new ApiError(response.status, code, message);
+    }
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      buffer = parseEvents(buffer + value, onEvent);
+    }
+  }
   return {
     get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body),
+    events,
   };
 }

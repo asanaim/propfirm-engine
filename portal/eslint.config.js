@@ -16,5 +16,6 @@ export default tseslint.config(
       "@typescript-eslint/restrict-template-expressions": ["error", { allowNumber: true }],
     },
   },
-  { files: ["eslint.config.js"], ...tseslint.configs.disableTypeChecked },
+  { files: ["eslint.config.js", "scripts/*.mjs"], ...tseslint.configs.disableTypeChecked },
+  { files: ["scripts/*.mjs"], languageOptions: { globals: { console: "readonly", process: "readonly" } } },
 );

@@ -1,4 +1,4 @@
-import { ApiError, StepUpRequired, createApi, parseStepUp } from "./client";
+import { ApiError, StepUpRequired, createApi, parseEvents, parseStepUp } from "./client";
 
 function respond(status: number, body: unknown, headers: Record<string, string> = {}) {
   return vi.fn<typeof fetch>().mockResolvedValue(
@@ -49,4 +49,36 @@ it("parses the challenge", () => {
   expect(parseStepUp('Bearer error="invalid_token"')).toBeNull();
   expect(parseStepUp('Bearer error="insufficient_user_authentication"')).toEqual({ maxAge: null });
   expect(parseStepUp('Bearer error="insufficient_user_authentication", max_age=60')).toEqual({ maxAge: 60 });
+});
+
+it("splits a server-sent event stream across chunks", () => {
+  const got: [string, unknown][] = [];
+  const push = (name: string, data: unknown) => got.push([name, data]);
+  let rest = parseEvents('event: account\ndata: {"a":1}\n\n: keep-alive\n\nevent: quo', push);
+  expect(got).toEqual([["account", { a: 1 }]]);
+  rest = parseEvents(rest + 'tes\ndata: {"EUR/USD":{}}\n\nevent: end\ndata: {}\n\n', push);
+  expect(rest).toBe("");
+  expect(got).toEqual([
+    ["account", { a: 1 }],
+    ["quotes", { "EUR/USD": {} }],
+    ["end", {}],
+  ]);
+});
+
+it("reads events from a response body with the token", async () => {
+  const body = 'event: account\ndata: {"equity_cents":5}\n\nevent: end\ndata: {}\n\n';
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(body, { status: 200 }));
+  const got: string[] = [];
+  await createApi("/api", () => Promise.resolve("t"), fetcher).events(
+    "/accounts/A/stream",
+    (name) => got.push(name),
+    new AbortController().signal,
+  );
+  expect(got).toEqual(["account", "end"]);
+  expect(fetcher.mock.calls[0]?.[1]?.headers).toMatchObject({ Authorization: "Bearer t" });
+  const refused = vi.fn<typeof fetch>().mockResolvedValue(new Response('{"detail":"unknown account"}', { status: 404 }));
+  const error = await createApi("/api", () => Promise.resolve("t"), refused)
+    .events("/accounts/Z/stream", () => undefined, new AbortController().signal)
+    .catch((e: unknown) => e);
+  expect(error).toMatchObject({ status: 404, message: "unknown account" });
 });

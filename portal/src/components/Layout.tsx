@@ -90,6 +90,9 @@ export function Layout({ children }: { children: ReactNode }) {
       </main>
       <footer className="footer">
         <p>Trading on this platform is simulated. Nothing here is investment advice.</p>
+        <p>
+          <Link href="/notices">Open-source notices</Link>
+        </p>
       </footer>
     </>
   );

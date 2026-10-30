@@ -48,6 +48,7 @@ class ServiceConfig:
     smtp_username: str | None = None
     smtp_password: str | None = field(default=None, repr=False)  # secret
     mail_from: str | None = None  # the From address; required with SMTP_HOST
+    price_source: str = "synthetic"  # "synthetic" or "twelve_data": named beside prices
     batch: int = 200  # inputs per transaction, at most
     block_ms: int = 1_000  # how long one stream read waits for input
     publish_ms: int = 250  # live state is published at most this often
@@ -70,6 +71,8 @@ class ServiceConfig:
             raise ConfigError(
                 "DIDIT_API_KEY, DIDIT_WORKFLOW_ID and DIDIT_WEBHOOK_SECRET go together"
             )
+        if self.price_source not in ("synthetic", "twelve_data"):
+            raise ConfigError("PROPFIRM_PRICE_SOURCE must be synthetic or twelve_data")
         if self.smtp_host and not self.mail_from:
             raise ConfigError("MAIL_FROM is required with SMTP_HOST")
         if self.smtp_tls not in ("starttls", "implicit"):
@@ -136,6 +139,7 @@ class ServiceConfig:
             smtp_username=env.get("SMTP_USERNAME") or None,
             smtp_password=env.get("SMTP_PASSWORD") or None,
             mail_from=env.get("MAIL_FROM") or None,
+            price_source=text("PROPFIRM_PRICE_SOURCE", "synthetic"),
             batch=number("PROPFIRM_BATCH", 200),
             block_ms=number("PROPFIRM_BLOCK_MS", 1_000),
             publish_ms=number("PROPFIRM_PUBLISH_MS", 250),

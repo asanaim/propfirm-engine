@@ -4,7 +4,9 @@ After each batch (at most every `publish_ms`) the engine process writes:
 
     {prefix}:head            journal seq and hash, engine time
     {prefix}:account:{id}    one account: status, balance, equity, margin,
-                             floors, target, trading days, positions,
+                             floors and limits, the next reset and the
+                             daily floor from then, target, trading days,
+                             positions,
                              pending orders, and the numbers of its own
                              rule-set version (it may be older than the
                              catalogue's)
@@ -36,6 +38,8 @@ def account_view(machine: Machine, account_id: str) -> dict[str, Any]:
     sup = machine.supervisor
     engine = sup.engine
     daily_floor, max_floor = sup.floors(account_id)
+    daily_limit, max_limit = sup.limits(account_id)
+    next_reset, next_daily_floor = sup.next_reset(account_id)
     equity = engine.equity(account_id)
     used = engine.used_margin(account_id)
     return {
@@ -47,8 +51,15 @@ def account_view(machine: Machine, account_id: str) -> dict[str, Any]:
         "equity_cents": equity,
         "used_margin_cents": used,
         "free_margin_cents": equity - used,
+        "initial_balance_cents": sup.initial_balance(account_id),
         "daily_floor_cents": daily_floor,
         "max_floor_cents": max_floor,
+        "daily_loss_limit_cents": daily_limit,
+        "max_loss_limit_cents": max_limit,
+        # before the 17:00 New York reset: the floor from then if equity stays
+        "next_reset_ts": next_reset,
+        "next_daily_floor_cents": next_daily_floor,
+        "consistency_ok": sup.consistency_ok(account_id),
         "target_balance_cents": sup.target(account_id),  # None: no target (funded)
         "rules": rule_set_view(sup.rule_set(account_id)),  # this account's own version
         "trading_days": sup.trading_days(account_id),

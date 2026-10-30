@@ -46,6 +46,9 @@ def test_config_defaults_and_overrides() -> None:
     assert config.live_prefix == "live:engine" and config.anchor_path is None
     other = ServiceConfig.from_env({**ENV, "PROPFIRM_BATCH": "50", "PROPFIRM_SCHEMA": "eng2"})
     assert (other.batch, other.schema) == (50, "eng2")
+    assert config.price_source == "synthetic"
+    licensed = ServiceConfig.from_env({**ENV, "PROPFIRM_PRICE_SOURCE": "twelve_data"})
+    assert licensed.price_source == "twelve_data"
 
 
 @pytest.mark.parametrize(
@@ -58,6 +61,7 @@ def test_config_defaults_and_overrides() -> None:
         {**ENV, "PROPFIRM_SCHEMA": "Engine; DROP"},
         {**ENV, "PROPFIRM_READ_SCHEMA": "engine"},
         {**ENV, "PROPFIRM_STREAM": "bad key with spaces"},
+        {**ENV, "PROPFIRM_PRICE_SOURCE": "tradingview"},
     ],
 )
 def test_bad_settings_are_refused(env: dict[str, str]) -> None:
@@ -105,10 +109,19 @@ class FakeLive:
 
 
 class FakeHistory:
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str, int, int | None]] = []
+
     async def account_events(
         self, account_id: str, after_seq: int = 0, limit: int = 200
     ) -> list[dict[str, Any]]:
         return [{"seq": after_seq + 1, "account_id": account_id, "limit": limit}]
+
+    async def bars(
+        self, symbol: str, interval: str, limit: int = 300, before: int | None = None
+    ) -> list[dict[str, int]]:
+        self.asked.append((symbol, interval, limit, before))
+        return [{"time": 60_000, "open": 1, "high": 2, "low": 1, "close": 2, "updates": 3}]
 
 
 class FakeGateway:
