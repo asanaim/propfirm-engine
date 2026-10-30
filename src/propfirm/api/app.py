@@ -8,15 +8,19 @@ office's carry `staff` and `admin`):
 - signed in, any role: /quotes (Twelve Data licence: display to logged-in
   users only);
 - trader: their own CIF, orders, accounts (an account shows its own
-  target and limits) and progressions; buying; trading their own accounts. Someone else's
-  account answers 404, so ids cannot be probed;
+  target and limits), progressions and funded onboardings; buying; their
+  identity check, contract and signature; trading their own accounts.
+  Someone else's account answers 404, so ids cannot be probed;
 - employee (role `staff`): reads every account, its history and inputs;
-  reviews passed stages that lead to funding (approve or deny, never their
+  reviews passed stages that lead to funding, and identity checks whose
+  result differs from the customer record (approve or deny, never their
   own); trades none; no settings;
 - admin: what an employee reads, and the admin-only settings: the
   country-gating switch and list (view and change); changing each stage's
   profit target, daily loss limit and drawdown limit; the change history.
 A signed-in request outside its role's view answers 403.
+- the KYC provider (Didit): POST /webhooks/didit, checked by its signature;
+  it only prompts a fresh read of the outcome from the provider.
 
 Trading: every change is an input submitted to the engine, and the response
 carries the events the engine recorded for it. An engine rejection is
@@ -40,8 +44,11 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
+from propfirm.customers.funding import Onboarding, Signature
+from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
+from propfirm.customers.onboarding_store import OnboardingRecord, OnboardingStateError
 from propfirm.customers.store import (
     AccountRecord,
     AlreadyRegisteredError,
@@ -120,6 +127,8 @@ class Deps:
     policy: PolicySource | None = None  # the policy in force
     settings: Settings | None = None  # admin changes
     lifecycle: Lifecycle | None = None  # stage progression
+    onboarding: Onboarding | None = None  # funded onboarding
+    didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
     clock: Callable[[], int] = now_ms
@@ -174,6 +183,20 @@ class PurchaseBody(_Body):
 
 class DecisionBody(_Body):
     reason: Reason
+
+
+class SignBody(_Body):
+    full_name: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+
+
+class SandboxKycBody(_Body):
+    """Sandbox: the outcome to pretend; the identity defaults to the CIF's."""
+
+    result: Literal["approved", "declined"]
+    full_name: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
+    date_of_birth: Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
+    document_country: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2,3}$")] | None = None
 
 
 class CountryGatingBody(_Body):
@@ -265,6 +288,7 @@ def account_record_view(a: AccountRecord) -> dict[str, Any]:
         "size_cents": a.size_cents,
         "stage": a.stage,
         "progression": a.progression,
+        "onboarding": a.onboarding,
         "created_at": a.created_at,
     }
 
@@ -289,6 +313,46 @@ def progression_view(p: ProgressionRecord) -> dict[str, Any]:
         "decided_at": p.decided_at,
         "created_at": p.created_at,
     }
+
+
+def onboarding_view(o: OnboardingRecord) -> dict[str, Any]:
+    return {
+        "onb": o.onb,
+        "cif": o.cif,
+        "source": o.source,
+        "prg": o.prg,
+        "ord": o.ord,
+        "product_id": o.product_id,
+        "size_cents": o.size_cents,
+        "rsv_id": o.rsv_id,
+        "status": o.status,
+        "kyc": o.kyc,
+        "kyc_attempts": o.kyc_attempts,
+        "acc": o.acc,
+        "contract": o.contract,
+        "failure": o.failure,
+        "created_at": o.created_at,
+    }
+
+
+ONBOARDING_ERRORS = {
+    "unknown": 404,
+    "not_verifying": 409,
+    "not_signing": 409,
+    "not_in_review": 409,
+    "attempts": 409,
+    "not_signer": 403,
+    "blocked": 403,
+    "own_onboarding": 403,
+    "other_text": 422,
+    "name": 422,
+}
+
+
+def _onboarding_refused(exc: OnboardingStateError) -> HTTPException:
+    return HTTPException(
+        status_code=ONBOARDING_ERRORS[exc.code], detail={"code": exc.code, "message": str(exc)}
+    )
 
 
 def _answer(outcome: Outcome) -> JSONResponse:
@@ -356,6 +420,19 @@ PrgId = Annotated[str, Path(pattern=r"^PRG[0-9]{8}$")]
 STATUSES = Literal[
     "provisioning", "provisioned", "failed", "review", "approved", "denied", "blocked"
 ]
+OnbId = Annotated[str, Path(pattern=r"^ONB[0-9]{8}$")]
+ONB_STATUSES = Literal[
+    "verification",
+    "verification_declined",
+    "checks",
+    "review",
+    "rejected",
+    "contract",
+    "signature",
+    "signed",
+    "provisioned",
+    "failed",
+]
 
 
 async def _policy(deps: Deps) -> Policy:
@@ -374,6 +451,12 @@ def _settings(deps: Deps) -> Settings:
     if deps.settings is None:
         raise HTTPException(status_code=503, detail="settings not available")
     return deps.settings
+
+
+def _onboarding(deps: Deps) -> Onboarding:
+    if deps.onboarding is None:
+        raise HTTPException(status_code=503, detail="funded onboarding is not available")
+    return deps.onboarding
 
 
 def _checkout(deps: Deps) -> Checkout:
@@ -460,12 +543,142 @@ def create_app(
         progressions = (
             await deps.lifecycle.store.progressions_for(cif.cif) if deps.lifecycle else []
         )
+        onboardings = (
+            await deps.onboarding.store.onboardings_for(cif.cif) if deps.onboarding else []
+        )
         return {
             **cif_view(cif),
             "accounts": [account_record_view(a) for a in accounts],
             "orders": [order_view(o) for o in orders],
             "progressions": [progression_view(p) for p in progressions],
+            "onboardings": [onboarding_view(o) for o in onboardings],
         }
+
+    # --- funded onboarding --------------------------------------------------------
+
+    async def verification_url(deps: Deps, record: OnboardingRecord) -> str | None:
+        if record.status != "verification" or record.kyc is None:
+            return None
+        store = _onboarding(deps).store
+        case = await store.case(record.kyc)
+        if case is None or await store.result(record.kyc) is not None:
+            return None
+        return case.url
+
+    @app.post("/me/onboardings/{onb}/verification")
+    async def start_verification(deps: D, me: Trader, onb: OnbId) -> dict[str, Any]:
+        """Open (or return) the identity check; answers where to complete it."""
+        cif = await _cif(deps, me)
+        try:
+            record = await _onboarding(deps).start_verification(onb, cif, deps.clock())
+        except OnboardingStateError as exc:
+            raise _onboarding_refused(exc) from exc
+        except KycError as exc:
+            raise HTTPException(status_code=502, detail="identity provider unavailable") from exc
+        return {**onboarding_view(record), "verification_url": await verification_url(deps, record)}
+
+    @app.get("/me/onboardings/{onb}")
+    async def my_onboarding(deps: D, me: Trader, onb: OnbId) -> dict[str, Any]:
+        cif = await _cif(deps, me)
+        record = await _onboarding(deps).store.onboarding(onb)
+        if record is None or record.cif != cif.cif:
+            raise HTTPException(status_code=404, detail="unknown onboarding")
+        return {**onboarding_view(record), "verification_url": await verification_url(deps, record)}
+
+    @app.get("/me/onboardings/{onb}/contract")
+    async def contract(deps: D, me: Trader, onb: OnbId) -> dict[str, Any]:
+        """The agreement to read before signing (and after)."""
+        cif = await _cif(deps, me)
+        store = _onboarding(deps).store
+        record = await store.onboarding(onb)
+        if record is None or record.cif != cif.cif or record.contract is None:
+            raise HTTPException(status_code=404, detail="no contract")
+        found = await store.contract(record.contract)
+        assert found is not None
+        return {
+            "contract": found.contract,
+            "template": found.template,
+            "sha256": found.sha256,
+            "draft": found.draft,
+            "body": found.body,
+            "created_at": found.created_at,
+        }
+
+    @app.post("/me/onboardings/{onb}/sign")
+    async def sign(
+        deps: D, me: Trader, onb: OnbId, body: SignBody, request: Request
+    ) -> dict[str, Any]:
+        """Sign as the verified person: type the name on the identity document
+        and confirm the SHA-256 of the text read."""
+        cif = await _cif(deps, me)
+        signature = Signature(
+            subject=me.subject,
+            typed_name=body.full_name,
+            sha256=body.sha256,
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        try:
+            record = await _onboarding(deps).sign(onb, cif, signature, deps.clock())
+        except OnboardingStateError as exc:
+            raise _onboarding_refused(exc) from exc
+        return onboarding_view(record)
+
+    @app.post("/webhooks/didit")
+    async def didit_webhook(deps: D, request: Request) -> dict[str, Any]:
+        """Didit's notice that a session changed: checked, then the outcome is
+        read from Didit itself."""
+        secret = deps.didit_webhook_secret
+        onboarding = deps.onboarding
+        if not secret or onboarding is None or onboarding.kyc.name != "didit":
+            raise HTTPException(status_code=404, detail="not found")
+        body = await request.body()
+        valid = didit_webhook_valid(
+            body,
+            request.headers.get("x-signature-v2"),
+            request.headers.get("x-timestamp"),
+            secret,
+            deps.clock() // 1000,
+        )
+        if not valid:
+            raise HTTPException(status_code=401, detail="invalid signature")
+        session_id = (await request.json()).get("session_id")
+        if not isinstance(session_id, str):
+            return {"ok": True}
+        try:
+            await onboarding.kyc_update("didit", session_id, deps.clock())
+        except KycError as exc:  # Didit retries; the poll catches up too
+            raise HTTPException(status_code=503, detail="decision not readable yet") from exc
+        return {"ok": True}
+
+    @app.post("/dev/kyc/{session_id}/complete")
+    async def sandbox_kyc(
+        deps: D, me: Trader, session_id: Ident, body: SandboxKycBody
+    ) -> dict[str, Any]:
+        """Sandbox only: pretend the customer finished the identity check."""
+        onboarding = deps.onboarding
+        if not deps.sandbox or onboarding is None or not isinstance(onboarding.kyc, SandboxKyc):
+            raise HTTPException(status_code=404, detail="not found")
+        cif = await _cif(deps, me)
+        case = await onboarding.store.case_by_session("sandbox", session_id)
+        if case is None or case.cif != cif.cif:
+            raise HTTPException(status_code=404, detail="unknown session")
+        if body.result == "declined":
+            decision = KycDecision("declined", detail={"status": "Declined"})
+        else:
+            decision = KycDecision(
+                "approved",
+                full_name=body.full_name or cif.full_name,
+                date_of_birth=date.fromisoformat(body.date_of_birth)
+                if body.date_of_birth
+                else cif.date_of_birth,
+                document_country=alpha2(body.document_country) or cif.residence_country,
+                detail={"status": "Approved"},
+            )
+        onboarding.kyc.complete(session_id, decision)
+        await onboarding.kyc_update("sandbox", session_id, deps.clock())
+        record = await onboarding.store.waiting_on(case.kyc)
+        return {"kyc": case.kyc, "result": body.result, "still_waiting": record}
 
     @app.post("/me", status_code=201)
     async def register(deps: D, me: Trader, body: RegisterBody, request: Request) -> dict[str, Any]:
@@ -654,6 +867,66 @@ def create_app(
     async def deny(deps: D, me: Staff, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
         result: dict[str, Any] = await decide(deps, me, prg, False, body.reason)
         return result
+
+    # --- employees: identity reviews ---------------------------------------------------
+
+    @app.get("/staff/onboardings")
+    async def onboardings(
+        deps: D,
+        me: Staff,
+        status: ONB_STATUSES = "review",
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
+    ) -> list[dict[str, Any]]:
+        """Onboardings in one status; by default the identity reviews waiting."""
+        found = await _onboarding(deps).store.with_status(status, limit)
+        return [onboarding_view(o) for o in found]
+
+    @app.get("/staff/onboardings/{onb}")
+    async def onboarding(deps: D, me: Staff, onb: OnbId) -> dict[str, Any]:
+        """One onboarding with its full history and the verified identity."""
+        store = _onboarding(deps).store
+        record = await store.onboarding(onb)
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown onboarding")
+        history = [
+            {"kind": e.kind, "ts": e.ts, "detail": dict(e.detail)} for e in await store.history(onb)
+        ]
+        verified = None
+        if record.kyc is not None:
+            result = await store.result(record.kyc)
+            if result is not None:
+                verified = {
+                    "kyc": result.kyc,
+                    "result": result.result,
+                    "full_name": result.full_name,
+                    "date_of_birth": result.date_of_birth.isoformat()
+                    if result.date_of_birth
+                    else None,
+                    "document_country": result.document_country,
+                }
+        return {**onboarding_view(record), "verified": verified, "history": history}
+
+    async def decide_onboarding(
+        deps: Deps, me: Principal, onb: str, approve: bool, reason: str
+    ) -> dict[str, Any]:
+        try:
+            record = await _onboarding(deps).decide(
+                onb, approve, me.subject, me.email, reason, deps.clock()
+            )
+        except OnboardingStateError as exc:
+            raise _onboarding_refused(exc) from exc
+        return onboarding_view(record)
+
+    @app.post("/staff/onboardings/{onb}/approve")
+    async def approve_onboarding(
+        deps: D, me: Staff, onb: OnbId, body: DecisionBody
+    ) -> dict[str, Any]:
+        """Accept a verified identity that differs from the customer record."""
+        return await decide_onboarding(deps, me, onb, True, body.reason)
+
+    @app.post("/staff/onboardings/{onb}/deny")
+    async def deny_onboarding(deps: D, me: Staff, onb: OnbId, body: DecisionBody) -> dict[str, Any]:
+        return await decide_onboarding(deps, me, onb, False, body.reason)
 
     # --- admin: settings --------------------------------------------------------------
 

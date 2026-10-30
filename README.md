@@ -160,12 +160,47 @@ product as the policy in force defines it at that moment:
 - the funded stage (Lite and Classic after S2, 1-Step after S1): an
   employee approves or denies it (`GET /staff/progressions`,
   `POST /staff/progressions/{prg}/approve` or `/deny` with a reason); nobody
-  decides their own. Funded onboarding (Tier 2 verification, contract,
-  signature, the funded account) follows an approval (step 3b);
+  decides their own. Funded onboarding follows an approval (below);
 - no next stage in the policy: the progression is blocked for an employee.
 
 Each step is an event in `progression_events` (append-only); the trader
 sees their progressions in `GET /me`.
+
+## Funded onboarding
+
+A funded account is earned by an approved funded review, or by paying for
+an Instant account. Either way an onboarding (`ONB00000001`) starts, and the
+account opens only at its end (an Instant order stays `paid` until then):
+
+1. **Tier 2 identity check** (`POST /me/onboardings/{onb}/verification`
+   answers the provider's link). Didit when `DIDIT_API_KEY`,
+   `DIDIT_WORKFLOW_ID` and `DIDIT_WEBHOOK_SECRET` are set (its workflow must
+   include AML screening); the sandbox check under `PROPFIRM_SANDBOX=1`
+   (`POST /dev/kyc/{session}/complete`). Didit's webhook
+   (`POST /webhooks/didit`) is checked by its signature and only prompts a
+   fresh read of the outcome from Didit; cases without a webhook are polled.
+   A declined check may be retried, three sessions at most; a customer
+   verified before reuses that check.
+2. **Checks** at that moment: AML screening (a hit blocks the customer), the
+   minimum age on the verified date of birth, the country gate on the
+   document country when switched on. A verified name or date of birth
+   that differs from the customer record goes to an employee
+   (`GET /staff/onboardings`, `POST /staff/onboardings/{onb}/approve` or
+   `/deny`); nobody decides their own.
+3. **Contract**: the account's ACC id is allocated and the funded-trader
+   agreement generated from the policy in force
+   (`config/contracts/funded-agreement-v1.txt`, `[contract]` in the policy);
+   its SHA-256 is kept. Until the firm name (C14) and governing law
+   (counsel) are set, contracts are issued only in the sandbox, as DRAFT.
+4. **Signature** (`GET /me/onboardings/{onb}/contract`, then
+   `POST /me/onboardings/{onb}/sign` with the name as on the identity
+   document and the text's SHA-256): only the verified person's login; the
+   login, time, network address and device are recorded.
+5. **The funded account** opens on the product's funded rule set.
+
+Each step is an event in `onboarding_events` (append-only, like
+`contracts`); identity-check data (`kyc_cases`, `kyc_results`) is never
+edited by the code but stays erasable.
 
 ## Conventions
 
@@ -189,7 +224,7 @@ or rules uses floating point.
   trader / employee / admin views, admin-only settings)
 - [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
   - [x] 3a: stage progression (next evaluation account, funded review)
-  - [ ] 3b: funded onboarding (Tier 2 verification, contract, signature)
+  - [x] 3b: funded onboarding (Tier 2 verification, contract, signature)
   - [ ] 3c: payable profit and payout eligibility
   - [ ] 3d: payout processing (two-person approval)
 - [ ] Step 4: trader portal

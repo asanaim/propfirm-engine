@@ -137,6 +137,16 @@ metal = "0"
 oil = "0"
 crypto = "0.0525"
 
+[contract]
+# The funded-trader agreement, issued after Tier 2 verification (outline
+# M18). Text in config/contracts/<template>.txt. Until firm_name (C14) and
+# governing_law (counsel) are set, a contract is issued only in the sandbox,
+# marked DRAFT.
+template = "funded-agreement-v1"
+firm_name = ""
+governing_law = ""
+account_disclosure = "simulated"  # D1: "simulated" or "live"
+
 # --- products -------------------------------------------------------------------
 # Each stage becomes the rule-set version "<product>-<stage>-v<version>".
 # max_loss_kind: "static" (initial balance - max loss) or "trailing"

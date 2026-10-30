@@ -20,6 +20,9 @@ Payment and provisioning, a saga with a retry (outline M08, M09):
    it before a crash) the order becomes provisioned;
 4. an engine refusal marks the order failed (refund is a staff action);
    no answer in time leaves it paid, and `reconcile` retries later.
+An order for a funded account (Instant) opens its account only after
+funded onboarding: Tier 2 verification and the signed agreement
+(`customers.funding`). Until then it stays paid, with its onboarding.
 """
 
 from dataclasses import dataclass
@@ -32,7 +35,8 @@ from propfirm.customers.pricing import DiscountKind, PricingError, price
 from propfirm.customers.providers import PaymentProvider, Screener
 from propfirm.customers.store import CifRecord, CustomerStore, OrderRecord
 from propfirm.journal.inputs import Input, OpenAccount
-from propfirm.policy import PolicySource
+from propfirm.policy import PolicySource, stage_of
+from propfirm.rules.products import Stage
 from propfirm.service.gateway import Outcome
 
 
@@ -40,6 +44,14 @@ class Submitter(Protocol):
     async def publish(self, item: Input) -> str: ...
 
     async def outcome(self, entry_id: str, wait_s: float) -> Outcome: ...
+
+
+class FundedGate(Protocol):
+    """Funded onboarding, as an order sees it."""
+
+    async def order_ready(self, ord_id: str) -> bool: ...
+
+    async def for_order(self, order: OrderRecord, ts: int) -> object: ...
 
 
 class CheckoutError(Exception):
@@ -66,13 +78,17 @@ class Checkout:
         screener: Screener,
         gateway: Submitter,
         wait_s: float = 5.0,
+        funded: FundedGate | None = None,
     ) -> None:
+        """`funded` holds funded orders until onboarding is done (None: they
+        open at payment, as before step 3b; tests only)."""
         self._store = store
         self._policy = policy
         self._payments = payments
         self._screener = screener
         self._gateway = gateway
         self._wait_s = wait_s
+        self._funded = funded
 
     # --- registration ---------------------------------------------------------------
 
@@ -174,6 +190,10 @@ class Checkout:
             raise CheckoutError("unknown_order", ord_id)
         if order.status != "paid":
             return order
+        funded = self._funded is not None and stage_of(order.rsv_id) is Stage.FUNDED
+        if funded and self._funded is not None and not await self._funded.order_ready(order.ord):
+            await self._funded.for_order(order, ts)
+            return order  # stays paid until the agreement is signed
         acc = await self._store.assign_account(order.ord, ts)
         entry_id = await self._gateway.publish(OpenAccount(acc, order.rsv_id, order.size_cents, ts))
         await self._store.provision_attempted(order.ord, acc, entry_id, ts)  # before the wait

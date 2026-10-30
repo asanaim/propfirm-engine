@@ -38,6 +38,10 @@ class ServiceConfig:
     oidc_audience: str = "propfirm-api"
     sandbox: bool = False  # sandbox payments and screening; never in production
     country_header: str | None = None  # header a trusted proxy sets with the IP country
+    didit_api_key: str | None = None  # Tier 2 identity checks (C7); secret
+    didit_workflow_id: str | None = None
+    didit_webhook_secret: str | None = None  # secret
+    public_url: str | None = None  # the portal's address, for the provider's callback
     batch: int = 200  # inputs per transaction, at most
     block_ms: int = 1_000  # how long one stream read waits for input
     publish_ms: int = 250  # live state is published at most this often
@@ -55,10 +59,20 @@ class ServiceConfig:
         for name in ("stream", "group", "consumer"):
             if not _KEY.fullmatch(getattr(self, name)):
                 raise ConfigError(f"{name} must match {_KEY.pattern}")
+        didit = (self.didit_api_key, self.didit_workflow_id, self.didit_webhook_secret)
+        if any(didit) and not all(didit):
+            raise ConfigError(
+                "DIDIT_API_KEY, DIDIT_WORKFLOW_ID and DIDIT_WEBHOOK_SECRET go together"
+            )
         for name in ("batch", "block_ms", "publish_ms"):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ConfigError(f"{name} must be a positive integer")
+
+    @property
+    def didit(self) -> bool:
+        """Whether Didit is configured."""
+        return self.didit_api_key is not None
 
     @property
     def live_prefix(self) -> str:
@@ -100,6 +114,10 @@ class ServiceConfig:
             oidc_audience=text("OIDC_AUDIENCE", "propfirm-api"),
             sandbox=sandbox == "1",
             country_header=env.get("PROPFIRM_COUNTRY_HEADER") or None,
+            didit_api_key=env.get("DIDIT_API_KEY") or None,
+            didit_workflow_id=env.get("DIDIT_WORKFLOW_ID") or None,
+            didit_webhook_secret=env.get("DIDIT_WEBHOOK_SECRET") or None,
+            public_url=env.get("PROPFIRM_PUBLIC_URL") or None,
             batch=number("PROPFIRM_BATCH", 200),
             block_ms=number("PROPFIRM_BLOCK_MS", 1_000),
             publish_ms=number("PROPFIRM_PUBLISH_MS", 250),
