@@ -41,11 +41,12 @@ from propfirm.rules.events import (
     AccountVoided,
     BreachReason,
     DayStarted,
+    PayoutDebited,
     RuleEvent,
     StagePassed,
 )
 from propfirm.rules.products import MaxLossKind, RuleSet, TargetBasis, TieRule
-from propfirm.trading.engine import TradingEngine
+from propfirm.trading.engine import TradingEngine, payout_entry
 from propfirm.trading.events import (
     CloseReason,
     CommissionCharged,
@@ -231,6 +232,44 @@ class RuleSupervisor:
         events += closed
         events += self._engine.lock_account(account_id, now)
         state.status = AccountStatus.VOIDED
+        for other in self._active():
+            events += self._check(other)
+        return events
+
+    def payout_refusal(self, account_id: str, amount_cents: int, payout: str) -> str | None:
+        """Why this payout debit cannot be applied, or None."""
+        state = self._state(account_id)
+        engine = self._engine
+        if engine.has_entry(payout_entry(payout)):
+            return "duplicate_payout"  # first: a retried debit is recognised whatever came after
+        if state.status is not AccountStatus.ACTIVE:
+            return "account_not_active"
+        if engine.positions(account_id) or engine.pending_orders(account_id):
+            return "positions_open"
+        if amount_cents > engine.balance(account_id) - state.initial_balance:
+            return "payout_exceeds_profit"  # the balance never goes below the baseline
+        return None
+
+    def debit_payout(self, account_id: str, amount_cents: int, payout: str, ts: int) -> list[Event]:
+        """Take a payout out of the account (checked by `payout_refusal`)."""
+        refusal = self.payout_refusal(account_id, amount_cents, payout)
+        if refusal is not None:
+            raise ValueError(refusal)
+        state = self._state(account_id)
+        events = self._roll(ts)
+        self._engine.debit_payout(account_id, amount_cents, payout, ts)
+        state.day_base -= amount_cents
+        state.high_water -= amount_cents
+        events.append(
+            PayoutDebited(
+                self._engine.now,
+                account_id,
+                payout,
+                amount_cents,
+                self._engine.balance(account_id),
+                state.rules.rsv_id,
+            )
+        )
         for other in self._active():
             events += self._check(other)
         return events

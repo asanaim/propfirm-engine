@@ -29,11 +29,17 @@ class AuthError(Exception):
     """The request carries no valid access token."""
 
 
+# `amr` values (RFC 8176, and Keycloak's) that prove a second factor; the
+# realm must add the claim to access tokens (an "amr" mapper).
+SECOND_FACTORS = frozenset({"otp", "mfa", "hwk", "swk", "webauthn", "sms"})
+
+
 @dataclass(frozen=True, slots=True)
 class Principal:
     subject: str  # Keycloak user id: the login identity, mapped to one CIF
     email: str | None
     roles: frozenset[str]
+    mfa: bool = False  # the login used a second factor (token claim `amr`)
 
     def has(self, role: str) -> bool:
         return role in self.roles
@@ -117,10 +123,13 @@ class TokenVerifier:
         realm = claims.get("realm_access") or {}
         roles = realm.get("roles") if isinstance(realm, dict) else None
         email = claims.get("email")
+        amr = claims.get("amr")
+        methods = {m for m in amr if isinstance(m, str)} if isinstance(amr, list) else set()
         return Principal(
             subject=subject,
             email=email if isinstance(email, str) else None,
             roles=frozenset(r for r in roles or () if isinstance(r, str)),
+            mfa=bool(methods & SECOND_FACTORS),
         )
 
 

@@ -91,6 +91,12 @@ from propfirm.trading.orders import OrderRequest, OrderType, PendingOrder, Posit
 FIRM_CAPITAL = "firm:capital"
 FIRM_TRADING_PNL = "firm:trading_pnl"
 FIRM_COMMISSION = "firm:commission"
+FIRM_PAYOUTS = "firm:payouts"  # paid out of trading accounts, owed to traders until sent
+
+
+def payout_entry(payout: str) -> str:
+    """The ledger entry id of a payout's debit (one per payout, ever)."""
+    return f"payout:{payout}"
 
 
 def balance_account(account_id: str) -> str:
@@ -441,6 +447,26 @@ class TradingEngine:
                 self._instruments[spec.name] = spec
             self._spreads[spec.name].reconfigure(spec.spread_model)
         self._guards.reconfigure(guard)
+
+    def debit_payout(self, account_id: str, amount_cents: int, payout: str, ts: int) -> None:
+        """Take a payout's amount out of the account's balance (ledger entry
+        `payout:<payout>`). The rules supervisor checks it first."""
+        self._account(account_id)
+        self._advance(ts)
+        self._ledger.post(
+            transfer(
+                payout_entry(payout),
+                self._now,
+                "payout",
+                debit=FIRM_PAYOUTS,
+                credit=balance_account(account_id),
+                amount=amount_cents,
+                reference=payout,
+            )
+        )
+
+    def has_entry(self, entry_id: str) -> bool:
+        return self._ledger.has(entry_id)
 
     def lock_account(self, account_id: str, ts: int) -> list[EngineEvent]:
         """Cancel the account's pending orders and reject all further trading."""

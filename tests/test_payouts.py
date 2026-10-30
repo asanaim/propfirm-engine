@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from propfirm.customers.payouts import FAIL, LATER, PASS, FundedAccount, eligibility, pay_dates
+from propfirm.customers.payouts import FAIL, PASS, FundedAccount, eligibility, pay_dates
 from propfirm.money import share_floor
 from propfirm.policy import DEFAULT_POLICY, AccessPolicy, PolicyError, load_policy, parse_policy
 from propfirm.rules.clock import NEW_YORK_17
@@ -44,6 +44,7 @@ def funded(**change: Any) -> FundedAccount:
         tier2_approved=True,
         residence_country="DE",
         document_country="DE",
+        wallet_added_at=FUNDED,
     )
     return replace(account, **change)
 
@@ -61,7 +62,7 @@ def test_payable_profit_and_the_split() -> None:
         60_000,
     )
     assert (e.split_percent, e.trader_share_cents, e.firm_share_cents) == ("80", 48_000, 12_000)
-    assert (e.fee_refund_cents, e.trader_amount_cents) == (0, 48_000)
+    assert (e.fee_refund_cents, e.trader_amount_cents, e.debit_cents) == (0, 48_000, 60_000)
     assert e.eligible and e.trading_days == 3
     assert {c.name: c.status for c in e.checks} == {
         "funded": PASS,
@@ -73,7 +74,8 @@ def test_payable_profit_and_the_split() -> None:
         "identity": PASS,
         "residence": PASS,
         "cases": PASS,
-        "wallet": LATER,
+        "no_pending_payout": PASS,
+        "wallet": PASS,
     }
 
 
@@ -104,7 +106,47 @@ def test_the_fee_refund_comes_with_the_payout_the_product_names() -> None:
 
 def test_a_maximum_caps_the_trader_amount() -> None:
     capped = replace(POLICY, payouts=replace(POLICY.payouts, maximum_cents=10_000))
-    assert eligibility(capped, funded(), NOW).trader_amount_cents == 10_000
+    e = eligibility(capped, funded(), NOW)
+    # 10,000 of the 48,000 share: G = 10,000 / 0.8 = 12,500 leaves the account
+    assert (e.trader_amount_cents, e.debit_cents, e.payable_cents) == (10_000, 12_500, 60_000)
+    odd = replace(POLICY, payouts=replace(POLICY.payouts, maximum_cents=10_001))
+    assert eligibility(odd, funded(), NOW).debit_cents == 12_502  # 12,501.25 rounds up
+    removed = eligibility(capped, funded(violations_cents=1_000), NOW)
+    assert (removed.trader_amount_cents, removed.debit_cents) == (10_000, 13_500)  # G + V
+    high = replace(POLICY, payouts=replace(POLICY.payouts, maximum_cents=48_000))
+    assert eligibility(high, funded(), NOW).debit_cents == 60_000  # not capped: all of P
+
+
+def test_the_maximum_counts_the_fee_refund() -> None:
+    capped = replace(POLICY, payouts=replace(POLICY.payouts, maximum_cents=10_000))
+    one_step = POLICY.product("one-step")
+    third = eligibility(capped, funded(product=one_step, payouts_paid=2), NOW)
+    share = 10_000 - 4_400
+    assert (third.fee_refund_cents, third.trader_amount_cents) == (4_400, 10_000)
+    assert third.debit_cents == -(-share * 5 // 4)  # ceil(5,600 / 0.8) = 7,000
+
+
+def test_violations_leave_the_account_with_the_payout() -> None:
+    e = eligibility(POLICY, funded(violations_cents=20_000), NOW)
+    assert (e.payable_cents, e.debit_cents) == (40_000, 60_000)  # P + V
+    none = eligibility(POLICY, funded(violations_cents=90_000), NOW)
+    assert (none.payable_cents, none.debit_cents) == (0, 0)
+
+
+def test_the_wallet_and_a_pending_payout() -> None:
+    assert statuses(wallet_added_at=None)["wallet"] == FAIL
+    detail = {
+        c.name: c.detail for c in eligibility(POLICY, funded(wallet_added_at=None), NOW).checks
+    }
+    assert detail["wallet"] == "no payout wallet"
+    hour = 3_600_000
+    assert statuses(wallet_added_at=NOW - 48 * hour)["wallet"] == PASS  # usable from 48 h
+    assert statuses(wallet_added_at=NOW - 48 * hour + 1)["wallet"] == FAIL
+    cooling = replace(POLICY, payouts=replace(POLICY.payouts, wallet_cooling_off_hours=0))
+    fresh = eligibility(cooling, funded(wallet_added_at=NOW), NOW)
+    assert {c.name: c.status for c in fresh.checks}["wallet"] == PASS
+    found = statuses(pending_payout=True)
+    assert [n for n, status in found.items() if status == FAIL] == ["no_pending_payout"]
 
 
 def test_the_waiting_period_and_the_next_pay_day() -> None:
@@ -192,6 +234,10 @@ def test_the_residence_gate_applies_when_switched_on() -> None:
         {"flat_required": "yes"},
         {"min_trading_days": -1},
         {"maximum_cents": 1_000},  # below the minimum
+        {"maximum_cents": 99_899},  # below the largest refundable fee (1-Step 200K)
+        {"trading_during_payout": "stopped"},
+        {"wallet_cooling_off_hours": "48"},
+        {"require_mfa": 1},
     ],
 )
 def test_payout_settings_are_validated(change: dict[str, Any]) -> None:

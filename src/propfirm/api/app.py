@@ -10,14 +10,18 @@ office's carry `staff` and `admin`):
 - trader: their own CIF, orders, accounts (an account shows its own
   target and limits, and a funded account its payable profit and payout
   eligibility), progressions and funded onboardings; buying; their
-  identity check, contract and signature; trading their own accounts.
+  identity check, contract and signature; their payout wallet and payout
+  requests (both need a login with MFA, by policy); trading their own
+  accounts (no new orders while a payout of the account is pending, by
+  policy).
   Someone else's account answers 404, so ids cannot be probed;
 - employee (role `staff`): reads every account, its history and inputs;
   reviews passed stages that lead to funding, and identity checks whose
   result differs from the customer record (approve or deny, never their
   own); integrity, fraud and compliance cases: raises alerts, takes, notes,
   decides; a decision with actions needs a second employee (never on their
-  own customer record); trades none; no settings;
+  own customer record); payouts: approves (as many employees as the policy
+  requires, never their own) or denies; trades none; no settings;
 - admin: what an employee reads, and the admin-only settings: the
   country-gating switch and list (view and change); changing each stage's
   profit target, daily loss limit and drawdown limit; the change history.
@@ -54,7 +58,9 @@ from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, di
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
 from propfirm.customers.onboarding_store import OnboardingRecord, OnboardingStateError
-from propfirm.customers.payouts import Eligibility, FundedAccount, eligibility
+from propfirm.customers.payout_service import Payouts
+from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
+from propfirm.customers.payouts import Eligibility, eligibility_json
 from propfirm.customers.store import (
     AccountRecord,
     AlreadyRegisteredError,
@@ -68,7 +74,6 @@ from propfirm.policy import (
     PolicySource,
     ProductPolicy,
     parse_countries,
-    parse_percent,
     percent_text,
     rule_set_view,
 )
@@ -140,6 +145,7 @@ class Deps:
     lifecycle: Lifecycle | None = None  # stage progression
     onboarding: Onboarding | None = None  # funded onboarding
     cases: Casework | None = None  # integrity, fraud and compliance cases
+    payouts: Payouts | None = None  # payout wallets, requests and approvals
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -195,6 +201,10 @@ class PurchaseBody(_Body):
 
 class DecisionBody(_Body):
     reason: Reason
+
+
+class WalletBody(_Body):
+    address: Annotated[str, StringConstraints(min_length=34, max_length=34)]
 
 
 class AlertBody(_Body):
@@ -394,25 +404,48 @@ def _onboarding_refused(exc: OnboardingStateError) -> HTTPException:
 
 
 def eligibility_view(e: Eligibility) -> dict[str, Any]:
+    return eligibility_json(e)
+
+
+def wallet_view(w: Wallet) -> dict[str, Any]:
+    return {"wal": w.wal, "network": w.network, "address": w.address, "added_at": w.added_at}
+
+
+def payout_view(p: PayoutRecord) -> dict[str, Any]:
     return {
-        "acc": e.acc,
-        "as_of": e.as_of,
-        "eligible": e.eligible,
-        "basis": e.basis,
-        "measured_cents": e.measured_cents,
-        "baseline_cents": e.baseline_cents,
-        "violations_cents": e.violations_cents,
-        "payable_cents": e.payable_cents,
-        "split_percent": e.split_percent,
-        "trader_share_cents": e.trader_share_cents,
-        "firm_share_cents": e.firm_share_cents,
-        "fee_refund_cents": e.fee_refund_cents,
-        "trader_amount_cents": e.trader_amount_cents,
-        "period_start": e.period_start,
-        "trading_days": e.trading_days,
-        "next_pay_date": e.next_pay_date.isoformat(),
-        "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in e.checks],
+        "po": p.po,
+        "acc": p.acc,
+        "cif": p.cif,
+        "wal": p.wal,
+        "requested_at": p.requested_at,
+        "pay_date": p.pay_date.isoformat(),
+        "trader_amount_cents": p.trader_amount_cents,
+        "debit_cents": p.debit_cents,
+        "status": p.status,
+        "approvals": p.approvals,
+        "debited_at": p.debited_at,
+        "paid_at": p.paid_at,
+        "provider_ref": p.provider_ref,
+        "failure": p.failure,
     }
+
+
+PAYOUT_ERRORS = {
+    "unknown": 404,
+    "own_payout": 403,
+    "mfa_required": 403,
+    "not_allowed": 409,
+    "pending": 409,
+    "not_eligible": 409,
+    "product": 409,
+    "invalid": 422,
+}
+
+
+def _payout_refused(exc: PayoutRefused) -> HTTPException:
+    return HTTPException(
+        status_code=PAYOUT_ERRORS[exc.code], detail={"code": exc.code, "message": str(exc)}
+    )
 
 
 def case_view(c: CaseRecord) -> dict[str, Any]:
@@ -512,6 +545,10 @@ STATUSES = Literal[
 ]
 OnbId = Annotated[str, Path(pattern=r"^ONB[0-9]{8}$")]
 CasId = Annotated[str, Path(pattern=r"^CAS[0-9]{8}$")]
+PoId = Annotated[str, Path(pattern=r"^PO[0-9]{8}$")]
+PAYOUT_STATUS = Literal[
+    "requested", "approved", "debited", "sent", "paid", "denied", "cancelled", "failed"
+]
 CASE_STATUSES = Literal["open", "decision_pending", "actioning", "closed"]
 ONB_STATUSES = Literal[
     "verification",
@@ -549,6 +586,12 @@ def _cases(deps: Deps) -> Casework:
     if deps.cases is None:
         raise HTTPException(status_code=503, detail="cases are not available")
     return deps.cases
+
+
+def _payouts(deps: Deps) -> Payouts:
+    if deps.payouts is None:
+        raise HTTPException(status_code=503, detail="payouts are not available")
+    return deps.payouts
 
 
 def _onboarding(deps: Deps) -> Onboarding:
@@ -651,6 +694,37 @@ def create_app(
             "progressions": [progression_view(p) for p in progressions],
             "onboardings": [onboarding_view(o) for o in onboardings],
         }
+
+    # --- payout wallet and payouts ------------------------------------------------
+
+    @app.post("/me/wallet", status_code=201)
+    async def add_wallet(deps: D, me: Trader, body: WalletBody) -> dict[str, Any]:
+        """A new payout wallet (USDT, TRC-20): used after the cooling-off
+        period; replaces the one in use (MFA login, by policy)."""
+        cif = await _cif(deps, me)
+        try:
+            wallet = await _payouts(deps).add_wallet(
+                cif, me.subject, me.mfa, body.address, deps.clock()
+            )
+        except PayoutRefused as exc:
+            raise _payout_refused(exc) from exc
+        return wallet_view(wallet)
+
+    @app.get("/me/wallet")
+    async def my_wallet(deps: D, me: Trader) -> dict[str, Any]:
+        cif = await _cif(deps, me)
+        wallet = await _payouts(deps).store.wallet(cif.cif)
+        if wallet is None:
+            raise HTTPException(status_code=404, detail="no payout wallet")
+        return wallet_view(wallet)
+
+    @app.post("/me/payouts/{po}/cancel")
+    async def cancel_payout(deps: D, me: Trader, po: PoId) -> dict[str, Any]:
+        cif = await _cif(deps, me)
+        try:
+            return payout_view(await _payouts(deps).cancel(po, cif, me.subject, deps.clock()))
+        except PayoutRefused as exc:
+            raise _payout_refused(exc) from exc
 
     # --- funded onboarding --------------------------------------------------------
 
@@ -853,46 +927,27 @@ def create_app(
         """The account's payable profit and every payout eligibility check,
         now. Readable by its owner and by employees."""
         await _may_read(deps, me, account_id)
-        record = await deps.customers.account(account_id)
-        live = await deps.live.account(account_id)
-        if record is None or live is None:
-            raise HTTPException(status_code=404, detail="unknown account")
-        policy = await _policy(deps)
-        order = await deps.customers.order(record.ord)
-        cif = await deps.customers.cif(record.cif)
-        assert order is not None and cif is not None
         try:
-            product = policy.product(record.product_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=409, detail="product not in the policy") from exc
-        tier2 = await deps.onboarding.store.approved_case(cif.cif) if deps.onboarding else None
-        rules = live["rules"]
-        account = FundedAccount(
-            acc=account_id,
-            product=product,
-            stage=rules["stage"],
-            consistency=parse_percent(rules["consistency_percent"] or "", "consistency", True),
-            funded_at=record.created_at,
-            baseline_cents=record.size_cents,
-            fee_paid_cents=order.price_cents,
-            payouts_paid=0,  # payouts come with step 3d
-            last_payout_at=None,
-            status=live["status"],
-            locked=live["locked"],
-            balance_cents=live["balance_cents"],
-            equity_cents=live["equity_cents"],
-            open_positions=len(live["positions"]),
-            pending_orders=len(live["pending_orders"]),
-            trading_day_ids=live.get("trading_day_ids", []),
-            day_pnl=[(d, c) for d, c in live.get("day_pnl", [])],
-            cif_status=cif.status,
-            tier2_approved=tier2 is not None,
-            residence_country=cif.residence_country,
-            document_country=tier2.document_country if tier2 else None,
-            open_case=await deps.cases.has_open_case(cif.cif) if deps.cases else False,
-            violations_cents=await deps.cases.removed_profit(account_id) if deps.cases else 0,
-        )
-        return eligibility_view(eligibility(policy, account, deps.clock()))
+            found = await _payouts(deps).eligibility(account_id, deps.clock())
+        except PayoutRefused as exc:
+            raise _payout_refused(exc) from exc
+        return eligibility_view(found)
+
+    @app.post("/accounts/{account_id}/payouts", status_code=201)
+    async def request_payout(deps: D, me: Trader, account_id: Ident) -> dict[str, Any]:
+        """Ask for the payout the eligibility shows now (MFA login, by policy)."""
+        await _owns(deps, me, account_id)
+        cif = await _cif(deps, me)
+        try:
+            record = await _payouts(deps).request(account_id, cif, me.subject, me.mfa, deps.clock())
+        except PayoutRefused as exc:
+            raise _payout_refused(exc) from exc
+        return payout_view(record)
+
+    @app.get("/accounts/{account_id}/payouts")
+    async def account_payouts(deps: D, me: Me, account_id: Ident) -> list[dict[str, Any]]:
+        await _may_read(deps, me, account_id)
+        return [payout_view(p) for p in await _payouts(deps).store.payouts(acc=account_id)]
 
     @app.get("/accounts/{account_id}/history")
     async def history(
@@ -923,6 +978,13 @@ def create_app(
     @app.post("/accounts/{account_id}/orders")
     async def place(deps: D, me: Trader, account_id: Ident, body: OrderBody) -> JSONResponse:
         await _owns(deps, me, account_id)
+        if deps.payouts is not None:
+            paused = (await _policy(deps)).payouts.trading_during_payout == "paused"
+            if paused and await deps.payouts.store.in_progress(account_id) is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "payout_pending", "message": "no new orders until paid out"},
+                )
 
         def build(ts: int) -> Input:
             request = OrderRequest(
@@ -1200,6 +1262,47 @@ def create_app(
         return result
 
     # --- admin: settings --------------------------------------------------------------
+
+    # --- employees: payouts --------------------------------------------------------
+
+    @app.get("/staff/payouts")
+    async def list_payouts(
+        deps: D,
+        me: Staff,
+        status: PAYOUT_STATUS | None = None,
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
+    ) -> list[dict[str, Any]]:
+        found = await _payouts(deps).store.payouts(status=status, limit=limit)
+        return [payout_view(p) for p in found]
+
+    @app.get("/staff/payouts/{po}")
+    async def get_payout(deps: D, me: Staff, po: PoId) -> dict[str, Any]:
+        store = _payouts(deps).store
+        record = await store.payout(po)
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown payout")
+        wallet = await store.wallet_by_id(record.wal)
+        assert wallet is not None
+        history = [
+            {"kind": e.kind, "ts": e.ts, "detail": e.detail} for e in await store.history(po)
+        ]
+        return {**payout_view(record), "wallet": wallet_view(wallet), "history": history}
+
+    async def payout_step(step: Callable[[], Awaitable[PayoutRecord]]) -> dict[str, Any]:
+        try:
+            return payout_view(await step())
+        except PayoutRefused as exc:
+            raise _payout_refused(exc) from exc
+
+    @app.post("/staff/payouts/{po}/approve")
+    async def approve_payout(deps: D, me: Staff, po: PoId, body: DecisionBody) -> dict[str, Any]:
+        payouts = _payouts(deps)
+        return await payout_step(lambda: payouts.approve(po, me.subject, body.reason, deps.clock()))
+
+    @app.post("/staff/payouts/{po}/deny")
+    async def deny_payout(deps: D, me: Staff, po: PoId, body: DecisionBody) -> dict[str, Any]:
+        payouts = _payouts(deps)
+        return await payout_step(lambda: payouts.deny(po, me.subject, body.reason, deps.clock()))
 
     @app.get("/admin/access")
     async def admin_access(deps: D, me: Admin) -> dict[str, Any]:

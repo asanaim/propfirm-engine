@@ -60,8 +60,8 @@ them; add `-v` to delete the journal and start over.
 | View | Role | Sees and does |
 |---|---|---|
 | Public | none | products, sizes, prices, split, discounts; each stage's profit target, daily loss limit, drawdown limit, trading days and consistency rule; minimum age |
-| Trader (portal) | `trader` | own CIF, orders and accounts (each account shows its own target, limits and floors); buys; trades own accounts |
-| Employee (back office) | `staff` | every account, its history and inputs; trades none; no settings |
+| Trader (portal) | `trader` | own CIF, orders and accounts (each account shows its own target, limits and floors); buys; trades own accounts; own payout wallet and payouts |
+| Employee (back office) | `staff` | every account, its history and inputs; cases; approves or denies payouts (never their own); trades none; no settings |
 | Admin (back office) | `admin` | what an employee sees, plus the admin-only settings below |
 
 Admin-only settings, changed through the API (each change is recorded with
@@ -209,22 +209,63 @@ account's payable profit and every eligibility check, at that moment:
 
 - payable profit P = X − B − V, never below 0: X the closed balance (or the
   equity, `payouts.basis`), B the baseline (the initial capital; a payout
-  never moves it), V profit removed for violations (none yet);
+  never moves it), V profit removed for violations by confirmed case
+  decisions and not yet taken out by a payout;
 - the trader's share s·P rounded down to the cent (s the product's split),
   the firm's share the rest; a fee refund (1-Step: with the 3rd payout) on
-  its own line; `payouts.maximum_cents` caps the trader's amount;
+  its own line; `payouts.maximum_cents` caps the trader's amount (refund
+  included; it may not be set below a refundable fee); `debit_cents`, what
+  leaves the account: P + V (capped: G + V, G = the share paid ÷ s rounded
+  up to the cent, the rest of P stays payable);
 - checks: funded and active; 14 days since funding for the first payout;
   trading days in the period; the account's own consistency rule over the
   period; the $50 minimum; no open position or pending order
   (`payouts.flat_required`); an approved Tier 2 check and a customer not
   blocked; the country gate (when on); no case under review (shown to the
-  trader only as "held for review"). The payout wallet (at request, step
-  3d) is shown as not decided here;
+  trader only as "held for review"); no payout of the account in progress;
+  a payout wallet past its cooling-off period;
 - the next pay day (the 15th or the last day of the month, UTC dates).
 
 The payout settings (D22, D23) are in `[payouts]` of the policy: closed
 balance, flat at request, and, as FTMO and FundedNext, no minimum trading
 days and no maximum.
+
+## Payouts
+
+USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
+
+1. Wallet: `POST /me/wallet` `{"address": "T..."}` (a TRON address,
+   checked by its Base58Check checksum); a new one replaces the old and is
+   usable after `wallet_cooling_off_hours` (48).
+2. Request: `POST /accounts/{acc}/payouts`, when eligible. The request
+   keeps the eligibility it was based on, the trader's amount, the debit
+   and the next pay day. One payout in progress per account; until it is
+   debited (or denied, cancelled, failed) the account takes no new orders
+   (`trading_during_payout = "paused"`, 409 `payout_pending`). The trader
+   may cancel until it is fully approved (`POST /me/payouts/{po}/cancel`).
+3. Approval: `POST /staff/payouts/{po}/approve` by `approvals_required` (2)
+   different employees, never on their own customer record; one `deny`
+   ends it. `GET /staff/payouts`, `GET /staff/payouts/{po}` (wallet and
+   history).
+4. Pay day (the API's background round): eligibility is computed again;
+   anything changed (a check failing, the amount, the wallet) fails the
+   payout and nothing is taken. Otherwise the engine takes `debit_cents`
+   out of the account (input `DebitPayout`, event `PayoutDebited`, ledger
+   entry `payout:PO…` to `firm:payouts`); it refuses a second debit of the
+   same payout, open positions, and more than the profit above the
+   baseline. The day's loss base and the high-water mark drop by the same
+   amount (D42 [DEFAULT]: a trailing floor restarts from the balance after
+   the payout).
+5. Sending: the payout provider sends the trader's amount; its
+   confirmation marks the payout paid. Until NOWPayments is connected (C6),
+   only the sandbox provider exists (`PROPFIRM_SANDBOX=1`; it sends
+   nothing); without it the payout endpoints answer 503.
+
+Changing the wallet and requesting a payout need a login that used a
+second factor (`require_mfa`; the access token's `amr` claim, which the
+Keycloak realm must be set to include). `payout_events` and `wallets` are
+append-only; the payout's facts (amount, debit, wallet, pay day) never
+change.
 
 ## Integrity, fraud and compliance cases
 
@@ -273,7 +314,7 @@ or rules uses floating point.
   - [x] 3a: stage progression (next evaluation account, funded review)
   - [x] 3b: funded onboarding (Tier 2 verification, contract, signature)
   - [x] 3c: payable profit and payout eligibility
-  - [ ] 3d: payout processing (two-person approval)
+  - [x] 3d: payout processing (two-person approval; sandbox payout provider until C6)
 - [ ] Step 4: trader portal
 - [ ] Step 5: back office
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)

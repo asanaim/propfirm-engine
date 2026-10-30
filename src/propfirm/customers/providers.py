@@ -1,4 +1,4 @@
-"""Payment and screening providers, and their sandbox stand-ins.
+"""Payment, payout and screening providers, and their sandbox stand-ins.
 
 The real providers (NOWPayments, C6; Didit, C7) need the operator's
 accounts, which do not exist yet. Until then the sandbox versions stand in:
@@ -35,6 +35,25 @@ class Screener(Protocol):
     async def screen(self, full_name: str, date_of_birth: str, country: str) -> Screening: ...
 
 
+@dataclass(frozen=True, slots=True)
+class PayoutStatus:
+    status: str  # "pending" or "paid"
+    detail: dict[str, Any]  # the provider's evidence (e.g. the transaction hash)
+
+
+class PayoutProvider(Protocol):
+    """Sends USDT (TRC-20) to a trader's wallet (NOWPayments payouts, C6).
+
+    `send` must be idempotent on `payout` (the PO id): a repeated call after
+    a crash returns the same reference and sends nothing more."""
+
+    name: str
+
+    async def send(self, payout: str, network: str, address: str, amount_cents: int) -> str: ...
+
+    async def status(self, ref: str) -> PayoutStatus: ...
+
+
 class SandboxPayments:
     """Every invoice is paid by calling the sandbox completion endpoint."""
 
@@ -50,3 +69,15 @@ class SandboxScreener:
     async def screen(self, full_name: str, date_of_birth: str, country: str) -> Screening:
         hit = "SANCTIONED" in full_name.upper()
         return Screening("sandbox", "hit" if hit else "clear", {"lists": "sandbox"})
+
+
+class SandboxPayouts:
+    """Sends nothing: every payout is "paid" at the first status poll."""
+
+    name = "sandbox"
+
+    async def send(self, payout: str, network: str, address: str, amount_cents: int) -> str:
+        return f"sandbox-{payout}"
+
+    async def status(self, ref: str) -> PayoutStatus:
+        return PayoutStatus("paid", {"tx": f"sandbox-tx-{ref}"})

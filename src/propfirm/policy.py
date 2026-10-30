@@ -77,6 +77,9 @@ class PayoutPolicy:
     flat_required: bool = True  # D23: no open position or pending order at request
     min_trading_days: int = 0  # D22: trading days in the period
     maximum_cents: int = 0  # D22: largest trader amount per payout; 0 = none
+    trading_during_payout: str = "paused"  # D23: "paused" or "allowed", from request to debit
+    wallet_cooling_off_hours: int = 48  # a new payout wallet is used only after this
+    require_mfa: bool = True  # M04: MFA for wallet changes and payout requests
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,6 +369,10 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
     ids = [p.id for p in policy.products]
     if len(set(ids)) != len(ids):
         raise PolicyError("product ids must be unique")
+    refunds = [c for p in policy.products if p.fee_refund_with_payout for _, c in p.prices_cents]
+    if policy.payouts.maximum_cents and policy.payouts.maximum_cents < max(refunds, default=0):
+        # the fee refund is paid with a payout and counts towards its maximum
+        raise PolicyError("payouts.maximum_cents must be 0 or at least every refundable fee")
     return policy
 
 
@@ -424,10 +431,15 @@ def _payouts(t: _Table) -> PayoutPolicy:
         flat_required=t.boolean("flat_required"),
         min_trading_days=t.integer("min_trading_days"),
         maximum_cents=t.integer("maximum_cents"),
+        trading_during_payout=t.text("trading_during_payout"),
+        wallet_cooling_off_hours=t.integer("wallet_cooling_off_hours"),
+        require_mfa=t.boolean("require_mfa"),
     )
     t.done()
     if policy.basis not in PAYOUT_BASES:
         raise PolicyError(f"{t.name('basis')} must be one of {PAYOUT_BASES}")
+    if policy.trading_during_payout not in ("paused", "allowed"):
+        raise PolicyError(f"{t.name('trading_during_payout')} must be paused or allowed")
     if policy.maximum_cents and policy.maximum_cents < policy.minimum_cents:
         raise PolicyError(f"{t.name('maximum_cents')} must be 0 or >= minimum_cents")
     return policy

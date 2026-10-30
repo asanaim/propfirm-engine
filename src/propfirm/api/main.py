@@ -11,7 +11,13 @@ admin stage-limit changes the engine has not journaled yet; another, every
 second, turns new stage passes into progressions, opens the next
 evaluation accounts, and moves funded onboardings on (starting them for
 approved funded reviews, reading identity-check outcomes no webhook
-brought, issuing contracts and opening signed funded accounts).
+brought, issuing contracts and opening signed funded accounts), carries out
+confirmed case decisions, and moves payouts on (on the pay day: checked
+again, debited by the engine, sent, confirmed).
+
+Payouts run only with PROPFIRM_SANDBOX=1 (the sandbox payout provider sends
+nothing) until the NOWPayments payout client is connected (C6); without it,
+the payout endpoints answer 503.
 
 Funded onboarding runs with the sandbox identity check under
 PROPFIRM_SANDBOX=1, or with Didit when DIDIT_API_KEY, DIDIT_WORKFLOW_ID and
@@ -42,7 +48,14 @@ from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowSc
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
 from propfirm.customers.onboarding_store import OnboardingStore
-from propfirm.customers.providers import SandboxPayments, SandboxScreener, Screener
+from propfirm.customers.payout_service import Payouts
+from propfirm.customers.payout_store import PayoutStore
+from propfirm.customers.providers import (
+    SandboxPayments,
+    SandboxPayouts,
+    SandboxScreener,
+    Screener,
+)
 from propfirm.customers.store import CustomerStore
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.policy import load_policy
@@ -75,7 +88,7 @@ async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> N
 
 
 async def _lifecycle_forever(
-    lifecycle: Lifecycle, onboarding: Onboarding | None, cases: Casework
+    lifecycle: Lifecycle, onboarding: Onboarding | None, cases: Casework, payouts: Payouts | None
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -88,6 +101,11 @@ async def _lifecycle_forever(
             await cases.advance(now_ms())  # confirmed decisions not yet carried out
         except Exception:  # retried next round
             log.exception("carrying out case decisions failed")
+        if payouts is not None:
+            try:
+                await payouts.advance(now_ms())  # each payout's next step, recorded first
+            except Exception:  # retried next round
+                log.exception("payout round failed")
         if onboarding is None:
             continue
         try:
@@ -112,11 +130,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         progressions = ProgressionStore(pool, config.customer_schema, config.schema)
         onboardings = OnboardingStore(pool, config.customer_schema)
         case_store = CaseStore(pool, config.customer_schema)
+        payout_store = PayoutStore(pool, config.customer_schema)
         fixed = (
             await customers.rebuild_status()
             + await progressions.rebuild_status()
             + await onboardings.rebuild_status()
             + await case_store.rebuild_status()
+            + await payout_store.rebuild_status()
         )
         if fixed:
             log.warning("cached status differed from the history and was rebuilt: %s", fixed)
@@ -156,10 +176,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 cases=cases,
             )
         lifecycle = Lifecycle(progressions, settings, gateway, cases=cases)
+        live = LiveReader(client, config.live_prefix)
+        payouts = None
+        if config.sandbox:
+            payouts = Payouts(
+                payout_store,
+                customers,
+                live,
+                settings,
+                gateway,
+                SandboxPayouts(),
+                identity=onboardings,
+                cases=cases,
+            )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
-        tasks.append(asyncio.create_task(_lifecycle_forever(lifecycle, onboarding, cases)))
+        tasks.append(asyncio.create_task(_lifecycle_forever(lifecycle, onboarding, cases, payouts)))
         app.state.deps = Deps(
-            live=LiveReader(client, config.live_prefix),
+            live=live,
             history=HistoryReader(pool, config.read_schema),
             gateway=gateway,
             verifier=TokenVerifier(
@@ -172,6 +205,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             lifecycle=lifecycle,
             onboarding=onboarding,
             cases=cases,
+            payouts=payouts,
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,
             country_header=config.country_header,

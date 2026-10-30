@@ -49,6 +49,7 @@ from propfirm.journal.inputs import (
     CancelOrder,
     Checkpoint,
     ClosePosition,
+    DebitPayout,
     Input,
     InputRejected,
     InputRejectReason,
@@ -82,6 +83,7 @@ from propfirm.rules.events import (
     AccountVoided,
     BreachReason,
     DayStarted,
+    PayoutDebited,
     StagePassed,
 )
 from propfirm.rules.news import EventScope, RestrictedEvent
@@ -175,6 +177,7 @@ CODEC = Codec(
         CancelNews,
         UpdateTrading,
         VoidAccount,
+        DebitPayout,
         Checkpoint,
         Malformed,
         PriceRef,
@@ -205,6 +208,7 @@ CODEC = Codec(
         AccountBreached,
         StagePassed,
         AccountVoided,
+        PayoutDebited,
         # ledger
         Entry,
         Posting,

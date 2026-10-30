@@ -34,6 +34,7 @@ def token(
     kid: str = KID,
     algorithm: str = "RS256",
     drop: tuple[str, ...] = (),
+    amr: tuple[str, ...] = ("pwd", "otp"),
 ) -> str:
     now = int(time.time())
     claims: dict[str, Any] = {
@@ -44,14 +45,18 @@ def token(
         "exp": now + expires_in,
         "email": email,
         "realm_access": {"roles": list(roles)},
+        "amr": list(amr),
     }
     for name in drop:
         claims.pop(name, None)
     return jwt.encode(claims, key, algorithm=algorithm, headers={"kid": kid})
 
 
-def bearer(subject: str = "user-1", roles: tuple[str, ...] = ("trader",)) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token(subject, roles, f'{subject}@example.com')}"}
+def bearer(
+    subject: str = "user-1", roles: tuple[str, ...] = ("trader",), *, mfa: bool = True
+) -> dict[str, str]:
+    amr = ("pwd", "otp") if mfa else ("pwd",)
+    return {"Authorization": f"Bearer {token(subject, roles, f'{subject}@example.com', amr=amr)}"}
 
 
 @dataclass

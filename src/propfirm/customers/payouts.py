@@ -8,7 +8,7 @@ Payable profit:
        closed-balance account to B, so losses after a payout must be made
        back above B before the next one (high-water mark, I8);
     V  profit removed for violations: the remove_profit actions of confirmed
-       case decisions (customers.cases);
+       case decisions (customers.cases) not yet taken out by a payout;
     P  = max(0, X - B - V), the payable profit;
     s  the product's profit split (the 90 % tier comes with scaling, later).
 The trader's share is s * P rounded down to the cent (`share_floor`); the
@@ -18,7 +18,7 @@ separate line. A payout maximum, when set, caps the trader's amount.
 Eligibility, all of which must hold (M18):
 - funded: a funded account, active (not breached, passed or locked);
 - waiting period: the first payout no sooner than `first_after_days` after
-  funding (later payouts: one per pay day, with 3d);
+  funding (later payouts: one per pay day);
 - trading days in the period (`min_trading_days`, D22);
 - consistency (D19): when the account's rule set has the rule, its best
   day in the period is at most that share of the period's realized profit;
@@ -30,8 +30,11 @@ Eligibility, all of which must hold (M18):
   countries (D32).
 - no case not closed (integrity, fraud, compliance: M16, M17, M20); the
   detail never says more than "held for review" (no tipping off).
-One check is recorded as not decided here: the payout wallet (checked when
-a payout is requested, step 3d).
+- no payout of the account already being processed;
+- a payout wallet, past its cooling-off period.
+The amount leaving the account is P + V (G + V when a maximum caps the
+trader's share: G = the share paid / s, rounded up to the cent; the rest of
+P stays payable).
 
 The period runs from funding, or from the last payout; trading days and
 daily P&L count whole trading days (17:00 New York), so the trading day of
@@ -42,10 +45,12 @@ after the end of the waiting period is shown.
 """
 
 import calendar
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from fractions import Fraction
+from typing import Any
 
 from propfirm.access.gating import check_country
 from propfirm.money import share_floor
@@ -74,8 +79,8 @@ class FundedAccount:
     funded_at: int  # ms UTC: when the account opened
     baseline_cents: int  # B
     fee_paid_cents: int  # the order's price (for a fee refund)
-    payouts_paid: int  # payouts made on this order's accounts so far (3d)
-    last_payout_at: int | None  # ms UTC (3d)
+    payouts_paid: int  # payouts made on this order's accounts so far
+    last_payout_at: int | None  # ms UTC: the last payout debited from this account
     # live engine state
     status: str  # active, passed, breached
     locked: bool
@@ -93,6 +98,9 @@ class FundedAccount:
     # cases (M16, M17, M20)
     open_case: bool = False  # the customer has a case not closed
     violations_cents: int = 0  # profit removed by confirmed decisions (V)
+    # payouts (3d)
+    pending_payout: bool = False  # a payout of this account requested, not yet debited
+    wallet_added_at: int | None = None  # the customer's payout wallet; None: none
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +117,7 @@ class Eligibility:
     firm_share_cents: int
     fee_refund_cents: int
     trader_amount_cents: int  # what the trader would receive (share, refund, maximum)
+    debit_cents: int  # what leaves the account: the gross paid on (G, or P) plus V
     period_start: int  # ms UTC
     trading_days: int  # in the period
     next_pay_date: date
@@ -150,9 +159,14 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
     payout_number = account.payouts_paid + 1
     refund_due = account.product.fee_refund_with_payout == payout_number
     refund = account.fee_paid_cents if refund_due else 0
-    amount = trader_share + refund
+    share_paid = trader_share
     if payouts.maximum_cents:
-        amount = min(amount, payouts.maximum_cents)
+        share_paid = max(0, min(trader_share, payouts.maximum_cents - refund))
+    amount = share_paid + refund
+    # a capped share pays out only part of P: G = W / s rounded up to the cent,
+    # and the rest stays payable (B never moves)
+    gross = payable if share_paid == trader_share else min(payable, math.ceil(share_paid / split))
+    debit = gross + violations if gross else 0
 
     active = account.status == "active" and not account.locked
     funded = account.stage == "funded"
@@ -215,7 +229,21 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
     )
     check("residence", gate.allowed, ", ".join(gate.reasons) or "not restricted")
     check("cases", not account.open_case, "held for review" if account.open_case else "none open")
-    checks.append(Check("wallet", LATER, "checked when the payout is requested"))
+    check(
+        "no_pending_payout",
+        not account.pending_payout,
+        "a payout is being processed" if account.pending_payout else "none",
+    )
+    if account.wallet_added_at is None:
+        check("wallet", False, "no payout wallet")
+    else:
+        usable = account.wallet_added_at + payouts.wallet_cooling_off_hours * 3_600_000
+        check(
+            "wallet",
+            now >= usable,
+            f"usable from {datetime.fromtimestamp(usable / 1000, UTC).isoformat()} "
+            f"({payouts.wallet_cooling_off_hours} h after it was added)",
+        )
 
     return Eligibility(
         acc=account.acc,
@@ -230,8 +258,34 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
         firm_share_cents=payable - trader_share,
         fee_refund_cents=refund,
         trader_amount_cents=amount,
+        debit_cents=debit,
         period_start=period_start,
         trading_days=len(days),
         next_pay_date=next_pay,
         checks=tuple(checks),
     )
+
+
+def eligibility_json(e: Eligibility) -> dict[str, Any]:
+    """The eligibility as shown to the trader and staff, and as recorded with
+    a payout request (a JSON snapshot)."""
+    return {
+        "acc": e.acc,
+        "as_of": e.as_of,
+        "eligible": e.eligible,
+        "basis": e.basis,
+        "measured_cents": e.measured_cents,
+        "baseline_cents": e.baseline_cents,
+        "violations_cents": e.violations_cents,
+        "payable_cents": e.payable_cents,
+        "split_percent": e.split_percent,
+        "trader_share_cents": e.trader_share_cents,
+        "firm_share_cents": e.firm_share_cents,
+        "fee_refund_cents": e.fee_refund_cents,
+        "trader_amount_cents": e.trader_amount_cents,
+        "debit_cents": e.debit_cents,
+        "period_start": e.period_start,
+        "trading_days": e.trading_days,
+        "next_pay_date": e.next_pay_date.isoformat(),
+        "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in e.checks],
+    }

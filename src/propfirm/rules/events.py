@@ -65,4 +65,20 @@ class AccountVoided:
     rsv_id: str
 
 
-type RuleEvent = DayStarted | AccountBreached | StagePassed | AccountVoided
+@dataclass(frozen=True, slots=True)
+class PayoutDebited:
+    """A payout's amount (the payable profit plus any profit removed for
+    violations) left the account's balance. The day's base and the
+    high-water mark drop by the same amount, so the payout itself never
+    moves a loss floor closer (a trailing floor restarts from the balance
+    after the payout [DEFAULT], D42)."""
+
+    ts: int
+    account_id: str
+    payout: str  # PO id
+    amount_cents: int
+    balance_cents: int  # after the payout
+    rsv_id: str
+
+
+type RuleEvent = DayStarted | AccountBreached | StagePassed | AccountVoided | PayoutDebited

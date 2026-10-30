@@ -231,6 +231,23 @@ class VoidAccount:
 
 
 @dataclass(frozen=True, slots=True)
+class DebitPayout:
+    """Take an approved payout (`payout`, a PO id) out of an account: the
+    payable profit plus any profit removed for violations, in cents."""
+
+    account_id: str
+    amount_cents: int
+    payout: str
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("account_id", self.account_id)
+        require_int("amount_cents", self.amount_cents, minimum=1)
+        require_text("payout", self.payout)
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
 class Checkpoint:
     """Record a digest of the whole engine state in the chain and store a
     snapshot of it, so start-up can resume from here (sent by the scheduler)."""
@@ -255,6 +272,7 @@ type Input = (
     | CancelNews
     | UpdateTrading
     | VoidAccount
+    | DebitPayout
     | Checkpoint
     | Malformed
 )
@@ -273,6 +291,7 @@ INPUT_TYPES = (
     CancelNews,
     UpdateTrading,
     VoidAccount,
+    DebitPayout,
     Checkpoint,
     Malformed,
 )
@@ -292,6 +311,9 @@ class InputRejectReason(StrEnum):
     INVALID_TRADING_CONFIG = "invalid_trading_config"
     UNKNOWN_ACCOUNT = "unknown_account"
     ACCOUNT_NOT_ACTIVE = "account_not_active"
+    DUPLICATE_PAYOUT = "duplicate_payout"
+    POSITIONS_OPEN = "positions_open"
+    PAYOUT_EXCEEDS_PROFIT = "payout_exceeds_profit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +423,13 @@ def apply(
             if sup.status(item.account_id) is not AccountStatus.ACTIVE:
                 return reject(item.account_id, InputRejectReason.ACCOUNT_NOT_ACTIVE)
             return list(sup.void_account(item.account_id, item.case, item.ts))
+        case DebitPayout():
+            if not sup.has_account(item.account_id):
+                return reject(item.account_id, InputRejectReason.UNKNOWN_ACCOUNT)
+            refusal = sup.payout_refusal(item.account_id, item.amount_cents, item.payout)
+            if refusal is not None:
+                return reject(item.account_id, InputRejectReason(refusal))
+            return list(sup.debit_payout(item.account_id, item.amount_cents, item.payout, item.ts))
         case Checkpoint():
             raise TypeError("Checkpoint is applied by the journal machine")
         case Malformed():
