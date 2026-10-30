@@ -72,7 +72,7 @@ def test_payable_profit_and_the_split() -> None:
         "flat": PASS,
         "identity": PASS,
         "residence": PASS,
-        "cases": LATER,
+        "cases": PASS,
         "wallet": LATER,
     }
 

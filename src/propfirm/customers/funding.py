@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from propfirm.access.gating import age_on, check_country
+from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, opened, refusal_reason
 from propfirm.customers.kyc import KycDecision, KycError, KycProvider
 from propfirm.customers.onboarding import (
@@ -69,6 +70,7 @@ class Onboarding:
         sandbox: bool,
         callback_url: str | None = None,
         wait_s: float = 5.0,
+        cases: Casework | None = None,
     ) -> None:
         """`checkout` opens Instant accounts (None: Instant onboardings stop
         after signing). Outside the sandbox, a contract whose firm name or
@@ -83,6 +85,7 @@ class Onboarding:
         self._sandbox = sandbox
         self._callback = callback_url
         self._wait_s = wait_s
+        self._cases = cases
 
     @property
     def store(self) -> OnboardingStore:
@@ -206,6 +209,9 @@ class Onboarding:
         if screening.result != "clear":
             refusals.append("screening_hit")
             await self._customers.block(cif.cif, cif.subject, ts, {"reason": "screening_hit"})
+            if self._cases is not None:
+                hit = {"onboarding": onb, "provider": screening.provider}
+                await self._cases.alert(cif.cif, None, "screening", "aml", "high", hit, ts)
         if result.date_of_birth is not None:
             age = age_on(result.date_of_birth, datetime.fromtimestamp(ts / 1000, UTC).date())
             if age < policy.access.min_age:
@@ -218,6 +224,23 @@ class Onboarding:
             detail: dict[str, Any] = {"reason": refusals[0], "reasons": refusals}
             await self._store.append(onb, "rejected", ts, detail, when=("checks",))
             return await self._get(onb)
+        if self._cases is not None and result.date_of_birth is not None:
+            others = [
+                other
+                for other, name in await self._store.verified_elsewhere(
+                    cif.cif, result.date_of_birth
+                )
+                if name and same_name(name, result.full_name)
+            ]
+            if others:  # the same person as another customer: multi-accounting?
+                same: dict[str, Any] = {
+                    "onboarding": onb,
+                    "kyc": record.kyc,
+                    "same_identity_as": others,
+                }
+                await self._cases.alert(
+                    cif.cif, None, "duplicate_identity", "fraud", "medium", same, ts
+                )
         differences = _differences(cif, result)
         if differences:
             await self._store.append(
@@ -230,6 +253,10 @@ class Onboarding:
     async def decide(
         self, onb: str, approve: bool, subject: str, email: str | None, reason: str, ts: int
     ) -> OnboardingRecord:
+        if approve and self._cases is not None:
+            record = await self._get(onb)
+            if await self._cases.has_open_case(record.cif):
+                raise OnboardingStateError("open_case", "the customer has a case under review")
         await self._store.decide(onb, approve, subject, email, reason, ts)
         if approve:
             return await self.issue_contract(onb, ts)
@@ -240,6 +267,9 @@ class Onboarding:
     async def issue_contract(self, onb: str, ts: int) -> OnboardingRecord:
         record = await self._get(onb)
         if record.status != "contract" or record.kyc is None:
+            return record
+        if self._cases is not None and await self._cases.has_open_case(record.cif):
+            log.info("%s waits: the customer has a case under review", onb)
             return record
         policy = await self._policy.current()
         if not policy.contract.complete and not self._sandbox:

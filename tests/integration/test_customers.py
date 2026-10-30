@@ -16,6 +16,8 @@ import pytest
 import valkey.asyncio as avalkey
 
 from propfirm.api.app import Deps, create_app
+from propfirm.customers.cases_store import CaseStore
+from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycProvider, SandboxKyc
@@ -57,6 +59,7 @@ class Platform:
     engine: Callable[[], Awaitable[None]]  # start the engine (if stopped)
     stop_engine: Callable[[], Awaitable[None]]
     onboarding: Onboarding | None = None  # with funded=True
+    cases: Casework | None = None
 
     async def call(
         self,
@@ -106,6 +109,7 @@ async def platform(
     records = await SettingsStore.open(pool, config.settings_schema)
     settings = Settings(policy, records, gateway, wait_s)
     onboardings = OnboardingStore(pool, config.customer_schema)
+    cases = Casework(CaseStore(pool, config.customer_schema), store, settings, gateway, wait_s)
     checkout = Checkout(
         store,
         settings,
@@ -114,6 +118,7 @@ async def platform(
         gateway,
         wait_s,
         funded=onboardings if funded else None,
+        cases=cases,
     )
     onboarding = (
         Onboarding(
@@ -126,12 +131,17 @@ async def platform(
             checkout,
             sandbox=sandbox,
             wait_s=wait_s,
+            cases=cases,
         )
         if funded
         else None
     )
     lifecycle = Lifecycle(
-        ProgressionStore(pool, config.customer_schema, config.schema), settings, gateway, wait_s
+        ProgressionStore(pool, config.customer_schema, config.schema),
+        settings,
+        gateway,
+        wait_s,
+        cases=cases,
     )
     live = LiveReader(client, config.live_prefix)
     deps = Deps(
@@ -145,6 +155,7 @@ async def platform(
         settings=settings,
         lifecycle=lifecycle,
         onboarding=onboarding,
+        cases=cases,
         didit_webhook_secret=didit_webhook_secret,
         sandbox=sandbox,
         country_header="X-Country",
@@ -176,7 +187,17 @@ async def platform(
         await engine()
     try:
         yield Platform(
-            api, store, writer, live, config, settings, lifecycle, engine, stop_engine, onboarding
+            api,
+            store,
+            writer,
+            live,
+            config,
+            settings,
+            lifecycle,
+            engine,
+            stop_engine,
+            onboarding,
+            cases,
         )
     finally:
         await stop_engine()
@@ -352,7 +373,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3, 4]
+            assert await migrate(conn, schema) == [1, 2, 3, 4, 5]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

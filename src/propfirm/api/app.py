@@ -15,7 +15,9 @@ office's carry `staff` and `admin`):
 - employee (role `staff`): reads every account, its history and inputs;
   reviews passed stages that lead to funding, and identity checks whose
   result differs from the customer record (approve or deny, never their
-  own); trades none; no settings;
+  own); integrity, fraud and compliance cases: raises alerts, takes, notes,
+  decides; a decision with actions needs a second employee (never on their
+  own customer record); trades none; no settings;
 - admin: what an employee reads, and the admin-only settings: the
   country-gating switch and list (view and change); changing each stage's
   profit target, daily loss limit and drawdown limit; the change history.
@@ -33,7 +35,7 @@ money integer cents, times integer UTC milliseconds; floats are refused.
 """
 
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -44,6 +46,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
+from propfirm.customers.cases_store import CaseRecord, CaseRefused
+from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
 from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
@@ -135,6 +139,7 @@ class Deps:
     settings: Settings | None = None  # admin changes
     lifecycle: Lifecycle | None = None  # stage progression
     onboarding: Onboarding | None = None  # funded onboarding
+    cases: Casework | None = None  # integrity, fraud and compliance cases
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -189,6 +194,31 @@ class PurchaseBody(_Body):
 
 
 class DecisionBody(_Body):
+    reason: Reason
+
+
+class AlertBody(_Body):
+    cif: Annotated[str, StringConstraints(pattern=r"^CIF[0-9]{8}$")]
+    acc: Annotated[str, StringConstraints(pattern=r"^ACC[0-9]{8}$")] | None = None
+    kind: Literal["integrity", "fraud", "aml"]
+    severity: Literal["low", "medium", "high"]
+    reason: Reason
+    evidence: dict[str, Any] = {}
+
+
+class NoteBody(_Body):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+
+
+class CaseAction(_Body):
+    action: Literal["remove_profit", "void_account", "block_customer"]
+    acc: Annotated[str, StringConstraints(pattern=r"^ACC[0-9]{8}$")] | None = None
+    amount_cents: StrictInt | None = None
+
+
+class CaseDecisionBody(_Body):
+    outcome: Literal["cleared", "warning", "actioned"]
+    actions: list[CaseAction] = []
     reason: Reason
 
 
@@ -347,6 +377,7 @@ ONBOARDING_ERRORS = {
     "not_verifying": 409,
     "not_signing": 409,
     "not_in_review": 409,
+    "open_case": 409,
     "attempts": 409,
     "not_signer": 403,
     "blocked": 403,
@@ -382,6 +413,36 @@ def eligibility_view(e: Eligibility) -> dict[str, Any]:
         "next_pay_date": e.next_pay_date.isoformat(),
         "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in e.checks],
     }
+
+
+def case_view(c: CaseRecord) -> dict[str, Any]:
+    return {
+        "cas": c.cas,
+        "cif": c.cif,
+        "opened_at": c.opened_at,
+        "status": c.status,
+        "severity": c.severity,
+        "due_at": c.due_at,
+        "assignee": c.assignee,
+        "outcome": c.outcome,
+        "proposed_by": c.proposed_by,
+        "closed_at": c.closed_at,
+    }
+
+
+CASE_ERRORS = {
+    "unknown": 404,
+    "own_case": 403,
+    "not_allowed": 409,
+    "another_case_open": 409,
+    "invalid": 422,
+}
+
+
+def _case_refused(exc: CaseRefused) -> HTTPException:
+    return HTTPException(
+        status_code=CASE_ERRORS[exc.code], detail={"code": exc.code, "message": str(exc)}
+    )
 
 
 def _answer(outcome: Outcome) -> JSONResponse:
@@ -450,6 +511,8 @@ STATUSES = Literal[
     "provisioning", "provisioned", "failed", "review", "approved", "denied", "blocked"
 ]
 OnbId = Annotated[str, Path(pattern=r"^ONB[0-9]{8}$")]
+CasId = Annotated[str, Path(pattern=r"^CAS[0-9]{8}$")]
+CASE_STATUSES = Literal["open", "decision_pending", "actioning", "closed"]
 ONB_STATUSES = Literal[
     "verification",
     "verification_declined",
@@ -480,6 +543,12 @@ def _settings(deps: Deps) -> Settings:
     if deps.settings is None:
         raise HTTPException(status_code=503, detail="settings not available")
     return deps.settings
+
+
+def _cases(deps: Deps) -> Casework:
+    if deps.cases is None:
+        raise HTTPException(status_code=503, detail="cases are not available")
+    return deps.cases
 
 
 def _onboarding(deps: Deps) -> Onboarding:
@@ -820,6 +889,8 @@ def create_app(
             tier2_approved=tier2 is not None,
             residence_country=cif.residence_country,
             document_country=tier2.document_country if tier2 else None,
+            open_case=await deps.cases.has_open_case(cif.cif) if deps.cases else False,
+            violations_cents=await deps.cases.removed_profit(account_id) if deps.cases else 0,
         )
         return eligibility_view(eligibility(policy, account, deps.clock()))
 
@@ -924,7 +995,12 @@ def create_app(
                 prg, approve, me.subject, me.email, reason, deps.clock()
             )
         except DecisionError as exc:
-            status = {"unknown": 404, "not_in_review": 409, "own_progression": 403}[exc.code]
+            status = {
+                "unknown": 404,
+                "not_in_review": 409,
+                "own_progression": 403,
+                "open_case": 409,
+            }[exc.code]
             raise HTTPException(
                 status_code=status, detail={"code": exc.code, "message": str(exc)}
             ) from exc
@@ -1000,6 +1076,128 @@ def create_app(
     @app.post("/staff/onboardings/{onb}/deny")
     async def deny_onboarding(deps: D, me: Staff, onb: OnbId, body: DecisionBody) -> dict[str, Any]:
         return await decide_onboarding(deps, me, onb, False, body.reason)
+
+    # --- employees: integrity, fraud and compliance cases --------------------------
+
+    @app.post("/staff/cases", status_code=201)
+    async def raise_alert(deps: D, me: Staff, body: AlertBody) -> dict[str, Any]:
+        """An employee's alert: joins the customer's case not closed, or opens one."""
+        cif = await deps.customers.cif(body.cif)
+        if cif is None:
+            raise HTTPException(status_code=404, detail="unknown customer")
+        if cif.subject == me.subject:
+            raise _case_refused(CaseRefused("own_case", "nobody raises a case about themselves"))
+        if body.acc is not None:
+            account = await deps.customers.account(body.acc)
+            if account is None or account.cif != body.cif:
+                raise HTTPException(status_code=422, detail="not this customer's account")
+        detail = {"reason": body.reason, "evidence": body.evidence, "by": me.subject}
+        cas, alr = await _cases(deps).alert(
+            body.cif,
+            body.acc,
+            f"staff:{me.subject}",
+            body.kind,
+            body.severity,
+            detail,
+            deps.clock(),
+        )
+        record = await _cases(deps).store.case(cas)
+        assert record is not None
+        return {**case_view(record), "alert": alr}
+
+    @app.get("/staff/cases")
+    async def list_cases(
+        deps: D,
+        me: Staff,
+        status: CASE_STATUSES | None = None,
+        cif: Annotated[str | None, Query(pattern=r"^CIF[0-9]{8}$")] = None,
+        overdue: bool = False,
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
+    ) -> list[dict[str, Any]]:
+        """Cases by status or customer, soonest due first; `overdue`: past due, not closed."""
+        found = await _cases(deps).store.cases(
+            status, cif, deps.clock() if overdue else None, limit
+        )
+        return [case_view(c) for c in found]
+
+    @app.get("/staff/cases/{cas}")
+    async def get_case(deps: D, me: Staff, cas: CasId) -> dict[str, Any]:
+        store = _cases(deps).store
+        record = await store.case(cas)
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown case")
+        alerts = [
+            {
+                "alr": a.alr,
+                "acc": a.acc,
+                "source": a.source,
+                "kind": a.kind,
+                "severity": a.severity,
+                "ts": a.ts,
+                "detail": a.detail,
+            }
+            for a in await store.alerts(cas)
+        ]
+        history = [
+            {"kind": e.kind, "ts": e.ts, "detail": dict(e.detail)} for e in await store.history(cas)
+        ]
+        return {**case_view(record), "alerts": alerts, "history": history}
+
+    async def case_step(deps: Deps, step: Callable[[Casework], Awaitable[CaseRecord]]) -> Any:
+        try:
+            return case_view(await step(_cases(deps)))
+        except CaseRefused as exc:
+            raise _case_refused(exc) from exc
+
+    @app.post("/staff/cases/{cas}/assign")
+    async def assign_case(deps: D, me: Staff, cas: CasId) -> dict[str, Any]:
+        """Take the case."""
+        result: dict[str, Any] = await case_step(
+            deps, lambda c: c.assign(cas, me.subject, deps.clock())
+        )
+        return result
+
+    @app.post("/staff/cases/{cas}/notes")
+    async def note_case(deps: D, me: Staff, cas: CasId, body: NoteBody) -> dict[str, Any]:
+        result: dict[str, Any] = await case_step(
+            deps, lambda c: c.note(cas, me.subject, body.text, deps.clock())
+        )
+        return result
+
+    @app.post("/staff/cases/{cas}/decide")
+    async def decide_case(deps: D, me: Staff, cas: CasId, body: CaseDecisionBody) -> dict[str, Any]:
+        """cleared or warning closes the case; actioned proposes actions that
+        a second employee must confirm."""
+        actions = [a.model_dump(exclude_none=True) for a in body.actions]
+        result: dict[str, Any] = await case_step(
+            deps,
+            lambda c: c.decide(cas, me.subject, body.outcome, actions, body.reason, deps.clock()),
+        )
+        return result
+
+    @app.post("/staff/cases/{cas}/confirm")
+    async def confirm_case(deps: D, me: Staff, cas: CasId, body: DecisionBody) -> dict[str, Any]:
+        """The second employee confirms the proposed actions; they are carried out."""
+        result: dict[str, Any] = await case_step(
+            deps, lambda c: c.confirm(cas, me.subject, body.reason, deps.clock())
+        )
+        return result
+
+    @app.post("/staff/cases/{cas}/reject")
+    async def reject_case(deps: D, me: Staff, cas: CasId, body: DecisionBody) -> dict[str, Any]:
+        """The second employee sends the proposed actions back."""
+        result: dict[str, Any] = await case_step(
+            deps, lambda c: c.reject(cas, me.subject, body.reason, deps.clock())
+        )
+        return result
+
+    @app.post("/staff/cases/{cas}/reopen")
+    async def reopen_case(deps: D, me: Staff, cas: CasId, body: DecisionBody) -> dict[str, Any]:
+        """Reopen a closed case on new evidence (an appeal)."""
+        result: dict[str, Any] = await case_step(
+            deps, lambda c: c.reopen(cas, me.subject, body.reason, deps.clock())
+        )
+        return result
 
     # --- admin: settings --------------------------------------------------------------
 

@@ -36,6 +36,7 @@ class CloseReason(StrEnum):
     STOP_LOSS = "stop_loss"
     TAKE_PROFIT = "take_profit"
     BREACH = "breach"
+    VOID = "void"
 
 
 @dataclass(frozen=True, slots=True)
