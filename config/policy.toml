@@ -49,8 +49,11 @@ min_trading_days = 0           # none, as FTMO and FundedNext
 maximum_cents = 0              # no maximum, as FTMO and FundedNext
 # Payout processing (M19), starting values [DEFAULT]:
 trading_during_payout = "paused"  # D23: no new orders from request to debit (or denial)
-wallet_cooling_off_hours = 48  # a new or changed payout wallet is usable after this
 require_mfa = true             # M04: the login must have used MFA to change the wallet or ask
+# No waiting period on a new or changed payout wallet, as FTMO, FundedNext
+# and The5ers (checked 30 Oct 2026: the wallet is given with the request;
+# FundedNext confirms the request by OTP). A wait of N hours can be set here.
+wallet_cooling_off_hours = 0
 
 [scaling]                      # Lite, Classic and 1-Step funded accounts
 review_months = 4

@@ -139,12 +139,17 @@ def test_the_wallet_and_a_pending_payout() -> None:
         c.name: c.detail for c in eligibility(POLICY, funded(wallet_added_at=None), NOW).checks
     }
     assert detail["wallet"] == "no payout wallet"
+    assert POLICY.payouts.wallet_cooling_off_hours == 0  # as FTMO, FundedNext, The5ers
+    assert statuses(wallet_added_at=NOW)["wallet"] == PASS  # usable at once
     hour = 3_600_000
-    assert statuses(wallet_added_at=NOW - 48 * hour)["wallet"] == PASS  # usable from 48 h
-    assert statuses(wallet_added_at=NOW - 48 * hour + 1)["wallet"] == FAIL
-    cooling = replace(POLICY, payouts=replace(POLICY.payouts, wallet_cooling_off_hours=0))
-    fresh = eligibility(cooling, funded(wallet_added_at=NOW), NOW)
-    assert {c.name: c.status for c in fresh.checks}["wallet"] == PASS
+    wait = replace(POLICY, payouts=replace(POLICY.payouts, wallet_cooling_off_hours=48))
+
+    def waited(added: int) -> str:
+        found = eligibility(wait, funded(wallet_added_at=added), NOW)
+        return {c.name: c.status for c in found.checks}["wallet"]
+
+    assert waited(NOW - 48 * hour) == PASS  # usable from 48 h, when a wait is set
+    assert waited(NOW - 48 * hour + 1) == FAIL
     found = statuses(pending_payout=True)
     assert [n for n, status in found.items() if status == FAIL] == ["no_pending_payout"]
 

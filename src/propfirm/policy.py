@@ -78,7 +78,7 @@ class PayoutPolicy:
     min_trading_days: int = 0  # D22: trading days in the period
     maximum_cents: int = 0  # D22: largest trader amount per payout; 0 = none
     trading_during_payout: str = "paused"  # D23: "paused" or "allowed", from request to debit
-    wallet_cooling_off_hours: int = 48  # a new payout wallet is used only after this
+    wallet_cooling_off_hours: int = 0  # a new payout wallet is used only after this
     require_mfa: bool = True  # M04: MFA for wallet changes and payout requests
 
 

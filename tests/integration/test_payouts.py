@@ -171,7 +171,7 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             closed = await staff(p, "POST", f"{cas}/confirm", "staff-2", {"reason": "ok"})
             assert closed.json()["status"] == "closed", closed.text
 
-            # the wallet: MFA, a TRON address, cooling off
+            # the wallet: MFA, a TRON address; usable at once
             body = {"address": USDT}
             no_mfa = await p.call("POST", "/me/wallet", body=body, mfa=False)
             assert (no_mfa.status_code, no_mfa.json()["detail"]["code"]) == (403, "mfa_required")
@@ -183,7 +183,7 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             assert added.json()["wal"] == "WAL00000001"
             assert (await p.call("GET", "/me/wallet")).json()["address"] == USDT
             cooling = {c["name"]: c["status"] for c in (await view())["checks"]}
-            assert (cooling["wallet"], cooling["waiting_period"]) == ("fail", "fail")
+            assert (cooling["wallet"], cooling["waiting_period"]) == ("pass", "fail")
             early = await p.call("POST", f"/accounts/{acc}/payouts")
             assert (early.status_code, early.json()["detail"]["code"]) == (409, "not_eligible")
 
@@ -360,14 +360,14 @@ def test_the_pay_day_check_fails_a_payout_that_changed(
             # a wallet changed after the request
             po, pay_ts = await approved()
             await p.call("POST", "/me/wallet", body={"address": OTHER})
-            await p.payouts.advance(pay_ts + 49 * 3_600_000)  # the new wallet has cooled off
+            await p.payouts.advance(pay_ts)
             changed = await p.payouts.store.payout(po)
             assert changed is not None and changed.status == "failed"
             assert changed.failure == "the payout wallet changed since the request"
 
             # the engine does not answer: the debit is published again, at most
             # once a minute, and taken once
-            offset["ms"] = 15 * DAY + 49 * 3_600_000  # the new wallet has cooled off
+            offset["ms"] = 15 * DAY + 3_600_000
             slow, slow_ts = await approved()
 
             async def attempts() -> int:

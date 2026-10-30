@@ -223,7 +223,7 @@ account's payable profit and every eligibility check, at that moment:
   (`payouts.flat_required`); an approved Tier 2 check and a customer not
   blocked; the country gate (when on); no case under review (shown to the
   trader only as "held for review"); no payout of the account in progress;
-  a payout wallet past its cooling-off period;
+  a payout wallet (past its waiting period, if one is set);
 - the next pay day (the 15th or the last day of the month, UTC dates).
 
 The payout settings (D22, D23) are in `[payouts]` of the policy: closed
@@ -236,7 +236,8 @@ USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
 
 1. Wallet: `POST /me/wallet` `{"address": "T..."}` (a TRON address,
    checked by its Base58Check checksum); a new one replaces the old and is
-   usable after `wallet_cooling_off_hours` (48).
+   usable at once, as at FTMO, FundedNext and The5ers
+   (`wallet_cooling_off_hours` = 0; a wait can be set).
 2. Request: `POST /accounts/{acc}/payouts`, when eligible. The request
    keeps the eligibility it was based on, the trader's amount, the debit
    and the next pay day. One payout in progress per account; until it is
