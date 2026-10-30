@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from propfirm.policy import DEFAULT_POLICY
+from propfirm.rules.calendar import DEFAULT_NEWS_DIR
 
 _NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 _KEY = re.compile(r"[A-Za-z0-9:_.-]{1,200}")
@@ -31,6 +32,7 @@ class ServiceConfig:
     consumer: str = "engine-1"
     anchor_path: Path | None = None
     policy_path: Path = DEFAULT_POLICY
+    news_dir: Path = DEFAULT_NEWS_DIR  # restricted-events calendar files (M13)
     customer_schema: str = "customers"  # CIF, orders, accounts (personal data)
     settings_schema: str = "settings"  # admin setting changes
     oidc_issuer: str = ""  # e.g. http://localhost:8080/realms/propfirm (API only)
@@ -109,6 +111,7 @@ class ServiceConfig:
 
         anchor = env.get("PROPFIRM_ANCHOR_PATH")
         policy = env.get("PROPFIRM_POLICY")
+        news = env.get("PROPFIRM_NEWS_DIR")
         sandbox = env.get("PROPFIRM_SANDBOX", "0")
         if sandbox not in ("0", "1"):
             raise ConfigError("PROPFIRM_SANDBOX must be 0 or 1")
@@ -122,6 +125,7 @@ class ServiceConfig:
             consumer=text("PROPFIRM_CONSUMER", "engine-1"),
             anchor_path=Path(anchor) if anchor else None,
             policy_path=Path(policy) if policy else DEFAULT_POLICY,
+            news_dir=Path(news) if news else DEFAULT_NEWS_DIR,
             customer_schema=text("PROPFIRM_CUSTOMER_SCHEMA", "customers"),
             settings_schema=text("PROPFIRM_SETTINGS_SCHEMA", "settings"),
             oidc_issuer=text("OIDC_ISSUER", ""),

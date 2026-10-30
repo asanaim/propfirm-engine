@@ -130,6 +130,6 @@ def test_the_stream_is_the_owners_or_staffs() -> None:
 
 def test_the_news_calendar_for_signed_in_users() -> None:
     assert run("/news").json() == [
-        {"event_id": "us-nfp", "start_ts": 1, "end_ts": 2, "symbols": ["EUR/USD"]}
-    ]
+        {"event_id": "us-nfp", "start_ts": 1, "end_ts": 2, "symbols": ["EUR/USD"], "title": None}
+    ]  # no news desk here: no titles
     assert run("/news", user=None).status_code == 401

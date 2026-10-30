@@ -22,9 +22,14 @@ office's carry `staff` and `admin`):
   decides; a decision with actions needs a second employee (never on their
   own customer record); payouts: approves (as many employees as the policy
   requires, never their own) or denies; trades none; no settings;
+  restricted news events (M13): publishes a month of the calendar files,
+  adds a manual window with a reason, marks a no-fixed-time event
+  (Bank of Japan) published; the risk desk's action log;
 - admin: what an employee reads, and the admin-only settings: the
   country-gating switch and list (view and change); changing each stage's
-  profit target, daily loss limit and drawdown limit; the change history.
+  profit target, daily loss limit and drawdown limit; the change history;
+  cancelling a restricted event before its window starts (it lifts a
+  restriction, so not an employee's).
 A signed-in request outside its role's view answers 403.
 - the KYC provider (Didit): POST /webhooks/didit, checked by its signature;
   it only prompts a fresh read of the outcome from the provider.
@@ -80,9 +85,12 @@ from propfirm.policy import (
     percent_text,
     rule_set_view,
 )
+from propfirm.rules.calendar import Calendar
+from propfirm.rules.news import EventScope
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.service.projector import INTERVALS
+from propfirm.settings.newsdesk import Author, NewsDesk, NewsRefused, action_view
 from propfirm.settings.overlay import CountryGating, stage_limits, to_json
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.store import ChangeStatus
@@ -156,6 +164,7 @@ class Deps:
     onboarding: Onboarding | None = None  # funded onboarding
     cases: Casework | None = None  # integrity, fraud and compliance cases
     payouts: Payouts | None = None  # payout wallets, requests and approvals
+    news: NewsDesk | None = None  # restricted-events calendar and the risk desk's actions
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -196,6 +205,29 @@ class OrderBody(_Body):
     stop_loss: StrictInt | None = None
     take_profit: StrictInt | None = None
     order_id: Annotated[str, StringConstraints(pattern=ID_PATTERN)] | None = None
+
+
+EventId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")]
+Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+Currency = Literal["AUD", "CAD", "CHF", "EUR", "GBP", "JPY", "NZD", "USD"]  # = CURRENCIES
+
+
+class NewsReasonBody(_Body):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class ManualNewsBody(NewsReasonBody):
+    event_id: EventId
+    title: Title
+    scope: Literal["currency", "oil_inventory"]
+    currency: Currency | None = None
+    ts: StrictInt  # the release time, ms UTC
+
+
+class PublishedNewsBody(NewsReasonBody):
+    event_id: EventId
+    title: Title
+    currency: Currency
 
 
 class CloseBody(_Body):
@@ -298,6 +330,32 @@ def product_view(p: ProductPolicy) -> dict[str, Any]:
         "fee_refund_with_payout": p.fee_refund_with_payout or None,
         "sizes": [{"size_cents": s, "price_cents": c} for s, c in p.prices_cents],
         "stages": [rule_set_view(r) for r in p.rule_sets],
+    }
+
+
+def calendar_view(calendar: Calendar, scheduled: set[str]) -> dict[str, Any]:
+    return {
+        "version": calendar.version,
+        "month": calendar.month,
+        "checked": calendar.checked,
+        "events": [
+            {
+                "event_id": e.event.event_id,
+                "title": e.title,
+                "ts": e.event.ts,
+                "local": e.local,
+                "zone": e.zone,
+                "scope": e.event.scope.value,
+                "currency": e.event.currency,
+                "source": e.source,
+                "in_engine": e.event.event_id in scheduled,  # scheduled and not over
+            }
+            for e in calendar.events
+        ],
+        "unscheduled": [
+            {"date": u.date, "title": u.title, "currency": u.currency, "source": u.source}
+            for u in calendar.unscheduled
+        ],
     }
 
 
@@ -951,8 +1009,10 @@ def create_app(
     @app.get("/news")
     async def news(deps: D, me: Me) -> list[dict[str, Any]]:
         """Restricted events not over yet (M13): no trade opens or closes on
-        their symbols from `start_ts` to `end_ts` (ms UTC)."""
-        return await deps.live.news()
+        their symbols from `start_ts` to `end_ts` (ms UTC); `title` from the
+        calendar or the risk desk (null if neither names the event)."""
+        titles = await deps.news.titles() if deps.news is not None else {}
+        return [{**e, "title": titles.get(e["event_id"])} for e in await deps.live.news()]
 
     @app.get("/market")
     async def market(deps: D, me: Me) -> dict[str, Any]:
@@ -1470,6 +1530,92 @@ def create_app(
             },
             status_code=200 if applied else 202,
         )
+
+    # --- the risk desk: restricted news events (M13) ----------------------------------
+
+    def news_desk(deps: Deps) -> NewsDesk:
+        if deps.news is None:
+            raise HTTPException(status_code=503, detail="the news calendar is not available")
+        return deps.news
+
+    def news_refused(exc: NewsRefused) -> HTTPException:
+        status = 404 if exc.code == "unknown_calendar" else 422
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    @app.get("/staff/news")
+    async def staff_news(deps: D, me: Staff) -> dict[str, Any]:
+        """The calendar files (which events are in the engine now), the
+        events with no fixed time, and the desk's latest actions."""
+        desk = news_desk(deps)
+        live = {e["event_id"] for e in await deps.live.news()}
+        return {
+            "calendars": [calendar_view(c, live) for c in desk.calendars],
+            "actions": [action_view(a) for a in await desk.history(100)],
+        }
+
+    @app.post("/staff/news/calendars/{month}/publish")
+    async def publish_news(
+        deps: D,
+        me: Staff,
+        month: Annotated[str, Path(pattern=r"^\d{4}-\d{2}$")],
+        body: NewsReasonBody,
+    ) -> list[dict[str, Any]]:
+        """Send the month's events whose windows have not started; repeats
+        are refused by the engine (already scheduled) and change nothing."""
+        try:
+            done = await news_desk(deps).publish(
+                month, Author(me.subject, me.email, body.reason), deps.clock()
+            )
+        except NewsRefused as exc:
+            raise news_refused(exc) from exc
+        return [action_view(a) for a in done]
+
+    @app.post("/staff/news/events", status_code=201)
+    async def manual_news(deps: D, me: Staff, body: ManualNewsBody) -> dict[str, Any]:
+        """A window for an event that is not in the calendar."""
+        scope = EventScope(body.scope)
+        try:
+            done = await news_desk(deps).manual(
+                body.event_id,
+                body.title,
+                scope,
+                body.currency,
+                body.ts,
+                Author(me.subject, me.email, body.reason),
+                deps.clock(),
+            )
+        except NewsRefused as exc:
+            raise news_refused(exc) from exc
+        return action_view(done)
+
+    @app.post("/staff/news/published", status_code=201)
+    async def news_published(deps: D, me: Staff, body: PublishedNewsBody) -> dict[str, Any]:
+        """An event with no fixed time was just published: no trades on its
+        currency's symbols for the next 2 minutes."""
+        try:
+            done = await news_desk(deps).published(
+                body.event_id,
+                body.title,
+                body.currency,
+                Author(me.subject, me.email, body.reason),
+                deps.clock(),
+            )
+        except NewsRefused as exc:
+            raise news_refused(exc) from exc
+        return action_view(done)
+
+    @app.post("/admin/news/events/{event_id}/cancel")
+    async def cancel_news(
+        deps: D,
+        me: Admin,
+        event_id: Annotated[str, Path(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")],
+        body: NewsReasonBody,
+    ) -> dict[str, Any]:
+        """Remove a window that has not started (the engine refuses later)."""
+        done = await news_desk(deps).cancel(
+            event_id, Author(me.subject, me.email, body.reason), deps.clock()
+        )
+        return action_view(done)
 
     @app.get("/admin/settings/changes")
     async def setting_changes(

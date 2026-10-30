@@ -189,9 +189,13 @@ it("exports closed trades as exact CSV", () => {
 });
 
 it("lists restricted news windows", async () => {
-  const news = [{ event_id: "us-nfp-2026-11-06", start_ts: 0, end_ts: 240_001, symbols: ["EUR/USD", "USD/JPY"] }];
+  const news = [
+    { event_id: "2026-11-06-us-employment", title: "US employment situation (October)", start_ts: 0, end_ts: 240_001, symbols: ["EUR/USD", "USD/JPY"] },
+    { event_id: "2026-11-07-snb", title: null, start_ts: 0, end_ts: 240_001, symbols: ["USD/CHF"] },
+  ];
   const { fetcher } = recorder(() => [200, news]);
   renderWith(<NewsPage />, fakeAuth(), fetcher);
-  const row = (await screen.findByRole("rowheader", { name: "us-nfp-2026-11-06" })).closest("tr");
+  const row = (await screen.findByRole("rowheader", { name: "US employment situation (October)" })).closest("tr");
   expect(row).toHaveTextContent("EUR/USD, USD/JPY");
+  expect(screen.getByRole("rowheader", { name: "2026-11-07-snb" })).toBeInTheDocument(); // no title: the id
 });

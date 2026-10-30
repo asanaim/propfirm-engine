@@ -69,11 +69,13 @@ from propfirm.customers.providers import (
 from propfirm.customers.store import CustomerStore
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.policy import load_policy
+from propfirm.rules.calendar import load_calendars
 from propfirm.service.config import ConfigError, ServiceConfig
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
+from propfirm.settings.newsdesk import NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
 
@@ -160,6 +162,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if fixed:
             log.warning("cached status differed from the history and was rebuilt: %s", fixed)
         settings = Settings(policy, await SettingsStore.open(pool, config.settings_schema), gateway)
+        news = NewsDesk(
+            load_calendars(config.news_dir), NewsStore(pool, config.settings_schema), gateway
+        )
         cases = Casework(case_store, customers, settings, gateway)
         checkout = None
         if config.sandbox:
@@ -247,6 +252,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             onboarding=onboarding,
             cases=cases,
             payouts=payouts,
+            news=news,
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,
             country_header=config.country_header,

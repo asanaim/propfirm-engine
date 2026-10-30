@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useApi } from "../api/ApiProvider";
 import type { Market } from "../api/types";
 import { Problem } from "../components/Problem";
-import { Card, Loading } from "../components/ui";
+import { Card, Loading, ScrollRegion } from "../components/ui";
 import { formatCents, formatLots, formatPrice } from "../lib/money";
 import { Link } from "../router";
 import { AccountTabs } from "./AccountPage";
@@ -138,7 +138,7 @@ export function HistoryPage({ acc }: { acc: string }) {
         </p>
       </Card>
       {trades.length > 0 && (
-        <div className="table-wrap">
+        <ScrollRegion label="Closed trades">
           <table>
             <caption className="visually-hidden">Closed trades</caption>
             <thead>
@@ -171,11 +171,11 @@ export function HistoryPage({ acc }: { acc: string }) {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
       )}
       <h2>Account record</h2>
       <p className="muted">Every event of the account, newest first, as the engine recorded it.</p>
-      <div className="table-wrap">
+      <ScrollRegion label="Account record">
         <table>
           <caption className="visually-hidden">Account record</caption>
           <thead>
@@ -195,7 +195,7 @@ export function HistoryPage({ acc }: { acc: string }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
     </div>
   );
 }

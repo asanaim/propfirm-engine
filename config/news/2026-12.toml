@@ -1,0 +1,100 @@
+# Restricted news events for December 2026 (M13, CC-5). See 2026-11.toml for
+# the rules. EIA had published no December holiday changes when checked:
+# recheck the weekly report dates before each event.
+
+version = "news-2026-12-v1"
+month = "2026-12"
+checked = "2026-10-31"
+
+[[event]]
+id = "2026-12-02-us-oil-inventory"
+title = "US weekly petroleum status report (EIA)"
+scope = "oil_inventory"
+local = "2026-12-02T10:30"
+zone = "America/New_York"
+source = "https://www.eia.gov/petroleum/supply/weekly/schedule.php"
+
+[[event]]
+id = "2026-12-04-us-employment"
+title = "US employment situation (November)"
+scope = "currency"
+currency = "USD"
+local = "2026-12-04T08:30"
+zone = "America/New_York"
+source = "https://www.bls.gov/schedule/2026/12_sched_list.htm"
+
+[[event]]
+id = "2026-12-09-us-oil-inventory"
+title = "US weekly petroleum status report (EIA)"
+scope = "oil_inventory"
+local = "2026-12-09T10:30"
+zone = "America/New_York"
+source = "https://www.eia.gov/petroleum/supply/weekly/schedule.php"
+
+[[event]]
+id = "2026-12-09-fomc-decision"
+title = "Federal Reserve (FOMC) rate decision"
+scope = "currency"
+currency = "USD"
+local = "2026-12-09T14:00"
+zone = "America/New_York"
+source = "https://www.federalreserve.gov/newsevents/2026-december.htm"
+
+[[event]]
+id = "2026-12-10-us-cpi"
+title = "US consumer price index (November)"
+scope = "currency"
+currency = "USD"
+local = "2026-12-10T08:30"
+zone = "America/New_York"
+source = "https://www.bls.gov/schedule/2026/12_sched_list.htm"
+
+[[event]]
+id = "2026-12-16-us-oil-inventory"
+title = "US weekly petroleum status report (EIA)"
+scope = "oil_inventory"
+local = "2026-12-16T10:30"
+zone = "America/New_York"
+source = "https://www.eia.gov/petroleum/supply/weekly/schedule.php"
+
+[[event]]
+id = "2026-12-17-ecb-decision"
+title = "European Central Bank rate decision"
+scope = "currency"
+currency = "EUR"
+local = "2026-12-17T14:15"
+zone = "Europe/Berlin"
+source = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
+
+[[event]]
+id = "2026-12-17-boe-decision"
+title = "Bank of England rate decision"
+scope = "currency"
+currency = "GBP"
+local = "2026-12-17T12:00"
+zone = "Europe/London"
+source = "https://www.bankofengland.co.uk/news/2024/december/mpc-dates-for-2026"
+
+[[event]]
+id = "2026-12-23-us-oil-inventory"
+title = "US weekly petroleum status report (EIA)"
+scope = "oil_inventory"
+local = "2026-12-23T10:30"
+zone = "America/New_York"
+source = "https://www.eia.gov/petroleum/supply/weekly/schedule.php"
+
+[[event]]
+id = "2026-12-30-us-oil-inventory"
+title = "US weekly petroleum status report (EIA)"
+scope = "oil_inventory"
+local = "2026-12-30T10:30"
+zone = "America/New_York"
+source = "https://www.eia.gov/petroleum/supply/weekly/schedule.php"
+
+# No fixed time: the risk desk marks the statement published
+# (POST /staff/news/published) and the window runs 2 minutes from then.
+[[unscheduled]]
+date = "2026-12-18"
+title = "Bank of Japan rate decision"
+currency = "JPY"
+source = "https://www.boj.or.jp/en/announcements/calendar/"
