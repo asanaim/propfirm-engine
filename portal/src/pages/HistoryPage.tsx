@@ -89,6 +89,7 @@ const REASONS: Record<string, string> = {
   client: "You closed it",
   stop_loss: "Stop loss",
   take_profit: "Take profit",
+  trailing_stop: "Trailing stop",
   breach: "Rule breach",
   void: "Account closed",
 };

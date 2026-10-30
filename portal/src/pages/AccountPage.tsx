@@ -6,7 +6,7 @@ import { useAccountStream } from "../api/useAccountStream";
 import { useAuth } from "../auth/AuthProvider";
 import { Attribution } from "../components/Attribution";
 import { OrderTicket } from "../components/OrderTicket";
-import { PendingRow, PositionRow } from "../components/PositionRow";
+import { PendingRow, PositionRow, TrailingRow } from "../components/PositionRow";
 import { PriceChart } from "../components/PriceChart";
 import { Problem } from "../components/Problem";
 import { Button, Card, Loading, Notice } from "../components/ui";
@@ -337,7 +337,14 @@ export function AccountPage({ acc }: { acc: string }) {
             </thead>
             <tbody>
               {account.positions.map((p) => (
-                <PositionRow key={p.position_id} acc={acc} position={p} digits={digitsOf(p.symbol)} canTrade={canTrade} />
+                <PositionRow
+                  key={p.position_id}
+                  acc={acc}
+                  position={p}
+                  digits={digitsOf(p.symbol)}
+                  canTrade={canTrade}
+                  trailing={account.trailing_orders.find((t) => t.kind === "stop" && t.position_id === p.position_id)}
+                />
               ))}
             </tbody>
           </table>
@@ -364,6 +371,34 @@ export function AccountPage({ acc }: { acc: string }) {
               <tbody>
                 {account.pending_orders.map((o) => (
                   <PendingRow key={o.request.order_id} acc={acc} order={o} digits={digitsOf(o.request.symbol)} canTrade={canTrade} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {account.trailing_orders.length > 0 && (
+        <>
+          <h2>Trailing orders</h2>
+          <div className="table-wrap">
+            <table>
+              <caption className="visually-hidden">Trailing orders</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Symbol</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Lots</th>
+                  <th scope="col">Distance / step (points)</th>
+                  <th scope="col">Level</th>
+                  <th scope="col">Level as of</th>
+                  <th scope="col">
+                    <span className="visually-hidden">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {account.trailing_orders.map((o) => (
+                  <TrailingRow key={o.order_id} acc={acc} order={o} digits={digitsOf(o.symbol)} canTrade={canTrade} />
                 ))}
               </tbody>
             </table>

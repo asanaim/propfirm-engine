@@ -93,7 +93,19 @@ npm run typecheck && npm run lint && npm run build
   commission, CSV export, and the account's whole record), the rule set
   (`/accounts/{acc}/rules`, from the rule set's own fields: target basis,
   flat to pass, tie rule) and the news calendar (`GET /news`: restricted
-  windows not over yet). Trailing orders (M09) need engine work: not yet.
+  windows not over yet).
+- Trailing orders (M09, D43): the ticket's "Trailing" type places a trailing
+  buy or sell (`POST /accounts/{acc}/trailing-orders`), and "Trail" on a
+  position sets its trailing stop (`PUT .../positions/{pos}/trailing-stop`,
+  replacing any it has); both are cancelled like any order. Distance and
+  step are whole points (at least 1). They run in the engine, so they keep
+  working while the trader is offline: buy-side orders follow the ask and
+  sell-side orders the bid, a level moves only towards the price and only
+  by a whole step, every move is an engine event with the price update that
+  caused it, and each working trailing order shows its level and when it
+  last moved. Frozen prices move and trigger nothing; inside a news window
+  levels keep moving, entries are held and trailing stops execute like a
+  stop-loss.
 - Live updates: `GET /accounts/{acc}/stream`, server-sent events (`account`
   and `quotes` when they change; `end` after 5 minutes, and the portal
   opens it again with a fresh token).
@@ -399,7 +411,7 @@ or rules uses floating point.
 - [x] Step 1: engine service, live state, history, trading API, policy file
 - [x] Step 2: customers and access (Keycloak login, CIF, country-gating switch, checkout,
   trader / employee / admin views, admin-only settings)
-- [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
+- [x] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
   - [x] 3a: stage progression (next evaluation account, funded review)
   - [x] 3b: funded onboarding (Tier 2 verification, contract, signature)
   - [x] 3c: payable profit and payout eligibility
@@ -407,7 +419,8 @@ or rules uses floating point.
 - [ ] Step 4: trader portal
   - [x] 4a: foundation, login (PKCE, optional 2FA, step-up), registration, checkout, accounts
   - [x] 4b: account dashboard, live prices, chart
-  - [x] 4c: order ticket, positions, history, rulebook, news calendar (trailing orders: engine step to come)
+  - [x] 4c: order ticket, positions, history, rulebook, news calendar
+  - [x] Trailing orders (engine, API, portal)
   - [ ] 4d: funded onboarding, wallet, payouts
 - [ ] Step 5: back office
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)

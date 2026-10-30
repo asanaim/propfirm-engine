@@ -35,7 +35,9 @@ from propfirm.journal.inputs import (
     OpenAccount,
     Outage,
     PlaceOrder,
+    PlaceTrailingEntry,
     ScheduleNews,
+    SetTrailingStop,
     apply,
 )
 from propfirm.journal.machine import (
@@ -164,8 +166,9 @@ def command(sup: RuleSupervisor, rng: random.Random, n: int, now: int) -> Input:
     account = rng.choice(list(ACCOUNTS))
     ts = now + rng.randrange(50)
     positions = engine.positions(account)
-    pending = engine.pending_orders(account)
-    roll = rng.randrange(12)
+    pending = [o.request.order_id for o in engine.pending_orders(account)]
+    pending += [o.order_id for o, _ in engine.trailing_orders(account)]
+    roll = rng.randrange(14)
     if positions and roll < 4:
         position = rng.choice(positions)
         if roll == 0:
@@ -176,7 +179,15 @@ def command(sup: RuleSupervisor, rng: random.Random, n: int, now: int) -> Input:
         volume = None if roll == 1 else max(1, position.volume // 2)
         return ClosePosition(account, position.position_id, ts, volume)
     if pending and roll == 4:
-        return CancelOrder(account, rng.choice(pending).request.order_id, ts)
+        return CancelOrder(account, rng.choice(pending), ts)
+    if positions and roll == 12:
+        position = rng.choice(positions)
+        distance, step = rng.choice([0, 15, 80, 300]), rng.choice([1, 10])
+        return SetTrailingStop(f"t{n}", account, position.position_id, distance, step, ts)
+    if roll == 13:
+        side = rng.choice([Side.BUY, Side.SELL])
+        distance, step = rng.choice([5, 60, 250]), rng.choice([0, 1, 20])
+        return PlaceTrailingEntry(f"o{n}", account, rng.choice(SYMS), side, 50, distance, step, ts)
     if roll == 5:
         return CancelOrder(account, "no-such-order", ts)
     symbol = rng.choice(SYMS)
@@ -474,6 +485,7 @@ def observe(machine: Machine) -> dict[str, object]:
             engine.is_locked(a),
             engine.positions(a),
             engine.pending_orders(a),
+            engine.trailing_orders(a),
         )
         for a in ACCOUNTS
     }

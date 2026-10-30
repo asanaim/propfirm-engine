@@ -2,7 +2,7 @@ import { useState, type SyntheticEvent } from "react";
 import { useApi } from "../api/ApiProvider";
 import type { Market, Quote } from "../api/types";
 import { formatLots, formatPrice } from "../lib/money";
-import { parseLots, parsePrice, rejection } from "../lib/price";
+import { parseLots, parsePoints, parsePrice, rejection } from "../lib/price";
 import { Problem } from "./Problem";
 import { Button, Card, Notice } from "./ui";
 
@@ -21,16 +21,21 @@ export function describeOutcome(outcome: Outcome, digits: number): { tone: "ok" 
   if (opened?.price !== undefined) return { tone: "ok", text: `Filled at ${formatPrice(opened.price, digits)}.` };
   const placed = events.find((e) => e.type === "OrderPlaced");
   if (placed?.level !== undefined) return { tone: "ok", text: `Order placed at ${formatPrice(placed.level, digits)}.` };
+  const trailing = events.find((e) => e.type === "TrailingPlaced");
+  if (trailing?.level !== undefined) return { tone: "ok", text: `Trailing order working at ${formatPrice(trailing.level, digits)}.` };
   if (events.some((e) => e.type === "PositionClosed")) return { tone: "ok", text: "Closed." };
   if (events.some((e) => e.type === "StopsModified")) return { tone: "ok", text: "Stops changed." };
   if (events.some((e) => e.type === "OrderCancelled")) return { tone: "ok", text: "Order cancelled." };
   return { tone: "ok", text: "Done." };
 }
 
-type Kind = "market" | "limit" | "stop";
+type Kind = "market" | "limit" | "stop" | "trailing";
+
+const VERBS: Record<Kind, string> = { market: "at market", limit: "limit", stop: "stop", trailing: "trailing" };
 
 /** Market, limit and stop orders (M09) with optional stop loss and take
-profit; prices are typed as decimals and sent as integer points. */
+profit, and trailing buy and sell orders; prices are typed as decimals and
+sent as integer points, trailing distance and step as whole points. */
 export function OrderTicket({
   acc,
   market,
@@ -49,21 +54,28 @@ export function OrderTicket({
   const [level, setLevel] = useState("");
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
+  const [distance, setDistance] = useState("");
+  const [step, setStep] = useState("1");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const digits = market.symbols.find((s) => s.symbol === symbol)?.digits ?? 5;
   const quote = quotes[symbol];
 
+  const trailing = type === "trailing";
   const volume = parseLots(lots);
-  const levelPoints = type === "market" ? null : parsePrice(level, digits);
-  const sl = stopLoss.trim() === "" ? null : parsePrice(stopLoss, digits);
-  const tp = takeProfit.trim() === "" ? null : parsePrice(takeProfit, digits);
+  const levelPoints = type === "market" || trailing ? null : parsePrice(level, digits);
+  const sl = trailing || stopLoss.trim() === "" ? null : parsePrice(stopLoss, digits);
+  const tp = trailing || takeProfit.trim() === "" ? null : parsePrice(takeProfit, digits);
+  const distancePoints = parsePoints(distance);
+  const stepPoints = parsePoints(step);
   const problems = [
     volume === null && "Volume: lots in steps of 0.01, at least 0.01.",
-    type !== "market" && levelPoints === null && `Price: a positive number with up to ${digits} decimals.`,
-    stopLoss.trim() !== "" && sl === null && `Stop loss: a positive number with up to ${digits} decimals.`,
-    takeProfit.trim() !== "" && tp === null && `Take profit: a positive number with up to ${digits} decimals.`,
+    (type === "limit" || type === "stop") && levelPoints === null && `Price: a positive number with up to ${digits} decimals.`,
+    !trailing && stopLoss.trim() !== "" && sl === null && `Stop loss: a positive number with up to ${digits} decimals.`,
+    !trailing && takeProfit.trim() !== "" && tp === null && `Take profit: a positive number with up to ${digits} decimals.`,
+    trailing && distancePoints === null && "Distance: whole points, at least 1.",
+    trailing && stepPoints === null && "Step: whole points, at least 1.",
   ].filter((p): p is string => typeof p === "string");
 
   const send = async (side: "buy" | "sell", event: SyntheticEvent) => {
@@ -73,16 +85,23 @@ export function OrderTicket({
     setResult(null);
     setError(null);
     try {
-      const body = {
-        symbol,
-        side,
-        type,
-        volume,
-        ...(levelPoints === null ? {} : { level: levelPoints }),
-        ...(sl === null ? {} : { stop_loss: sl }),
-        ...(tp === null ? {} : { take_profit: tp }),
-      };
-      const outcome = await api.post<Outcome>(`/accounts/${acc}/orders`, body);
+      const outcome = trailing
+        ? await api.post<Outcome>(`/accounts/${acc}/trailing-orders`, {
+            symbol,
+            side,
+            volume,
+            distance: distancePoints,
+            step: stepPoints,
+          })
+        : await api.post<Outcome>(`/accounts/${acc}/orders`, {
+            symbol,
+            side,
+            type,
+            volume,
+            ...(levelPoints === null ? {} : { level: levelPoints }),
+            ...(sl === null ? {} : { stop_loss: sl }),
+            ...(tp === null ? {} : { take_profit: tp }),
+          });
       setResult(describeOutcome(outcome, digits));
     } catch (reason) {
       setError(reason);
@@ -91,7 +110,7 @@ export function OrderTicket({
     }
   };
 
-  const verb = type === "market" ? "at market" : type === "limit" ? "limit" : "stop";
+  const verb = VERBS[type];
   const size = volume === null ? lots : formatLots(volume);
   return (
     <Card title="New order">
@@ -111,27 +130,55 @@ export function OrderTicket({
               <option value="market">Market</option>
               <option value="limit">Limit</option>
               <option value="stop">Stop</option>
+              <option value="trailing">Trailing</option>
             </select>
           </label>
           <label className="field">
             <span>Volume (lots)</span>
             <input inputMode="decimal" value={lots} onChange={(e) => { setLots(e.target.value); }} />
           </label>
-          {type !== "market" && (
+          {(type === "limit" || type === "stop") && (
             <label className="field">
               <span>Price</span>
               <input inputMode="decimal" value={level} onChange={(e) => { setLevel(e.target.value); }} />
             </label>
           )}
-          <label className="field">
-            <span>Stop loss (optional)</span>
-            <input inputMode="decimal" value={stopLoss} onChange={(e) => { setStopLoss(e.target.value); }} />
-          </label>
-          <label className="field">
-            <span>Take profit (optional)</span>
-            <input inputMode="decimal" value={takeProfit} onChange={(e) => { setTakeProfit(e.target.value); }} />
-          </label>
+          {trailing ? (
+            <>
+              <label className="field">
+                <span>Distance (points)</span>
+                <input inputMode="numeric" value={distance} onChange={(e) => { setDistance(e.target.value); }} />
+              </label>
+              <label className="field">
+                <span>Step (points)</span>
+                <input inputMode="numeric" value={step} onChange={(e) => { setStep(e.target.value); }} />
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="field">
+                <span>Stop loss (optional)</span>
+                <input inputMode="decimal" value={stopLoss} onChange={(e) => { setStopLoss(e.target.value); }} />
+              </label>
+              <label className="field">
+                <span>Take profit (optional)</span>
+                <input inputMode="decimal" value={takeProfit} onChange={(e) => { setTakeProfit(e.target.value); }} />
+              </label>
+            </>
+          )}
         </div>
+        {trailing && (
+          <p className="muted">
+            A trailing buy follows the lowest ask and buys when the ask rises the distance above it; a trailing sell
+            follows the highest bid and sells when the bid falls the distance below it. The level moves only by whole
+            steps, and the engine keeps it working while you are offline.
+            {distancePoints !== null && ` ${String(distancePoints)} points = ${formatPrice(distancePoints, digits)}.`}
+            {distancePoints !== null && quote?.ask != null && ` A trailing buy starts at ${formatPrice(quote.ask + distancePoints, digits)}`}
+            {distancePoints !== null && quote?.bid != null && quote.bid - distancePoints > 0 &&
+              `; a trailing sell at ${formatPrice(quote.bid - distancePoints, digits)}`}
+            {distancePoints !== null && quote?.ask != null && "."}
+          </p>
+        )}
         <p className="muted">
           {quote?.bid != null && quote.ask != null
             ? `Bid ${formatPrice(quote.bid, digits)} · Ask ${formatPrice(quote.ask, digits)}`

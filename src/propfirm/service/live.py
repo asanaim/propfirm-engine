@@ -6,8 +6,9 @@ After each batch (at most every `publish_ms`) the engine process writes:
     {prefix}:account:{id}    one account: status, balance, equity, margin,
                              floors and limits, the next reset and the
                              daily floor from then, target, trading days,
-                             positions,
-                             pending orders, and the numbers of its own
+                             positions, pending orders, trailing orders
+                             (current level, its last move and when), and
+                             the numbers of its own
                              rule-set version (it may be older than the
                              catalogue's)
     {prefix}:quotes          hash: symbol -> current bid/ask, frozen, blocked
@@ -68,6 +69,7 @@ def account_view(machine: Machine, account_id: str) -> dict[str, Any]:
         "day_pnl": [[day, cents] for day, cents in sup.day_pnl(account_id)],
         "positions": _positions(machine, account_id),
         "pending_orders": view(engine.pending_orders(account_id)),
+        "trailing_orders": _trailing(machine, account_id),
         "engine_ts": engine.now,
         "journal_seq": machine.seq,
     }
@@ -83,6 +85,18 @@ def _positions(machine: Machine, account_id: str) -> list[dict[str, Any]]:
         assert isinstance(data, dict)
         price, pnl = floating[position.position_id]
         out.append({**data, "current_price": price, "pnl_cents": pnl})
+    return out
+
+
+def _trailing(machine: Machine, account_id: str) -> list[dict[str, Any]]:
+    """Working trailing orders, in placement order: each with its current
+    level and the engine time and price update id of its last move (or of
+    its placement, `moved_at` equal to `placed_at`)."""
+    out = []
+    for order, placed_at in machine.supervisor.engine.trailing_orders(account_id):
+        data = view(order)
+        assert isinstance(data, dict)
+        out.append({**data, "placed_at": placed_at})
     return out
 
 

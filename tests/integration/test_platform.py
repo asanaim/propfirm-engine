@@ -156,6 +156,123 @@ def test_trade_through_the_api_and_restart(
     asyncio.run(scenario())
 
 
+def test_trailing_orders_work_through_the_api_and_survive_a_restart(
+    database_url: str, valkey_url: str, pg_schema: str
+) -> None:
+    config = ServiceConfig(
+        database_url=database_url,
+        valkey_url=valkey_url,
+        schema=pg_schema,
+        read_schema=f"{pg_schema}_r",
+        stream=f"test:inputs:{uuid.uuid4().hex}",
+        block_ms=50,
+        publish_ms=1,
+    )
+
+    async def scenario() -> None:
+        client = avalkey.Valkey.from_url(valkey_url)
+        pool = await asyncpg.create_pool(database_url, min_size=1, max_size=4)
+        writer = InputStreamWriter(client, config.stream)
+        live = LiveReader(client, config.live_prefix)
+        ids = iter(["pos-1", "trail-1", "entry-1"])
+        deps = Deps(
+            live=live,
+            history=HistoryReader(pool, config.read_schema),
+            gateway=Gateway(writer, pool, config.schema),
+            verifier=verifier(),
+            customers=FakeCustomers(cifs={"u": "CIF00000001"}, owners={"A": "CIF00000001"}),
+            new_id=lambda: next(ids),
+        )
+        transport = httpx.ASGITransport(app=create_app(deps))
+        api = httpx.AsyncClient(transport=transport, base_url="http://api", headers=bearer("u"))
+        try:
+            t0 = now_ms()
+            async with engine(config):
+                await writer.publish(OpenAccount("A", "lite-s1-v1", 10_000_000, t0))
+                await writer.publish(PriceUpdate("EUR/USD", 1, t0, t0, 110_000))
+                await eventually(lambda: live.account("A"))
+                order = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 100}
+                assert (await api.post("/accounts/A/orders", json=order)).json()["status"] == "done"
+                stop = {"distance": 200, "step": 10}
+                placed = (
+                    await api.put("/accounts/A/positions/pos-1/trailing-stop", json=stop)
+                ).json()
+                assert types(placed["events"]) == ["TrailingPlaced"], placed
+                level = placed["events"][0]["level"]
+                entry = {
+                    "symbol": "EUR/USD",
+                    "side": "sell",
+                    "volume": 10,
+                    "distance": 300,
+                    "step": 1,
+                }
+                working = (await api.post("/accounts/A/trailing-orders", json=entry)).json()
+                assert types(working["events"]) == ["TrailingPlaced"], working
+                await writer.publish(PriceUpdate("EUR/USD", 2, now_ms(), now_ms(), 110_500))
+
+                async def moved() -> dict[str, Any] | None:
+                    data = await live.account("A")
+                    orders = data["trailing_orders"] if data else []
+                    ok = len(orders) == 2 and all(o["moved_seq"] == 2 for o in orders)
+                    return data if ok else None
+
+                before = await eventually(moved)
+                trail, sell = before["trailing_orders"]
+                assert (trail["order_id"], trail["kind"], trail["position_id"]) == (
+                    "trail-1",
+                    "stop",
+                    "pos-1",
+                )
+                assert trail["level"] > level and trail["moved_at"] > trail["placed_at"]
+                assert (sell["order_id"], sell["kind"], sell["side"]) == (
+                    "entry-1",
+                    "entry",
+                    "sell",
+                )
+
+            await client.delete(f"{config.live_prefix}:account:A")
+            async with engine(config):
+                after = await eventually(lambda: live.account("A"))
+                assert after["trailing_orders"] == before["trailing_orders"]  # replayed
+                await writer.publish(PriceUpdate("EUR/USD", 3, now_ms(), now_ms(), 109_000))
+
+                async def flat() -> dict[str, Any] | None:
+                    data = await live.account("A")
+                    return data if data and data["trailing_orders"] == [] else None
+
+                done = await eventually(flat)
+                (position,) = done["positions"]  # the trailing sell filled; the buy closed
+                assert (position["position_id"], position["side"]) == ("entry-1", "sell")
+
+            projector = await Projector.connect(database_url, config.schema, config.read_schema)
+            try:
+                while await projector.run_once(limit=50):
+                    pass
+            finally:
+                await projector.close()
+            history = (await api.get("/accounts/A/history")).json()
+            closes = [e for e in history if e["type"] == "PositionClosed"]
+            assert [(e["position_id"], e["reason"]) for e in closes] == [("pos-1", "trailing_stop")]
+            opens = [e for e in history if e["type"] == "PositionOpened"]
+            assert [(e["position_id"], e["order_type"]) for e in opens] == [
+                ("pos-1", "market"),
+                ("entry-1", "trailing"),
+            ]
+            assert "TrailingMoved" in types(history)
+        finally:
+            await api.aclose()
+            async with pool.acquire() as conn:
+                await conn.execute(f"DROP SCHEMA IF EXISTS {config.read_schema} CASCADE")
+            await pool.close()
+            for key in [config.stream] + [
+                k async for k in client.scan_iter(f"{config.live_prefix}:*")
+            ]:
+                await client.delete(key)
+            await client.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_projector_waits_for_the_journal_and_takes_one_lock(
     database_url: str, pg_schema: str
 ) -> None:

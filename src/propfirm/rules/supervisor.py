@@ -55,7 +55,7 @@ from propfirm.trading.events import (
     PositionOpened,
 )
 from propfirm.trading.instruments import InstrumentSpec
-from propfirm.trading.orders import OrderRequest
+from propfirm.trading.orders import OrderRequest, Side
 
 type Event = EngineEvent | RuleEvent
 
@@ -128,6 +128,34 @@ class RuleSupervisor:
 
     def place_order(self, request: OrderRequest, ts: int) -> list[Event]:
         return self._run(ts, lambda: self._engine.place_order(request, ts))
+
+    def place_trailing_entry(
+        self,
+        order_id: str,
+        account_id: str,
+        symbol: str,
+        side: Side,
+        volume: int,
+        distance: int,
+        step: int,
+        ts: int,
+    ) -> list[Event]:
+        return self._run(
+            ts,
+            lambda: self._engine.place_trailing_entry(
+                order_id, account_id, symbol, side, volume, distance, step, ts
+            ),
+        )
+
+    def set_trailing_stop(
+        self, order_id: str, account_id: str, position_id: str, distance: int, step: int, ts: int
+    ) -> list[Event]:
+        return self._run(
+            ts,
+            lambda: self._engine.set_trailing_stop(
+                order_id, account_id, position_id, distance, step, ts
+            ),
+        )
 
     def cancel_order(self, account_id: str, order_id: str, ts: int) -> list[Event]:
         return self._run(ts, lambda: self._engine.cancel_order(account_id, order_id, ts))
@@ -244,7 +272,7 @@ class RuleSupervisor:
             return "duplicate_payout"  # first: a retried debit is recognised whatever came after
         if state.status is not AccountStatus.ACTIVE:
             return "account_not_active"
-        if engine.positions(account_id) or engine.pending_orders(account_id):
+        if engine.positions(account_id) or engine.has_working_orders(account_id):
             return "positions_open"
         if amount_cents > engine.balance(account_id) - state.initial_balance:
             return "payout_exceeds_profit"  # the balance never goes below the baseline
@@ -462,7 +490,7 @@ class RuleSupervisor:
         if measured < target or len(state.trading_days) < rules.min_trading_days:
             return []
         if rules.flat_to_pass and (
-            self._engine.positions(account_id) or self._engine.pending_orders(account_id)
+            self._engine.positions(account_id) or self._engine.has_working_orders(account_id)
         ):
             return []
         if (

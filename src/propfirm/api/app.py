@@ -12,8 +12,9 @@ office's carry `staff` and `admin`):
   eligibility), progressions and funded onboardings; buying; their
   identity check, contract and signature; their payout wallet and payout
   requests (both need a login with MFA, by policy); trading their own
-  accounts (no new orders while a payout of the account is pending, by
-  policy).
+  accounts, trailing orders included (no new orders while a payout of the
+  account is pending, by policy; a trailing stop on an open position is
+  not a new order).
   Someone else's account answers 404, so ids cannot be probed;
 - employee (role `staff`): reads every account, its history and inputs;
   reviews passed stages that lead to funding, and identity checks whose
@@ -70,7 +71,15 @@ from propfirm.customers.store import (
     CifRecord,
     OrderRecord,
 )
-from propfirm.journal.inputs import CancelOrder, ClosePosition, Input, ModifyStops, PlaceOrder
+from propfirm.journal.inputs import (
+    CancelOrder,
+    ClosePosition,
+    Input,
+    ModifyStops,
+    PlaceOrder,
+    PlaceTrailingEntry,
+    SetTrailingStop,
+)
 from propfirm.policy import (
     Policy,
     PolicyError,
@@ -195,6 +204,24 @@ class OrderBody(_Body):
     level: StrictInt | None = None
     stop_loss: StrictInt | None = None
     take_profit: StrictInt | None = None
+    order_id: Annotated[str, StringConstraints(pattern=ID_PATTERN)] | None = None
+
+
+class TrailingEntryBody(_Body):
+    """A trailing buy or sell: distance and step in whole points (>= 1; the
+    engine rejects smaller values with a recorded reason)."""
+
+    symbol: str
+    side: Literal["buy", "sell"]
+    volume: StrictInt
+    distance: StrictInt
+    step: StrictInt
+    order_id: Annotated[str, StringConstraints(pattern=ID_PATTERN)] | None = None
+
+
+class TrailingStopBody(_Body):
+    distance: StrictInt
+    step: StrictInt
     order_id: Annotated[str, StringConstraints(pattern=ID_PATTERN)] | None = None
 
 
@@ -1079,9 +1106,7 @@ def create_app(
                 await _owns(deps, me, str(acc))
         return _answer(result)
 
-    @app.post("/accounts/{account_id}/orders")
-    async def place(deps: D, me: Trader, account_id: Ident, body: OrderBody) -> JSONResponse:
-        await _owns(deps, me, account_id)
+    async def no_payout_pending(deps: Deps, account_id: str) -> None:
         if deps.payouts is not None:
             paused = (await _policy(deps)).payouts.trading_during_payout == "paused"
             if paused and await deps.payouts.store.in_progress(account_id) is not None:
@@ -1089,6 +1114,11 @@ def create_app(
                     status_code=409,
                     detail={"code": "payout_pending", "message": "no new orders until paid out"},
                 )
+
+    @app.post("/accounts/{account_id}/orders")
+    async def place(deps: D, me: Trader, account_id: Ident, body: OrderBody) -> JSONResponse:
+        await _owns(deps, me, account_id)
+        await no_payout_pending(deps, account_id)
 
         def build(ts: int) -> Input:
             request = OrderRequest(
@@ -1105,6 +1135,44 @@ def create_app(
             return PlaceOrder(request, ts)
 
         return await submit(deps, build)
+
+    @app.post("/accounts/{account_id}/trailing-orders")
+    async def place_trailing(
+        deps: D, me: Trader, account_id: Ident, body: TrailingEntryBody
+    ) -> JSONResponse:
+        """A trailing buy (follows the ask) or trailing sell (follows the bid);
+        cancelled like any order (DELETE .../orders/{order_id})."""
+        await _owns(deps, me, account_id)
+        await no_payout_pending(deps, account_id)
+        order_id = body.order_id or deps.new_id()
+        return await submit(
+            deps,
+            lambda ts: PlaceTrailingEntry(
+                order_id,
+                account_id,
+                body.symbol,
+                Side(body.side),
+                body.volume,
+                body.distance,
+                body.step,
+                ts,
+            ),
+        )
+
+    @app.put("/accounts/{account_id}/positions/{position_id}/trailing-stop")
+    async def trailing_stop(
+        deps: D, me: Trader, account_id: Ident, position_id: Ident, body: TrailingStopBody
+    ) -> JSONResponse:
+        """Set the position's trailing stop, replacing any it has; removed
+        with DELETE .../orders/{order_id}."""
+        await _owns(deps, me, account_id)
+        order_id = body.order_id or deps.new_id()
+        return await submit(
+            deps,
+            lambda ts: SetTrailingStop(
+                order_id, account_id, position_id, body.distance, body.step, ts
+            ),
+        )
 
     @app.delete("/accounts/{account_id}/orders/{order_id}")
     async def cancel(deps: D, me: Trader, account_id: Ident, order_id: Ident) -> JSONResponse:
