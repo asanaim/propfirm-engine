@@ -39,6 +39,11 @@ minimum_cents = 5000           # $50
 first_after_days = 14          # after funding
 pay_days = ["15", "last"]      # days of the month
 approvals_required = 2         # people who must approve each payout
+# Open decisions (D22, D23), set here as starting values [DEFAULT]:
+basis = "closed_balance"       # profit measured on "closed_balance" or "equity" at request
+flat_required = true           # no open position or pending order when requesting
+min_trading_days = 0           # trading days needed in the period since funding / last payout
+maximum_cents = 0              # largest amount to the trader per payout; 0 = no maximum
 
 [scaling]                      # Lite, Classic and 1-Step funded accounts
 review_months = 4

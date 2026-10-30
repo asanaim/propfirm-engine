@@ -91,3 +91,15 @@ class FakeCustomers:
 
     async def order(self, ord_id: str) -> OrderRecord | None:
         return None
+
+    async def account(self, acc: str) -> AccountRecord | None:
+        owner = self.owners.get(acc)
+        if owner is None:
+            return None
+        return AccountRecord(acc, owner, f"ORD-{acc}", "lite", "lite-s1-v1", 1_000_000, 0, "s1")
+
+    async def cif(self, cif: str) -> CifRecord | None:
+        for subject, number in self.cifs.items():
+            if number == cif:
+                return self.record(subject)
+        return None
