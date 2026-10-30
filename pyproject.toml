@@ -9,6 +9,7 @@ dependencies = [
     "cryptography==50.0.2",
     "fastapi==0.143.5",
     "httpx==0.28.1",
+    "pycountry==26.2.16",
     "pydantic==2.14.1",
     "pyjwt[crypto]==2.15.1",
     "tzdata==2026.6",

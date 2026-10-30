@@ -17,8 +17,11 @@ import valkey.asyncio as avalkey
 
 from propfirm.api.app import Deps, create_app
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.funding import Onboarding
+from propfirm.customers.kyc import KycProvider, SandboxKyc
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
+from propfirm.customers.onboarding_store import OnboardingStore
 from propfirm.customers.providers import SandboxPayments, SandboxScreener
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.journal.stream import InputStreamWriter
@@ -53,6 +56,7 @@ class Platform:
     lifecycle: Lifecycle
     engine: Callable[[], Awaitable[None]]  # start the engine (if stopped)
     stop_engine: Callable[[], Awaitable[None]]
+    onboarding: Onboarding | None = None  # with funded=True
 
     async def call(
         self,
@@ -75,7 +79,12 @@ async def platform(
     sandbox: bool = True,
     wait_s: float = 5.0,
     start_engine: bool = True,
+    funded: bool = False,
+    kyc: KycProvider | None = None,
+    didit_webhook_secret: str | None = None,
 ) -> AsyncIterator[Platform]:
+    """`funded`: funded orders wait for funded onboarding (sandbox identity
+    check), as the API process runs it; otherwise they open at payment."""
     policy = policy or load_policy()
     config = ServiceConfig(
         database_url=database_url,
@@ -95,7 +104,31 @@ async def platform(
     store = await CustomerStore.open(pool, config.customer_schema)
     records = await SettingsStore.open(pool, config.settings_schema)
     settings = Settings(policy, records, gateway, wait_s)
-    checkout = Checkout(store, settings, SandboxPayments(), SandboxScreener(), gateway, wait_s)
+    onboardings = OnboardingStore(pool, config.customer_schema)
+    checkout = Checkout(
+        store,
+        settings,
+        SandboxPayments(),
+        SandboxScreener(),
+        gateway,
+        wait_s,
+        funded=onboardings if funded else None,
+    )
+    onboarding = (
+        Onboarding(
+            onboardings,
+            store,
+            settings,
+            kyc or SandboxKyc(),
+            SandboxScreener(),
+            gateway,
+            checkout,
+            sandbox=sandbox,
+            wait_s=wait_s,
+        )
+        if funded
+        else None
+    )
     lifecycle = Lifecycle(
         ProgressionStore(pool, config.customer_schema, config.schema), settings, gateway, wait_s
     )
@@ -110,6 +143,8 @@ async def platform(
         policy=settings,
         settings=settings,
         lifecycle=lifecycle,
+        onboarding=onboarding,
+        didit_webhook_secret=didit_webhook_secret,
         sandbox=sandbox,
         country_header="X-Country",
         today=lambda: TODAY,
@@ -138,7 +173,9 @@ async def platform(
     if start_engine:
         await engine()
     try:
-        yield Platform(api, store, writer, live, config, settings, lifecycle, engine, stop_engine)
+        yield Platform(
+            api, store, writer, live, config, settings, lifecycle, engine, stop_engine, onboarding
+        )
     finally:
         await stop_engine()
         await api.aclose()
@@ -313,7 +350,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3]
+            assert await migrate(conn, schema) == [1, 2, 3, 4]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

@@ -259,6 +259,102 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX ON {s}.accounts (ord);
         """,
     ),
+    (
+        4,
+        """
+        CREATE SEQUENCE {s}.onb_seq;
+        CREATE SEQUENCE {s}.kyc_seq;
+        CREATE SEQUENCE {s}.ctr_seq;
+        -- identity checks: personal data, so no trigger (erasable on a lawful
+        -- request); the code only ever inserts
+        CREATE TABLE {s}.kyc_cases (
+            kyc text PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            provider text NOT NULL,
+            session_id text NOT NULL,
+            url text NOT NULL,
+            created_at bigint NOT NULL,
+            UNIQUE (provider, session_id)
+        );
+        CREATE INDEX ON {s}.kyc_cases (cif);
+        CREATE TABLE {s}.kyc_results (
+            kyc text PRIMARY KEY REFERENCES {s}.kyc_cases (kyc),
+            result text NOT NULL CHECK (result IN ('approved', 'declined')),
+            full_name text,
+            date_of_birth date,
+            document_country text CHECK (document_country ~ '^[A-Z]{{2}}$'),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL,
+            CHECK (result = 'declined' OR full_name IS NOT NULL)
+        );
+        CREATE TABLE {s}.onboardings (
+            onb text PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            source text NOT NULL CHECK (source IN ('progression', 'order')),
+            prg text UNIQUE REFERENCES {s}.progressions (prg),
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            product_id text NOT NULL,
+            size_cents bigint NOT NULL CHECK (size_cents > 0),
+            rsv_id text NOT NULL,
+            created_at bigint NOT NULL,
+            status text NOT NULL CHECK (status IN ('verification', 'verification_declined',
+                'checks', 'review', 'rejected', 'contract', 'signature', 'signed',
+                'provisioned', 'failed')),
+            kyc text REFERENCES {s}.kyc_cases (kyc),
+            kyc_attempts integer NOT NULL DEFAULT 0,
+            acc text,
+            contract text,
+            failure text,
+            CHECK ((source = 'progression') = (prg IS NOT NULL))
+        );
+        CREATE UNIQUE INDEX ON {s}.onboardings (ord) WHERE source = 'order';
+        CREATE INDEX ON {s}.onboardings (cif);
+        CREATE INDEX ON {s}.onboardings (status);
+        CREATE TABLE {s}.onboarding_events (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            onb text NOT NULL REFERENCES {s}.onboardings (onb),
+            kind text NOT NULL CHECK (kind IN ('created', 'kyc_requested', 'kyc_declined',
+                'kyc_approved', 'screened', 'review_required', 'approved', 'denied',
+                'rejected', 'cleared', 'account_assigned', 'contract_issued', 'signed',
+                'provision_attempted', 'provisioned', 'failed')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.onboarding_events (onb, id);
+        CREATE TRIGGER onboarding_events_append_only
+            BEFORE UPDATE OR DELETE ON {s}.onboarding_events
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE FUNCTION {s}.onboarding_facts_fixed() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'onboardings are append-only';
+            END IF;
+            IF (NEW.onb, NEW.cif, NEW.source, NEW.prg, NEW.ord, NEW.product_id,
+                NEW.size_cents, NEW.rsv_id, NEW.created_at)
+               IS DISTINCT FROM
+               (OLD.onb, OLD.cif, OLD.source, OLD.prg, OLD.ord, OLD.product_id,
+                OLD.size_cents, OLD.rsv_id, OLD.created_at) THEN
+                RAISE EXCEPTION 'onboarding facts never change';
+            END IF;
+            RETURN NEW;
+        END $$;
+        CREATE TRIGGER onboardings_facts_fixed BEFORE UPDATE OR DELETE ON {s}.onboardings
+            FOR EACH ROW EXECUTE FUNCTION {s}.onboarding_facts_fixed();
+        -- signed agreements are legal records: kept whole
+        CREATE TABLE {s}.contracts (
+            contract text PRIMARY KEY,
+            onb text NOT NULL REFERENCES {s}.onboardings (onb),
+            template text NOT NULL,
+            sha256 text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{{64}}$'),
+            body text NOT NULL,
+            draft boolean NOT NULL,
+            created_at bigint NOT NULL
+        );
+        CREATE TRIGGER contracts_append_only BEFORE UPDATE OR DELETE ON {s}.contracts
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        ALTER TABLE {s}.accounts ADD COLUMN onboarding text REFERENCES {s}.onboardings (onb);
+        """,
+    ),
 )
 
 
@@ -311,6 +407,7 @@ class AccountRecord:
     created_at: int
     stage: str  # s1, s2 or funded
     progression: str | None = None  # the PRG that opened it; None: bought directly
+    onboarding: str | None = None  # the ONB that opened it (funded after a progression)
 
 
 def _check(name: str) -> str:
@@ -414,6 +511,10 @@ class CustomerStore:
         """Record a refused registration (no CIF is created)."""
         async with self._pool.acquire() as conn:
             await self._event(conn, None, subject, ts, "registration_refused", detail)
+
+    async def cif(self, cif: str) -> CifRecord | None:
+        row = await self._pool.fetchrow(f"SELECT * FROM {self._s}.cif WHERE cif = $1", cif)
+        return None if row is None else _cif(row)
 
     async def cif_by_subject(self, subject: str) -> CifRecord | None:
         row = await self._pool.fetchrow(f"SELECT * FROM {self._s}.cif WHERE subject = $1", subject)

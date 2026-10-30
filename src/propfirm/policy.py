@@ -103,6 +103,25 @@ class ProductPolicy:
         return next((r for r in self.rule_sets if r.stage is stage), None)
 
 
+_TEMPLATE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
+DISCLOSURES = ("simulated", "live")
+
+
+@dataclass(frozen=True, slots=True)
+class ContractPolicy:
+    """The funded-trader agreement (outline M18). Empty text = not decided
+    yet: the contract is then issued only as a sandbox draft."""
+
+    template: str  # config/contracts/<template>.txt
+    firm_name: str  # the contracting company (C14)
+    governing_law: str  # counsel
+    account_disclosure: str  # D1: "simulated" or "live"
+
+    @property
+    def complete(self) -> bool:
+        return bool(self.firm_name and self.governing_law)
+
+
 @dataclass(frozen=True, slots=True)
 class Policy:
     access: AccessPolicy
@@ -111,6 +130,7 @@ class Policy:
     scaling: ScalingPolicy
     trading: TradingPolicy
     products: tuple[ProductPolicy, ...]
+    contract: ContractPolicy
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         return tuple(r for p in self.products for r in p.rule_sets)
@@ -246,10 +266,10 @@ class _Table:
             raise PolicyError(f"{self.name(key)} must be a whole number >= {minimum}")
         return value
 
-    def text(self, key: str) -> str:
+    def text(self, key: str, *, allow_empty: bool = False) -> str:
         value = self._get(key)
-        if not isinstance(value, str) or not value or value != value.strip():
-            raise PolicyError(f"{self.name(key)} must be non-empty text")
+        if not isinstance(value, str) or value != value.strip() or not (value or allow_empty):
+            raise PolicyError(f"{self.name(key)} must be {'' if allow_empty else 'non-empty '}text")
         return value
 
     def percent(self, key: str, *, optional: bool = False) -> Fraction | None:
@@ -313,6 +333,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             scaling=_scaling(root.table("scaling")),
             trading=_trading(root.table("trading")),
             products=tuple(_product(t) for t in root.tables("products")),
+            contract=_contract(root.table("contract")),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -322,6 +343,21 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
     ids = [p.id for p in policy.products]
     if len(set(ids)) != len(ids):
         raise PolicyError("product ids must be unique")
+    return policy
+
+
+def _contract(t: _Table) -> ContractPolicy:
+    policy = ContractPolicy(
+        template=t.text("template"),
+        firm_name=t.text("firm_name", allow_empty=True),
+        governing_law=t.text("governing_law", allow_empty=True),
+        account_disclosure=t.text("account_disclosure"),
+    )
+    t.done()
+    if not _TEMPLATE_ID.fullmatch(policy.template):
+        raise PolicyError(f"{t.name('template')} must match {_TEMPLATE_ID.pattern}")
+    if policy.account_disclosure not in DISCLOSURES:
+        raise PolicyError(f"{t.name('account_disclosure')} must be one of {DISCLOSURES}")
     return policy
 
 
