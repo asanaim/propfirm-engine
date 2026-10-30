@@ -473,6 +473,7 @@ def test_realm_gives_each_app_only_its_roles() -> None:
     }
     assert users == {
         "trader1@example.com": set(),
+        "trader2@example.com": set(),  # with an authenticator (TOTP)
         "staff1@example.com": {"staff"},
         "admin1@example.com": {"admin"},
     }
