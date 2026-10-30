@@ -5,10 +5,12 @@ import type { Attribution as AttributionSource, Bar, LiveAccount, Market, Quote 
 import { useAccountStream } from "../api/useAccountStream";
 import { useAuth } from "../auth/AuthProvider";
 import { Attribution } from "../components/Attribution";
+import { OrderTicket } from "../components/OrderTicket";
+import { PendingRow, PositionRow } from "../components/PositionRow";
 import { PriceChart } from "../components/PriceChart";
 import { Problem } from "../components/Problem";
 import { Button, Card, Loading, Notice } from "../components/ui";
-import { formatCents, formatDuration, formatLots, formatPrice } from "../lib/money";
+import { formatCents, formatDuration, formatPrice } from "../lib/money";
 import { Link } from "../router";
 
 const STAGES: Record<string, string> = { s1: "Stage 1", s2: "Stage 2", funded: "Funded" };
@@ -53,6 +55,23 @@ function LossCard({ title, equity, floor, limit }: { title: string; equity: numb
         <dd>{formatCents(floor)}</dd>
       </dl>
     </Card>
+  );
+}
+
+export function AccountTabs({ acc, current }: { acc: string; current: "dashboard" | "history" | "rules" }) {
+  const tabs = [
+    { key: "dashboard", href: `/accounts/${acc}`, label: "Dashboard" },
+    { key: "history", href: `/accounts/${acc}/history`, label: "History" },
+    { key: "rules", href: `/accounts/${acc}/rules`, label: "Rules" },
+  ];
+  return (
+    <nav className="tabs" aria-label="Account">
+      {tabs.map((t) => (
+        <Link key={t.key} href={t.href} aria-current={t.key === current ? "page" : undefined}>
+          {t.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
@@ -236,11 +255,15 @@ export function AccountPage({ acc }: { acc: string }) {
   const account = live.account;
   if (account === null) return <Loading label="Connecting" />;
   const floating = account.equity_cents - account.balance_cents;
+  const canTrade = account.status === "active" && !account.locked;
+  const digitsOf = (symbol: string) =>
+    market?.symbols.find((m) => m.symbol === symbol)?.digits ?? live.quotes[symbol]?.digits ?? 5;
   return (
     <div className="page">
       <p className="crumbs">
         <Link href="/accounts">Accounts</Link> / {acc}
       </p>
+      <AccountTabs acc={acc} current="dashboard" />
       <div className="title-row">
         <h1>{acc}</h1>
         <span className={`badge badge-${account.status}`}>{STATUS[account.status]}</span>
@@ -288,6 +311,9 @@ export function AccountPage({ acc }: { acc: string }) {
         <ResetCard account={account} now={now} />
       </div>
       {market !== null && <Chart market={market} quotes={live.quotes} />}
+      {market !== null && (
+        <OrderTicket acc={acc} market={market} quotes={live.quotes} disabled={!canTrade} />
+      )}
       <h2>Open positions</h2>
       {account.positions.length === 0 ? (
         <p className="muted">No open positions.</p>
@@ -301,24 +327,18 @@ export function AccountPage({ acc }: { acc: string }) {
                 <th scope="col">Side</th>
                 <th scope="col">Lots</th>
                 <th scope="col">Open price</th>
-                <th scope="col">Stop loss</th>
-                <th scope="col">Take profit</th>
+                <th scope="col">Current</th>
+                <th scope="col">Profit</th>
+                <th scope="col">Stop loss / take profit</th>
+                <th scope="col">
+                  <span className="visually-hidden">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {account.positions.map((p) => {
-                const digits = live.quotes[p.symbol]?.digits ?? 5;
-                return (
-                  <tr key={p.position_id}>
-                    <th scope="row">{p.symbol}</th>
-                    <td>{p.side === "buy" ? "Buy" : "Sell"}</td>
-                    <td>{formatLots(p.volume)}</td>
-                    <td>{formatPrice(p.open_price, digits)}</td>
-                    <td>{p.stop_loss === null ? "—" : formatPrice(p.stop_loss, digits)}</td>
-                    <td>{p.take_profit === null ? "—" : formatPrice(p.take_profit, digits)}</td>
-                  </tr>
-                );
-              })}
+              {account.positions.map((p) => (
+                <PositionRow key={p.position_id} acc={acc} position={p} digits={digitsOf(p.symbol)} canTrade={canTrade} />
+              ))}
             </tbody>
           </table>
         </div>
@@ -336,21 +356,15 @@ export function AccountPage({ acc }: { acc: string }) {
                   <th scope="col">Side</th>
                   <th scope="col">Lots</th>
                   <th scope="col">Level</th>
+                  <th scope="col">
+                    <span className="visually-hidden">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {account.pending_orders.map(({ request: o }) => {
-                  const digits = live.quotes[o.symbol]?.digits ?? 5;
-                  return (
-                    <tr key={o.order_id}>
-                      <th scope="row">{o.symbol}</th>
-                      <td>{o.order_type}</td>
-                      <td>{o.side === "buy" ? "Buy" : "Sell"}</td>
-                      <td>{formatLots(o.volume)}</td>
-                      <td>{o.level === null ? "—" : formatPrice(o.level, digits)}</td>
-                    </tr>
-                  );
-                })}
+                {account.pending_orders.map((o) => (
+                  <PendingRow key={o.request.order_id} acc={acc} order={o} digits={digitsOf(o.request.symbol)} canTrade={canTrade} />
+                ))}
               </tbody>
             </table>
           </div>

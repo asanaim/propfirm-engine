@@ -30,6 +30,9 @@ const LITE: Product = {
       min_trading_days: 3,
       consistency_percent: null,
       consistency_at_pass: false,
+      target_basis: "closed_balance",
+      flat_to_pass: true,
+      tie_rule: "breach_wins",
     },
   ],
 };

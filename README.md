@@ -84,6 +84,16 @@ npm run typecheck && npm run lint && npm run build
   positions and pending orders, prices, and a candle chart. Every figure
   comes from the engine's live state (`GET /accounts/{acc}`), so the portal
   computes no rule of its own (I14).
+- Trading (4c): an order ticket (market, limit and stop; volume in lots,
+  prices typed as decimals and sent as integer points, never floats; stop
+  loss and take profit), open positions with the price each would close at
+  and its profit (`pnl_cents`, each rounded on its own for display), close
+  and change stops, pending orders and cancel, every engine refusal in
+  words; history (`/accounts/{acc}/history`: closed trades, profit and
+  commission, CSV export, and the account's whole record), the rule set
+  (`/accounts/{acc}/rules`, from the rule set's own fields: target basis,
+  flat to pass, tie rule) and the news calendar (`GET /news`: restricted
+  windows not over yet). Trailing orders (M09) need engine work: not yet.
 - Live updates: `GET /accounts/{acc}/stream`, server-sent events (`account`
   and `quotes` when they change; `end` after 5 minutes, and the portal
   opens it again with a fresh token).
@@ -334,7 +344,7 @@ or rules uses floating point.
 - [ ] Step 4: trader portal
   - [x] 4a: foundation, login (PKCE, optional 2FA, step-up), registration, checkout, accounts
   - [x] 4b: account dashboard, live prices, chart
-  - [ ] 4c: order ticket, positions, history, rulebook, news calendar
+  - [x] 4c: order ticket, positions, history, rulebook, news calendar (trailing orders: engine step to come)
   - [ ] 4d: funded onboarding, wallet, payouts
 - [ ] Step 5: back office
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)

@@ -42,6 +42,9 @@ const ACCOUNT: LiveAccount = {
     min_trading_days: 4,
     consistency_percent: null,
     consistency_at_pass: false,
+    target_basis: "closed_balance",
+    flat_to_pass: true,
+    tie_rule: "breach_wins",
   },
   trading_days: 1,
   positions: [
@@ -54,6 +57,8 @@ const ACCOUNT: LiveAccount = {
       opened_at: 0,
       stop_loss: null,
       take_profit: 111_000,
+      current_price: 109_655,
+      pnl_cents: -350_000,
     },
   ],
   pending_orders: [],
@@ -100,7 +105,7 @@ it("shows the account's numbers from the live stream", async () => {
   expect(screen.getByRole("heading", { name: "Profit target" }).closest("section")).toHaveTextContent("$4,000.00");
   const positions = screen.getByRole("table", { name: "Open positions" });
   const row = within(positions).getByRole("rowheader", { name: "EUR/USD" }).closest("tr");
-  expect(row).toHaveTextContent("Buy10.001.10005—1.11000");
+  expect(row).toHaveTextContent("Buy10.001.100051.09655-$3,500.00— / 1.11000");
   // Twelve Data's guidelines: this text near the data, "Twelve Data" a followed link
   const links = await screen.findAllByRole("link", { name: "Twelve Data" });
   expect(links).toHaveLength(2); // the chart and the price table

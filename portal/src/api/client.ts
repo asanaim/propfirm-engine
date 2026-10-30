@@ -29,6 +29,8 @@ export type TokenSource = () => Promise<string | null>;
 export interface Api {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body?: unknown) => Promise<T>;
+  put: <T>(path: string, body?: unknown) => Promise<T>;
+  delete: <T>(path: string) => Promise<T>;
   /** Server-sent events from `path` until the server ends the stream. */
   events: (path: string, onEvent: (name: string, data: unknown) => void, signal: AbortSignal) => Promise<void>;
 }
@@ -121,6 +123,8 @@ export function createApi(base: string, token: TokenSource, fetcher: typeof fetc
   return {
     get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body),
+    put: (path, body) => request("PUT", path, body),
+    delete: (path) => request("DELETE", path),
     events,
   };
 }

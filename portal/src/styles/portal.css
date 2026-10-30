@@ -17,6 +17,8 @@
   --danger-bg: #fdecea;
   --ok: #146c43;
   --ok-bg: #e7f5ee;
+  --on-ok: #ffffff;
+  --on-danger: #ffffff;
   --warn: #9a6700;
   --info-bg: #eaf0fc;
   --focus: #2952cc;
@@ -51,6 +53,8 @@
   --danger-bg: #3a1916;
   --ok: #6fd49b;
   --ok-bg: #12301f;
+  --on-ok: #0e1013;
+  --on-danger: #0e1013;
   --warn: #e3b341;
   --info-bg: #18233d;
   --focus: #8aa8ff;
@@ -648,4 +652,84 @@ tbody th {
 
 .page > .card {
   margin-top: var(--space-5);
+}
+
+/* --- trading ------------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+.tabs a {
+  padding: var(--space-2) var(--space-3);
+  border-radius: 999px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 550;
+}
+
+.tabs a[aria-current="page"] {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.ticket-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-3);
+}
+
+.button-buy {
+  background: var(--ok);
+  color: var(--on-ok);
+}
+
+.button-sell {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.button.small {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  font-size: 0.875rem;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.inline-form {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+.inline-form input {
+  width: 110px;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--muted);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.problems {
+  color: var(--danger);
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.rules li {
+  margin-bottom: var(--space-2);
+}
+
+td.wrap {
+  white-space: normal;
 }

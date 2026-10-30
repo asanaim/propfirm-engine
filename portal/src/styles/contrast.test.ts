@@ -39,6 +39,8 @@ const TEXT: [string, string][] = [
   ["danger", "danger-bg"],
   ["ok", "ok-bg"],
   ["text", "info-bg"],
+  ["on-ok", "ok"], // buy and sell buttons
+  ["on-danger", "danger"],
 ];
 // non-text (1.4.11): focus ring and input borders against the surface
 const NON_TEXT: [string, string][] = [

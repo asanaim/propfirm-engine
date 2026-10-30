@@ -98,6 +98,8 @@ class LiveSource(Protocol):
 
     async def quotes(self) -> dict[str, dict[str, Any]]: ...
 
+    async def news(self) -> list[dict[str, Any]]: ...
+
 
 class HistorySource(Protocol):
     async def account_events(
@@ -862,6 +864,12 @@ def create_app(
     @app.get("/quotes")
     async def quotes(deps: D, me: Me) -> dict[str, dict[str, Any]]:
         return await deps.live.quotes()
+
+    @app.get("/news")
+    async def news(deps: D, me: Me) -> list[dict[str, Any]]:
+        """Restricted events not over yet (M13): no trade opens or closes on
+        their symbols from `start_ts` to `end_ts` (ms UTC)."""
+        return await deps.live.news()
 
     @app.get("/market")
     async def market(deps: D, me: Me) -> dict[str, Any]:

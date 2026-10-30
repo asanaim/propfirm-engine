@@ -36,6 +36,9 @@ class ChangingLive:
     async def quotes(self) -> dict[str, dict[str, Any]]:
         return {"EUR/USD": {"bid": 109_995, "ask": 110_005}}
 
+    async def news(self) -> list[dict[str, Any]]:
+        return [{"event_id": "us-nfp", "start_ts": 1, "end_ts": 2, "symbols": ["EUR/USD"]}]
+
 
 def run(
     url: str,
@@ -123,3 +126,10 @@ def test_the_stream_is_the_owners_or_staffs() -> None:
     assert run("/accounts/Z/stream", roles=("staff",)).status_code == 404
     assert run("/accounts/A/stream", user="user-9", roles=("staff",)).status_code == 200
     assert run("/accounts/A/stream", user=None).status_code == 401
+
+
+def test_the_news_calendar_for_signed_in_users() -> None:
+    assert run("/news").json() == [
+        {"event_id": "us-nfp", "start_ts": 1, "end_ts": 2, "symbols": ["EUR/USD"]}
+    ]
+    assert run("/news", user=None).status_code == 401

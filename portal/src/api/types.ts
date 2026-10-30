@@ -11,6 +11,9 @@ export interface Stage {
   min_trading_days: number;
   consistency_percent: string | null;
   consistency_at_pass: boolean;
+  target_basis: "closed_balance" | "equity";
+  flat_to_pass: boolean; // no open position or pending order to pass
+  tie_rule: "breach_wins" | "pass_wins";
 }
 
 export interface Product {
@@ -89,6 +92,8 @@ export interface LivePosition {
   opened_at: number;
   stop_loss: number | null;
   take_profit: number | null;
+  current_price: number; // what it would close at now (bid for a buy, ask for a sell)
+  pnl_cents: number; // floating, at current_price (display)
 }
 
 export interface LivePendingOrder {

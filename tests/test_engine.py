@@ -172,6 +172,23 @@ def test_equity_is_balance_plus_unrealized() -> None:
     assert e.free_margin("A") == e.equity("A") - e.used_margin("A")
 
 
+def test_floating_profit_per_position_for_display() -> None:
+    rig = Rig()
+    rig.price("EUR/USD", 110_000)
+    rig.price("USD/JPY", 150_000)
+    rig.order("p1", Side.BUY)  # 1 lot at 1.10005
+    rig.order("p2", Side.SELL, symbol="USD/JPY")
+    rig.price("EUR/USD", 110_200)  # bid 1.10195: +$190
+    rig.price("USD/JPY", 149_000)
+    floating = {pid: (price, pnl) for pid, price, pnl in rig.engine.floating("A")}
+    assert floating["p1"] == (110_195, 19_000)
+    price, pnl = floating["p2"]
+    assert price == rig.engine.quote("USD/JPY").ask  # type: ignore[union-attr]  # a sell closes at the ask
+    assert abs(sum(p for _, p in floating.values()) - rig.engine.unrealized_pnl("A")) <= 1
+    assert pnl > 0
+    assert rig.engine.floating("A") and Rig().engine.floating("A") == ()
+
+
 # --- pending orders ----------------------------------------------------------
 
 
@@ -434,3 +451,14 @@ def test_frozen_reason_is_carried_on_events() -> None:
     frozen = one(rig.price("EUR/USD", 110_000, at=T0 + 100, lag=2_001), SymbolFrozen)
     assert frozen.reason is FreezeReason.DELAYED
     assert one(rig.price("EUR/USD", 110_000, at=T0 + 3_000), SymbolResumed).symbol == "EUR/USD"
+
+
+def test_the_calendar_lists_scheduled_events_soonest_first() -> None:
+    from propfirm.market.spread import NewsWindow
+
+    rig = Rig()
+    late = NewsWindow(frozenset({"EUR/USD"}), T0 + 10_000, T0 + 20_000)
+    soon = NewsWindow(frozenset({"USD/JPY", "EUR/USD"}), T0 + 1_000, T0 + 2_000)
+    rig.engine.schedule_news("ecb", late, T0)
+    rig.engine.schedule_news("nfp", soon, T0)
+    assert rig.engine.calendar() == (("nfp", soon), ("ecb", late))

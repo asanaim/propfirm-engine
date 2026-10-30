@@ -578,6 +578,21 @@ class TradingEngine:
     def equity(self, account_id: str) -> int:
         return self.balance(account_id) + self.unrealized_pnl(account_id)
 
+    def floating(self, account_id: str) -> tuple[tuple[str, int, int], ...]:
+        """(position id, the price it would close at now, its P&L in cents)
+        per open position, for display: each rounded on its own, so they may
+        differ from `unrealized_pnl` (rounded once) by under a cent each."""
+        self._account(account_id)
+        out = []
+        for p in self._open(account_id):
+            price = self._exit_price(p)
+            out.append((p.position_id, price, cents_half_even(self._pnl_usd(p, price, p.volume))))
+        return tuple(out)
+
+    def calendar(self) -> tuple[tuple[str, NewsWindow], ...]:
+        """Restricted events scheduled (event id, window), soonest first."""
+        return tuple(sorted(self._calendar.items(), key=lambda item: (item[1].start_ts, item[0])))
+
     def used_margin(self, account_id: str) -> int:
         self._account(account_id)
         return cents_ceil(sum((p.margin_usd for p in self._open(account_id)), Fraction(0)))

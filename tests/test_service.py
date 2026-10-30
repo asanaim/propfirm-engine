@@ -107,6 +107,9 @@ class FakeLive:
     async def quotes(self) -> dict[str, dict[str, Any]]:
         return {"EUR/USD": {"bid": 1, "ask": 3}}
 
+    async def news(self) -> list[dict[str, Any]]:
+        return [{"event_id": "us-nfp", "start_ts": 1, "end_ts": 2, "symbols": ["EUR/USD"]}]
+
 
 class FakeHistory:
     def __init__(self) -> None:
@@ -327,6 +330,9 @@ def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
         "min_trading_days": 4,
         "consistency_percent": None,
         "consistency_at_pass": False,
+        "target_basis": "closed_balance",
+        "flat_to_pass": True,
+        "tie_rule": "breach_wins",
     }
     instant = products[-1]["stages"][0]
     assert (instant["max_loss_kind"], instant["consistency_percent"]) == ("trailing", "50")
