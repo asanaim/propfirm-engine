@@ -76,7 +76,24 @@ npm run typecheck && npm run lint && npm run build
   to sign in again, or to set up an authenticator.
 - Pages: overview (registration on the first visit), challenges (the
   catalogue and checkout; sandbox payment under `PROPFIRM_SANDBOX=1`),
-  accounts and orders, security.
+  accounts and orders, security, open-source notices.
+- Account dashboard (`/accounts/{acc}`), live: balance, equity, the daily
+  and maximum loss left with their floors, the profit target, trading days,
+  the countdown to the 17:00 New York reset with the daily floor from then
+  and a warning when equity at the reset would breach (audit, M12), open
+  positions and pending orders, prices, and a candle chart. Every figure
+  comes from the engine's live state (`GET /accounts/{acc}`), so the portal
+  computes no rule of its own (I14).
+- Live updates: `GET /accounts/{acc}/stream`, server-sent events (`account`
+  and `quotes` when they change; `end` after 5 minutes, and the portal
+  opens it again with a fresh token).
+- Chart: TradingView Lightweight Charts 5.2.1 drawn from the firm's own
+  prices: `GET /bars?symbol=EUR/USD&interval=1m` (1m, 5m, 15m, 1h, 4h, and
+  1d by the 17:00 New York trading day), built by the projector from the
+  price store into one-minute bars. The price source is named beside every
+  chart and price table (`GET /market`; `PROPFIRM_PRICE_SOURCE` =
+  `synthetic` or `twelve_data`: "Prices by Twelve Data"); the chart carries
+  TradingView's attribution link, and the notices page its notice.
 - The portal calls the API under `/api` on its own origin: Vite forwards it
   in development (`PROPFIRM_API_URL`, default http://127.0.0.1:8000), the
   web server in production; no CORS.
@@ -305,8 +322,8 @@ or rules uses floating point.
   - [x] 3c: payable profit and payout eligibility
   - [ ] 3d: payout processing (two-person approval)
 - [ ] Step 4: trader portal
-  - [ ] 4a: foundation, login (PKCE, optional 2FA, step-up), registration, checkout, accounts
-  - [ ] 4b: account dashboard, live prices, chart
+  - [x] 4a: foundation, login (PKCE, optional 2FA, step-up), registration, checkout, accounts
+  - [x] 4b: account dashboard, live prices, chart
   - [ ] 4c: order ticket, positions, history, rulebook, news calendar
   - [ ] 4d: funded onboarding, wallet, payouts
 - [ ] Step 5: back office

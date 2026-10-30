@@ -261,6 +261,27 @@ class RuleSupervisor:
         oldest first (the figures the consistency rule reads)."""
         return tuple(sorted(self._state(account_id).day_pnl.items()))
 
+    def initial_balance(self, account_id: str) -> int:
+        return self._state(account_id).initial_balance
+
+    def limits(self, account_id: str) -> tuple[int, int]:
+        """(daily loss limit, maximum loss limit) in cents."""
+        state = self._state(account_id)
+        rules = state.rules
+        initial = state.initial_balance
+        return rules.amount(rules.daily_loss, initial), rules.amount(rules.max_loss, initial)
+
+    def next_reset(self, account_id: str) -> tuple[int, int]:
+        """(the next 17:00 New York reset, the daily floor from then) in ms
+        UTC and cents, if equity stayed as it is now: the new daily base is
+        the higher of balance and equity, so a floating loss of the daily
+        limit or more breaches at the reset itself (audit, M12)."""
+        state = self._state(account_id)
+        engine = self._engine
+        base = max(engine.balance(account_id), engine.equity(account_id))
+        daily = state.rules.amount(state.rules.daily_loss, state.initial_balance)
+        return self._clock.next_boundary(engine.now), base - daily
+
     def floors(self, account_id: str) -> tuple[int, int]:
         """(daily floor, max floor) in cents."""
         state = self._state(account_id)

@@ -241,3 +241,26 @@ def test_instant_trailing_floor_stops_at_the_starting_balance() -> None:
     assert rig.sup.floors("A")[1] == 2_500_000
     events = rig.price(110_010, day + 3_000)  # bid 1.10005: equity $25,000
     assert one(events, AccountBreached).reasons == (BreachReason.MAX_LOSS,)
+
+
+# --- the next reset (dashboard warning, audit M12) ------------------------------------------
+
+
+def test_the_next_reset_floor_shows_a_breach_at_the_reset_coming() -> None:
+    rig = RulesRig(LITE_S1, USD_100K, WEEK[0])  # daily 3 % = $3,000, max 6 %
+    assert rig.sup.limits("A") == (300_000, 600_000)
+    assert rig.sup.initial_balance("A") == USD_100K
+    rig.price(110_000, WEEK[0])
+    assert rig.sup.next_reset("A") == (ny(2026, 10, 19, 17), USD_100K - 300_000)
+    rig.round_trip(200, WEEK[0])  # +$2,000 closed today: balance $102,000
+    rig.price(110_000, WEEK[0] + 2_000)
+    rig.order(Side.BUY, 1_000, WEEK[0] + 2_000)  # 10 lots at 1.10005
+    rig.price(109_660, WEEK[0] + 3_000)  # bid 1.09655: -$3,500 floating, equity $98,500
+    assert rig.sup.status("A") is AccountStatus.ACTIVE
+    assert rig.sup.floors("A")[0] == 9_700_000  # today's floor: base $100,000
+    reset, floor = rig.sup.next_reset("A")
+    assert (reset, floor) == (ny(2026, 10, 19, 17), 9_900_000)  # from $102,000
+    assert rig.engine.equity("A") == 9_850_000 <= floor  # so the reset will breach
+    events = rig.sup.advance(reset)
+    assert one(events, AccountBreached).reasons == (BreachReason.DAILY_LOSS,)
+    assert rig.sup.next_reset("A")[0] == ny(2026, 10, 20, 17)

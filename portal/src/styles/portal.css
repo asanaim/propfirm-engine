@@ -17,6 +17,7 @@
   --danger-bg: #fdecea;
   --ok: #146c43;
   --ok-bg: #e7f5ee;
+  --warn: #9a6700;
   --info-bg: #eaf0fc;
   --focus: #2952cc;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
@@ -50,6 +51,7 @@
   --danger-bg: #3a1916;
   --ok: #6fd49b;
   --ok-bg: #12301f;
+  --warn: #e3b341;
   --info-bg: #18233d;
   --focus: #8aa8ff;
   --shadow: none;
@@ -535,4 +537,115 @@ tbody th {
   * {
     transition: none !important;
   }
+}
+
+/* --- account dashboard ----------------------------------------------------------- */
+
+.crumbs {
+  color: var(--muted);
+  margin-bottom: var(--space-2);
+}
+
+.title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.title-row h1 {
+  margin: 0;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px var(--space-3);
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: var(--info-bg);
+}
+
+.badge-active,
+.badge-passed {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.badge-breached,
+.badge-voided {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.live {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.live.on {
+  color: var(--ok);
+}
+
+.inline-icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+}
+
+.loss {
+  color: var(--danger);
+}
+
+.meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+  margin: var(--space-3) 0;
+}
+
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ok);
+}
+
+.meter-warn span {
+  background: var(--warn);
+}
+
+.meter-danger span {
+  background: var(--danger);
+}
+
+.chart-figure {
+  margin: 0;
+}
+
+.chart {
+  height: 380px;
+  margin: var(--space-3) 0;
+}
+
+.chart-controls {
+  margin-bottom: var(--space-2);
+}
+
+.field.inline {
+  grid-auto-flow: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.attribution {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.page > .card {
+  margin-top: var(--space-5);
 }

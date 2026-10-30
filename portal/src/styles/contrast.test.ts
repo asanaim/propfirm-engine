@@ -42,6 +42,9 @@ const TEXT: [string, string][] = [
 ];
 // non-text (1.4.11): focus ring and input borders against the surface
 const NON_TEXT: [string, string][] = [
+  ["ok", "border"], // meter fills against their track
+  ["warn", "border"],
+  ["danger", "border"],
   ["focus", "surface"],
   ["focus", "bg"],
   ["muted", "surface"],

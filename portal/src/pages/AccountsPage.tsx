@@ -62,7 +62,9 @@ export function AccountsPage() {
             <tbody>
               {accounts.map((a) => (
                 <tr key={a.acc}>
-                  <th scope="row">{a.acc}</th>
+                  <th scope="row">
+                    <Link href={`/accounts/${a.acc}`}>{a.acc}</Link>
+                  </th>
                   <td>{a.product_id}</td>
                   <td>{formatSize(a.size_cents)}</td>
                   <td>{STAGES[a.stage] ?? a.stage}</td>

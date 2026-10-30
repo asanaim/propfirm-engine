@@ -42,6 +42,7 @@ class ServiceConfig:
     didit_workflow_id: str | None = None
     didit_webhook_secret: str | None = None  # secret
     public_url: str | None = None  # the portal's address, for the provider's callback
+    price_source: str = "synthetic"  # "synthetic" or "twelve_data": named beside prices
     batch: int = 200  # inputs per transaction, at most
     block_ms: int = 1_000  # how long one stream read waits for input
     publish_ms: int = 250  # live state is published at most this often
@@ -64,6 +65,8 @@ class ServiceConfig:
             raise ConfigError(
                 "DIDIT_API_KEY, DIDIT_WORKFLOW_ID and DIDIT_WEBHOOK_SECRET go together"
             )
+        if self.price_source not in ("synthetic", "twelve_data"):
+            raise ConfigError("PROPFIRM_PRICE_SOURCE must be synthetic or twelve_data")
         for name in ("batch", "block_ms", "publish_ms"):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
@@ -118,6 +121,7 @@ class ServiceConfig:
             didit_workflow_id=env.get("DIDIT_WORKFLOW_ID") or None,
             didit_webhook_secret=env.get("DIDIT_WEBHOOK_SECRET") or None,
             public_url=env.get("PROPFIRM_PUBLIC_URL") or None,
+            price_source=text("PROPFIRM_PRICE_SOURCE", "synthetic"),
             batch=number("PROPFIRM_BATCH", 200),
             block_ms=number("PROPFIRM_BLOCK_MS", 1_000),
             publish_ms=number("PROPFIRM_PUBLISH_MS", 250),

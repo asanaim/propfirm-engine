@@ -224,3 +224,100 @@ def test_policy_edits_reach_the_engine_on_restart(
             await client.aclose()
 
     asyncio.run(scenario())
+
+
+def test_prices_become_bars(database_url: str, valkey_url: str, pg_schema: str) -> None:
+    """One-minute bars from the journal's price updates (open and close in
+    journal order, a minute spread over projector pages), and wider bars
+    built from them."""
+    from propfirm.rules.clock import NEW_YORK_17
+
+    config = ServiceConfig(
+        database_url=database_url,
+        valkey_url=valkey_url,
+        schema=pg_schema,
+        read_schema=f"{pg_schema}_r",
+        stream=f"test:inputs:{uuid.uuid4().hex}",
+        block_ms=50,
+        publish_ms=1,
+    )
+
+    async def scenario() -> None:
+        client = avalkey.Valkey.from_url(valkey_url)
+        pool = await asyncpg.create_pool(database_url, min_size=1, max_size=2)
+        writer = InputStreamWriter(client, config.stream)
+        now = now_ms()
+        m0 = now - now % 60_000 - 10 * 60_000  # ten minutes ago, on the minute
+        prices = [  # (source time, price)
+            (m0 + 1_000, 110_000),
+            (m0 + 20_000, 110_050),
+            (m0 + 30_000, 109_970),
+            (m0 + 59_999, 110_010),
+            (m0 + 60_000, 110_020),  # the next minute
+            (m0 + 5 * 60_000 + 5, 110_100),  # the next five-minute bar
+        ]
+        try:
+            async with engine(config):
+                for seq, (ts, price) in enumerate(prices, start=1):
+                    await writer.publish(PriceUpdate("EUR/USD", seq, ts, ts, price))
+                await writer.publish(PriceUpdate("XAU/USD", 1, m0 + 2_000, m0 + 2_000, 400_000))
+                gateway = Gateway(writer, pool, config.schema)
+                last = await writer.publish(OpenAccount("A", "lite-s1-v1", 1_000_000, now))
+                assert (await gateway.outcome(last, 5)).seq is not None
+            projector = await Projector.connect(database_url, config.schema, config.read_schema)
+            try:
+                while await projector.run_once(limit=2):  # the first minute spans pages
+                    pass
+            finally:
+                await projector.close()
+            history = HistoryReader(pool, config.read_schema)
+            minutes = await history.bars("EUR/USD", "1m")
+            assert minutes == [
+                {
+                    "time": m0,
+                    "open": 110_000,
+                    "high": 110_050,
+                    "low": 109_970,
+                    "close": 110_010,
+                    "updates": 4,
+                },
+                {
+                    "time": m0 + 60_000,
+                    "open": 110_020,
+                    "high": 110_020,
+                    "low": 110_020,
+                    "close": 110_020,
+                    "updates": 1,
+                },
+                {
+                    "time": m0 + 5 * 60_000,
+                    "open": 110_100,
+                    "high": 110_100,
+                    "low": 110_100,
+                    "close": 110_100,
+                    "updates": 1,
+                },
+            ]
+            assert await history.bars("EUR/USD", "1m", limit=1) == minutes[-1:]
+            assert await history.bars("EUR/USD", "1m", before=m0 + 60_000) == minutes[:1]
+            five = await history.bars("EUR/USD", "5m")
+            start = m0 - m0 % 300_000
+            first = [b for b in five if b["time"] == start]
+            assert first and first[0]["updates"] >= 4 and first[0]["open"] == 110_000
+            assert sum(b["updates"] for b in five) == 6
+            days = await history.bars("EUR/USD", "1d")  # 17:00 New York trading days
+            assert [b["time"] for b in days] == sorted(
+                {NEW_YORK_17.day_start(t) for t, _ in prices}
+            )
+            assert sum(b["updates"] for b in days) == 6
+            gold = await history.bars("XAU/USD", "1h")
+            assert [(b["open"], b["updates"]) for b in gold] == [(400_000, 1)]
+            assert await history.bars("BTC/USD", "1m") == []
+        finally:
+            async with pool.acquire() as conn:
+                await conn.execute(f"DROP SCHEMA IF EXISTS {config.read_schema} CASCADE")
+            await pool.close()
+            await client.delete(config.stream)
+            await client.aclose()
+
+    asyncio.run(scenario())
