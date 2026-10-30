@@ -136,6 +136,10 @@ class Ledger:
     def balance(self, account: str) -> int:
         return self._balances.get(account, 0)
 
+    def has(self, entry_id: str) -> bool:
+        """Whether an entry with this id was posted."""
+        return entry_id in self._by_id
+
     def balances(self) -> dict[str, int]:
         """A copy of the cached balances (accounts that were ever posted to)."""
         return dict(self._balances)

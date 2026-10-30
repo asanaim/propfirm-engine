@@ -172,7 +172,8 @@ def _drop(path: list[Any]) -> Callable[[dict[str, Any]], None]:
         _set(["trading", "commission", "crypto"], 0.05),  # number, not text
         _set(["trading", "commission", "crypto"], "1"),  # 1 % or more
         _set(["trading", "gap_threshold_ms_by_symbol"], {"EURUSD": 5000}),
-        _set(["payouts", "pay_days"], ["15", "31"]),
+        _set(["payouts", "interval_days"], 0),
+        _drop(["payouts", "interval_days"]),
         _set(["unexpected"], 1),
     ],
 )

@@ -416,6 +416,105 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.case_facts_fixed();
         """,
     ),
+    (
+        6,
+        """
+        CREATE SEQUENCE {s}.wal_seq;
+        CREATE SEQUENCE {s}.po_seq;
+        -- payout wallets: the latest per customer is in use; kept for the
+        -- payout record (append-only)
+        CREATE TABLE {s}.wallets (
+            wal text PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            network text NOT NULL CHECK (network = 'TRC20'),
+            address text NOT NULL CHECK (address ~ '^T[1-9A-HJ-NP-Za-km-z]{{33}}$'),
+            added_at bigint NOT NULL,
+            added_by text NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.wallets (cif, added_at);
+        CREATE TRIGGER wallets_append_only BEFORE UPDATE OR DELETE ON {s}.wallets
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TABLE {s}.payouts (
+            po text PRIMARY KEY,
+            acc text NOT NULL REFERENCES {s}.accounts (acc),
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            wal text NOT NULL REFERENCES {s}.wallets (wal),
+            requested_at bigint NOT NULL,
+            trader_amount_cents bigint NOT NULL CHECK (trader_amount_cents > 0),
+            debit_cents bigint NOT NULL CHECK (debit_cents > 0),
+            status text NOT NULL CHECK (status IN ('requested', 'approved', 'debited', 'sent',
+                'paid', 'denied', 'cancelled', 'failed')),
+            approvals integer NOT NULL DEFAULT 0,
+            debited_at bigint,
+            paid_at bigint,
+            provider_ref text,
+            failure text
+        );
+        -- one payout in progress per account
+        CREATE UNIQUE INDEX ON {s}.payouts (acc) WHERE status IN ('requested', 'approved');
+        CREATE INDEX ON {s}.payouts (status);
+        CREATE INDEX ON {s}.payouts (ord);
+        CREATE TABLE {s}.payout_events (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            po text NOT NULL REFERENCES {s}.payouts (po),
+            kind text NOT NULL CHECK (kind IN ('requested', 'approved', 'denied', 'cancelled',
+                'rechecked', 'failed', 'debit_attempted', 'debited', 'sent', 'send_failed',
+                'paid')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.payout_events (po, id);
+        CREATE TRIGGER payout_events_append_only BEFORE UPDATE OR DELETE ON {s}.payout_events
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE FUNCTION {s}.payout_facts_fixed() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'payouts are append-only';
+            END IF;
+            IF (NEW.po, NEW.acc, NEW.cif, NEW.ord, NEW.wal, NEW.requested_at,
+                NEW.trader_amount_cents, NEW.debit_cents)
+               IS DISTINCT FROM
+               (OLD.po, OLD.acc, OLD.cif, OLD.ord, OLD.wal, OLD.requested_at,
+                OLD.trader_amount_cents, OLD.debit_cents) THEN
+                RAISE EXCEPTION 'payout facts never change';
+            END IF;
+            RETURN NEW;
+        END $$;
+        CREATE TRIGGER payouts_facts_fixed BEFORE UPDATE OR DELETE ON {s}.payouts
+            FOR EACH ROW EXECUTE FUNCTION {s}.payout_facts_fixed();
+        """,
+    ),
+    (
+        7,
+        """
+        CREATE SEQUENCE {s}.ntf_seq;
+        -- security emails (outbox); personal data: insert-only by the code,
+        -- erasable
+        CREATE TABLE {s}.notifications (
+            ntf text PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            kind text NOT NULL CHECK (kind IN ('wallet_changed')),
+            recipient text NOT NULL,
+            subject text NOT NULL,
+            body text NOT NULL,
+            created_at bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.notifications (cif);
+        CREATE TABLE {s}.notification_events (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            ntf text NOT NULL REFERENCES {s}.notifications (ntf) ON DELETE CASCADE,
+            kind text NOT NULL CHECK (kind IN ('sent', 'failed')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.notification_events (ntf, id);
+        CREATE TRIGGER notification_events_append_only BEFORE UPDATE ON {s}.notification_events
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

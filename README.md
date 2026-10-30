@@ -60,8 +60,8 @@ them; add `-v` to delete the journal and start over.
 | View | Role | Sees and does |
 |---|---|---|
 | Public | none | products, sizes, prices, split, discounts; each stage's profit target, daily loss limit, drawdown limit, trading days and consistency rule; minimum age |
-| Trader (portal) | `trader` | own CIF, orders and accounts (each account shows its own target, limits and floors); buys; trades own accounts |
-| Employee (back office) | `staff` | every account, its history and inputs; trades none; no settings |
+| Trader (portal) | `trader` | own CIF, orders and accounts (each account shows its own target, limits and floors); buys; trades own accounts; own payout wallet and payouts |
+| Employee (back office) | `staff` | every account, its history and inputs; cases; approves or denies payouts (never their own); trades none; no settings |
 | Admin (back office) | `admin` | what an employee sees, plus the admin-only settings below |
 
 Admin-only settings, changed through the API (each change is recorded with
@@ -209,22 +209,85 @@ account's payable profit and every eligibility check, at that moment:
 
 - payable profit P = X − B − V, never below 0: X the closed balance (or the
   equity, `payouts.basis`), B the baseline (the initial capital; a payout
-  never moves it), V profit removed for violations (none yet);
+  never moves it), V profit removed for violations by confirmed case
+  decisions and not yet taken out by a payout;
 - the trader's share s·P rounded down to the cent (s the product's split),
   the firm's share the rest; a fee refund (1-Step: with the 3rd payout) on
-  its own line; `payouts.maximum_cents` caps the trader's amount;
-- checks: funded and active; 14 days since funding for the first payout;
+  its own line; `payouts.maximum_cents` caps the trader's amount (refund
+  included; it may not be set below a refundable fee); `debit_cents`, what
+  leaves the account: P + V (capped: G + V, G = the share paid ÷ s rounded
+  up to the cent, the rest of P stays payable);
+- checks: funded and active; the first payout from the trading day 14
+  days after that of the first trade on the account (as FTMO; trading days
+  end at 17:00 New York), a later one 14 days after the last
+  (`interval_days`);
   trading days in the period; the account's own consistency rule over the
   period; the $50 minimum; no open position or pending order
   (`payouts.flat_required`); an approved Tier 2 check and a customer not
   blocked; the country gate (when on); no case under review (shown to the
-  trader only as "held for review"). The payout wallet (at request, step
-  3d) is shown as not decided here;
-- the next pay day (the 15th or the last day of the month, UTC dates).
+  trader only as "held for review"); no payout of the account in progress;
+  a payout wallet (past its waiting period, if one is set);
+- `opens_at`: when a payout may be requested (on request, as FTMO and
+  FundedNext; no fixed pay days).
 
 The payout settings (D22, D23) are in `[payouts]` of the policy: closed
 balance, flat at request, and, as FTMO and FundedNext, no minimum trading
 days and no maximum.
+
+## Payouts
+
+USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
+
+1. Wallet: `POST /me/wallet` `{"address": "T..."}` (a TRON address,
+   checked by its Base58Check checksum); a new one replaces the old and is
+   usable at once, as at FTMO, FundedNext and The5ers
+   (`wallet_cooling_off_hours` = 0; a wait can be set). Every wallet added
+   or changed emails the customer's registered address ("Your payout wallet
+   was changed": the new and previous wallet, the time, what to do if it was
+   not them), as exchanges do for a new withdrawal address. The email is
+   written in the same transaction as the wallet (an outbox) and sent by the
+   background round, retried every minute; through SMTP when `SMTP_HOST` and
+   `MAIL_FROM` are set (`SMTP_PORT` 587, `SMTP_TLS` `starttls` or
+   `implicit`, `SMTP_USERNAME`, `SMTP_PASSWORD`; any transactional provider
+   such as Amazon SES or Postmark), otherwise through the sandbox mailer,
+   which sends nothing.
+2. Request: `POST /accounts/{acc}/payouts`, when eligible. The request
+   keeps the eligibility it was based on, the trader's amount and the
+   debit. One payout in progress per account; until it is debited (or
+   denied, cancelled, failed) the account takes no new orders
+   (`trading_during_payout = "paused"`, 409 `payout_pending`). The trader
+   may cancel until it is fully approved (`POST /me/payouts/{po}/cancel`).
+3. Approval: `POST /staff/payouts/{po}/approve` by `approvals_required` (2)
+   different employees, never on their own customer record; one `deny`
+   ends it. `GET /staff/payouts`, `GET /staff/payouts/{po}` (wallet and
+   history).
+4. Once approved (the API's background round, every second): eligibility
+   is computed again;
+   anything changed (a check failing, the amount, the wallet) fails the
+   payout and nothing is taken. Otherwise the engine takes `debit_cents`
+   out of the account (input `DebitPayout`, event `PayoutDebited`, ledger
+   entry `payout:PO…` to `firm:payouts`); it refuses a second debit of the
+   same payout, open positions, and more than the profit above the
+   baseline. The day's loss base and the high-water mark drop by the same
+   amount (D42 [DEFAULT]: a trailing floor restarts from the balance after
+   the payout).
+5. Sending: the payout provider sends the trader's amount; its
+   confirmation marks the payout paid. Until NOWPayments is connected (C6),
+   only the sandbox provider exists (`PROPFIRM_SANDBOX=1`; it sends
+   nothing); without it the payout endpoints answer 503.
+
+Changing the wallet and requesting a payout need the second factor
+entered in the last 5 minutes (`require_mfa`, `step_up_minutes`; step-up,
+as Binance asks for a 2FA code when a withdrawal address is added and
+FundedNext an OTP for each payout request). Otherwise the API answers 401
+with `WWW-Authenticate: Bearer error="insufficient_user_authentication",
+max_age=300` (RFC 9470), and the portal signs the trader in again. It reads
+the access token's `amr` and `auth_time` claims; the development realm's
+tokens carry neither yet (realm setup comes with the portal login), so
+these requests are refused until it does. `payout_events` and `wallets` are
+append-only; the payout's facts (amount, debit, wallet) never change. The
+funded agreement states these terms (`funded-agreement-v2`; contracts
+signed on v1 keep their text).
 
 ## Integrity, fraud and compliance cases
 
@@ -273,7 +336,7 @@ or rules uses floating point.
   - [x] 3a: stage progression (next evaluation account, funded review)
   - [x] 3b: funded onboarding (Tier 2 verification, contract, signature)
   - [x] 3c: payable profit and payout eligibility
-  - [ ] 3d: payout processing (two-person approval)
+  - [x] 3d: payout processing (two-person approval; sandbox payout provider until C6)
 - [ ] Step 4: trader portal
 - [ ] Step 5: back office
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)

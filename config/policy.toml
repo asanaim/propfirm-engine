@@ -36,8 +36,11 @@ after_minutes = 2
 
 [payouts]
 minimum_cents = 5000           # $50
-first_after_days = 14          # after funding
-pay_days = ["15", "last"]      # days of the month
+first_after_days = 14          # the 14th trading day after the first trade, as FTMO
+# On request, as FTMO (first reward from day 14, then a 14-day cycle; sent
+# 1-2 business days after approval) and FundedNext (paid within 24 hours);
+# replaces the 15th and last day of the month (D17), 30 Oct 2026.
+interval_days = 14             # a later payout no sooner than this after the last
 approvals_required = 2         # people who must approve each payout
 # D22, D23, confirmed 30 Oct 2026. FTMO (reward on request 14 days from the
 # first trading day; account in profit with no open positions or pending
@@ -47,6 +50,18 @@ basis = "closed_balance"       # profit measured on the closed balance at reques
 flat_required = true           # no open position or pending order when requesting
 min_trading_days = 0           # none, as FTMO and FundedNext
 maximum_cents = 0              # no maximum, as FTMO and FundedNext
+# Payout processing (M19), starting values [DEFAULT]:
+trading_during_payout = "paused"  # D23: no new orders from request to approval (the debit)
+require_mfa = true             # M04: the login must have used MFA to change the wallet or ask
+# Step-up (M06): that second factor entered no more than this many minutes
+# before the wallet change or payout request, as Binance asks for a 2FA
+# code when a withdrawal address is added and FundedNext an OTP for each
+# payout request; the portal then signs the trader in again (OIDC max_age).
+step_up_minutes = 5            # 0: any login that used MFA
+# No waiting period on a new or changed payout wallet, as FTMO, FundedNext
+# and The5ers (checked 30 Oct 2026: the wallet is given with the request;
+# FundedNext confirms the request by OTP). A wait of N hours can be set here.
+wallet_cooling_off_hours = 0
 
 [scaling]                      # Lite, Classic and 1-Step funded accounts
 review_months = 4
@@ -150,7 +165,7 @@ crypto = "0.0525"
 # M18). Text in config/contracts/<template>.txt. Until firm_name (C14) and
 # governing_law (counsel) are set, a contract is issued only in the sandbox,
 # marked DRAFT.
-template = "funded-agreement-v1"
+template = "funded-agreement-v2"
 firm_name = ""
 governing_law = ""
 account_disclosure = "simulated"  # D1: "simulated" or "live"

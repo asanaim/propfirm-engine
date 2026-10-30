@@ -17,9 +17,44 @@ def verify(raw: str) -> Principal:
 
 
 def test_a_valid_token_gives_the_principal() -> None:
-    principal = verify(token("abc", ("trader", "staff"), "a@example.com"))
-    assert principal == Principal("abc", "a@example.com", frozenset({"trader", "staff"}))
+    principal = verify(token("abc", ("trader", "staff"), "a@example.com", auth_time=1_793_000_000))
+    roles = frozenset({"trader", "staff"})
+    expected = Principal("abc", "a@example.com", roles, mfa=True, auth_time=1_793_000_000_000)
+    assert principal == expected  # amr: pwd, otp; auth_time in ms
     assert principal.has("staff") and not principal.has("admin")
+
+
+@pytest.mark.parametrize(
+    ("amr", "mfa"),
+    [
+        (("pwd",), False),
+        ((), False),
+        (("pwd", "otp"), True),
+        (("webauthn",), True),
+        (("hwk",), True),
+        (("pwd", "OTP"), False),  # exact values only
+    ],
+)
+def test_mfa_comes_from_the_amr_claim(amr: tuple[str, ...], mfa: bool) -> None:
+    assert verify(token(amr=amr)).mfa is mfa
+
+
+def test_a_missing_amr_claim_is_no_mfa() -> None:
+    assert verify(token(drop=("amr",))).mfa is False
+
+
+@pytest.mark.parametrize("raw", ["1793000000", True, -1, 1.5])
+def test_a_malformed_auth_time_is_unknown(raw: object) -> None:
+    import jwt as pyjwt
+
+    claims = pyjwt.decode(token(), options={"verify_signature": False})
+    claims["auth_time"] = raw
+    signed = pyjwt.encode(claims, KEY, algorithm="RS256", headers={"kid": KID})
+    assert verify(signed).auth_time is None
+
+
+def test_a_missing_auth_time_is_unknown() -> None:
+    assert verify(token(drop=("auth_time",))).auth_time is None
 
 
 @pytest.mark.parametrize(

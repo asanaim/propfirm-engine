@@ -23,8 +23,16 @@ from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycProvider, SandboxKyc
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
+from propfirm.customers.notifications import Notifications, NotificationStore, SandboxMailer
 from propfirm.customers.onboarding_store import OnboardingStore
-from propfirm.customers.providers import SandboxPayments, SandboxScreener
+from propfirm.customers.payout_service import Payouts
+from propfirm.customers.payout_store import PayoutStore
+from propfirm.customers.providers import (
+    PayoutProvider,
+    SandboxPayments,
+    SandboxPayouts,
+    SandboxScreener,
+)
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.market.types import PriceUpdate
@@ -60,6 +68,10 @@ class Platform:
     stop_engine: Callable[[], Awaitable[None]]
     onboarding: Onboarding | None = None  # with funded=True
     cases: Casework | None = None
+    payouts: Payouts | None = None
+    notifications: Notifications | None = None
+    mailer: SandboxMailer | None = None
+    clock: Callable[[], int] = now_ms  # the API's clock; logins happen "now" on it
 
     async def call(
         self,
@@ -68,8 +80,13 @@ class Platform:
         user: str = "u1",
         body: object = None,
         roles: tuple[str, ...] = ("trader",),
+        *,
+        mfa: bool = True,
+        login_age_s: int = 0,
     ) -> httpx.Response:
-        return await self.api.request(method, url, json=body, headers=bearer(user, roles))
+        auth_time = self.clock() // 1000 - login_age_s
+        headers = bearer(user, roles, mfa=mfa, auth_time=auth_time)
+        return await self.api.request(method, url, json=body, headers=headers)
 
 
 @asynccontextmanager
@@ -86,6 +103,7 @@ async def platform(
     kyc: KycProvider | None = None,
     didit_webhook_secret: str | None = None,
     clock: Callable[[], int] = now_ms,
+    payout_provider: PayoutProvider | None = None,
 ) -> AsyncIterator[Platform]:
     """`funded`: funded orders wait for funded onboarding (sandbox identity
     check), as the API process runs it; otherwise they open at payment."""
@@ -144,6 +162,19 @@ async def platform(
         cases=cases,
     )
     live = LiveReader(client, config.live_prefix)
+    mailer = SandboxMailer()
+    notifications = Notifications(NotificationStore(pool, config.customer_schema), mailer)
+    payouts = Payouts(
+        PayoutStore(pool, config.customer_schema),
+        store,
+        live,
+        settings,
+        gateway,
+        payout_provider or SandboxPayouts(),
+        identity=onboardings,
+        cases=cases,
+        wait_s=wait_s,
+    )
     deps = Deps(
         live=live,
         history=HistoryReader(pool, config.read_schema),
@@ -156,6 +187,7 @@ async def platform(
         lifecycle=lifecycle,
         onboarding=onboarding,
         cases=cases,
+        payouts=payouts,
         didit_webhook_secret=didit_webhook_secret,
         sandbox=sandbox,
         country_header="X-Country",
@@ -198,6 +230,10 @@ async def platform(
             stop_engine,
             onboarding,
             cases,
+            payouts,
+            notifications,
+            mailer,
+            clock,
         )
     finally:
         await stop_engine()
@@ -373,7 +409,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3, 4, 5]
+            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

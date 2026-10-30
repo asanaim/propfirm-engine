@@ -71,12 +71,16 @@ class NewsPolicy:
 class PayoutPolicy:
     minimum_cents: int
     first_after_days: int
-    pay_days: tuple[str, ...]  # "1".."28" or "last"
+    interval_days: int  # a later payout no sooner than this after the last one
     approvals_required: int
     basis: str = "closed_balance"  # D22/D23: "closed_balance" or "equity" at request
     flat_required: bool = True  # D23: no open position or pending order at request
     min_trading_days: int = 0  # D22: trading days in the period
     maximum_cents: int = 0  # D22: largest trader amount per payout; 0 = none
+    trading_during_payout: str = "paused"  # D23: "paused" or "allowed", from request to debit
+    wallet_cooling_off_hours: int = 0  # a new payout wallet is used only after this
+    require_mfa: bool = True  # M04: MFA for wallet changes and payout requests
+    step_up_minutes: int = 5  # M06: that MFA no older than this (0: any MFA login)
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,6 +370,10 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
     ids = [p.id for p in policy.products]
     if len(set(ids)) != len(ids):
         raise PolicyError("product ids must be unique")
+    refunds = [c for p in policy.products if p.fee_refund_with_payout for _, c in p.prices_cents]
+    if policy.payouts.maximum_cents and policy.payouts.maximum_cents < max(refunds, default=0):
+        # the fee refund is paid with a payout and counts towards its maximum
+        raise PolicyError("payouts.maximum_cents must be 0 or at least every refundable fee")
     return policy
 
 
@@ -409,25 +417,25 @@ def _news(t: _Table) -> NewsPolicy:
 
 
 def _payouts(t: _Table) -> PayoutPolicy:
-    days = t.texts("pay_days")
-    for day in days:
-        if day != "last" and not (day.isdigit() and 1 <= int(day) <= 28):
-            raise PolicyError(f'{t.name("pay_days")}: {day!r} must be 1 to 28 or "last"')
-    if not days or len(set(days)) != len(days):
-        raise PolicyError(f"{t.name('pay_days')} must list distinct days")
     policy = PayoutPolicy(
         minimum_cents=t.integer("minimum_cents", 1),
         first_after_days=t.integer("first_after_days"),
-        pay_days=days,
+        interval_days=t.integer("interval_days", 1),
         approvals_required=t.integer("approvals_required", 1),
         basis=t.text("basis"),
         flat_required=t.boolean("flat_required"),
         min_trading_days=t.integer("min_trading_days"),
         maximum_cents=t.integer("maximum_cents"),
+        trading_during_payout=t.text("trading_during_payout"),
+        wallet_cooling_off_hours=t.integer("wallet_cooling_off_hours"),
+        require_mfa=t.boolean("require_mfa"),
+        step_up_minutes=t.integer("step_up_minutes"),
     )
     t.done()
     if policy.basis not in PAYOUT_BASES:
         raise PolicyError(f"{t.name('basis')} must be one of {PAYOUT_BASES}")
+    if policy.trading_during_payout not in ("paused", "allowed"):
+        raise PolicyError(f"{t.name('trading_during_payout')} must be paused or allowed")
     if policy.maximum_cents and policy.maximum_cents < policy.minimum_cents:
         raise PolicyError(f"{t.name('maximum_cents')} must be 0 or >= minimum_cents")
     return policy
