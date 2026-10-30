@@ -257,6 +257,7 @@ def test_the_residence_gate_applies_when_switched_on() -> None:
         {"trading_during_payout": "stopped"},
         {"wallet_cooling_off_hours": "48"},
         {"require_mfa": 1},
+        {"step_up_minutes": -1},
     ],
 )
 def test_payout_settings_are_validated(change: dict[str, Any]) -> None:

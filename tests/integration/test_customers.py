@@ -71,6 +71,7 @@ class Platform:
     payouts: Payouts | None = None
     notifications: Notifications | None = None
     mailer: SandboxMailer | None = None
+    clock: Callable[[], int] = now_ms  # the API's clock; logins happen "now" on it
 
     async def call(
         self,
@@ -81,8 +82,10 @@ class Platform:
         roles: tuple[str, ...] = ("trader",),
         *,
         mfa: bool = True,
+        login_age_s: int = 0,
     ) -> httpx.Response:
-        headers = bearer(user, roles, mfa=mfa)
+        auth_time = self.clock() // 1000 - login_age_s
+        headers = bearer(user, roles, mfa=mfa, auth_time=auth_time)
         return await self.api.request(method, url, json=body, headers=headers)
 
 
@@ -230,6 +233,7 @@ async def platform(
             payouts,
             notifications,
             mailer,
+            clock,
         )
     finally:
         await stop_engine()

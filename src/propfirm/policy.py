@@ -80,6 +80,7 @@ class PayoutPolicy:
     trading_during_payout: str = "paused"  # D23: "paused" or "allowed", from request to debit
     wallet_cooling_off_hours: int = 0  # a new payout wallet is used only after this
     require_mfa: bool = True  # M04: MFA for wallet changes and payout requests
+    step_up_minutes: int = 5  # M06: that MFA no older than this (0: any MFA login)
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,6 +429,7 @@ def _payouts(t: _Table) -> PayoutPolicy:
         trading_during_payout=t.text("trading_during_payout"),
         wallet_cooling_off_hours=t.integer("wallet_cooling_off_hours"),
         require_mfa=t.boolean("require_mfa"),
+        step_up_minutes=t.integer("step_up_minutes"),
     )
     t.done()
     if policy.basis not in PAYOUT_BASES:

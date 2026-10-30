@@ -125,30 +125,53 @@ class Payouts:
 
     # --- the trader -----------------------------------------------------------------
 
-    async def _mfa(self, mfa: bool) -> None:
-        if (await self._policy.current()).payouts.require_mfa and not mfa:
+    async def _mfa(self, mfa: bool, auth_time: int | None, now: int) -> None:
+        """MFA by policy, entered at most `step_up_minutes` ago (step-up)."""
+        payouts = (await self._policy.current()).payouts
+        if not payouts.require_mfa:
+            return
+        if not mfa:
             raise PayoutRefused("mfa_required", "sign in with a second factor first")
+        limit = payouts.step_up_minutes * 60_000
+        if limit and (auth_time is None or now - auth_time > limit):
+            raise PayoutRefused(
+                "reauth_required",
+                f"confirm with your second factor (within {payouts.step_up_minutes} minutes)",
+                max_age_s=payouts.step_up_minutes * 60,
+            )
 
     async def add_wallet(
-        self, cif: CifRecord, subject: str, mfa: bool, address: str, ts: int
+        self,
+        cif: CifRecord,
+        subject: str,
+        mfa: bool,
+        address: str,
+        ts: int,
+        auth_time: int | None = None,
     ) -> Wallet:
         """A new payout wallet replaces the one in use (after the cooling-off
         period, if one is set); the customer is emailed at the registered
         address."""
-        await self._mfa(mfa)
+        await self._mfa(mfa, auth_time, ts)
         if not tron_address_valid(address):
             raise PayoutRefused("invalid", "not a TRON (TRC-20) address")
         previous = await self._store.wallet(cif.cif)
         notice = wallet_notice(
             cif.email, cif.full_name, address, previous.address if previous else None, ts
         )
-        detail = {"mfa": mfa}
+        detail = {"mfa": mfa, "auth_time": auth_time}
         return await self._store.add_wallet(cif.cif, NETWORK, address, subject, ts, detail, notice)
 
     async def request(
-        self, acc: str, cif: CifRecord, subject: str, mfa: bool, ts: int
+        self,
+        acc: str,
+        cif: CifRecord,
+        subject: str,
+        mfa: bool,
+        ts: int,
+        auth_time: int | None = None,
     ) -> PayoutRecord:
-        await self._mfa(mfa)
+        await self._mfa(mfa, auth_time, ts)
         policy = await self._policy.current()
         e = await self.eligibility(acc, ts)
         if not e.eligible:
@@ -162,6 +185,7 @@ class Payouts:
         detail = {
             "by": subject,
             "mfa": mfa,
+            "auth_time": auth_time,
             "approvals_required": policy.payouts.approvals_required,
             "rsv_id": live["rules"]["rsv_id"],
             "trading_during_payout": policy.payouts.trading_during_payout,

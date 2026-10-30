@@ -432,7 +432,8 @@ def payout_view(p: PayoutRecord) -> dict[str, Any]:
 PAYOUT_ERRORS = {
     "unknown": 404,
     "own_payout": 403,
-    "mfa_required": 403,
+    "mfa_required": 401,  # RFC 9470 step-up: sign in again with a second factor
+    "reauth_required": 401,
     "not_allowed": 409,
     "pending": 409,
     "not_eligible": 409,
@@ -442,8 +443,17 @@ PAYOUT_ERRORS = {
 
 
 def _payout_refused(exc: PayoutRefused) -> HTTPException:
+    headers = None
+    if exc.code in ("mfa_required", "reauth_required"):
+        # RFC 9470: the portal signs the user in again (prompt, max_age)
+        challenge = 'Bearer error="insufficient_user_authentication"'
+        if exc.max_age_s is not None:
+            challenge += f", max_age={exc.max_age_s}"
+        headers = {"WWW-Authenticate": challenge}
     return HTTPException(
-        status_code=PAYOUT_ERRORS[exc.code], detail={"code": exc.code, "message": str(exc)}
+        status_code=PAYOUT_ERRORS[exc.code],
+        detail={"code": exc.code, "message": str(exc)},
+        headers=headers,
     )
 
 
@@ -703,7 +713,7 @@ def create_app(
         cif = await _cif(deps, me)
         try:
             wallet = await _payouts(deps).add_wallet(
-                cif, me.subject, me.mfa, body.address, deps.clock()
+                cif, me.subject, me.mfa, body.address, deps.clock(), me.auth_time
             )
         except PayoutRefused as exc:
             raise _payout_refused(exc) from exc
@@ -938,7 +948,9 @@ def create_app(
         await _owns(deps, me, account_id)
         cif = await _cif(deps, me)
         try:
-            record = await _payouts(deps).request(account_id, cif, me.subject, me.mfa, deps.clock())
+            record = await _payouts(deps).request(
+                account_id, cif, me.subject, me.mfa, deps.clock(), me.auth_time
+            )
         except PayoutRefused as exc:
             raise _payout_refused(exc) from exc
         return payout_view(record)

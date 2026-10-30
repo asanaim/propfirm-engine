@@ -53,6 +53,11 @@ maximum_cents = 0              # no maximum, as FTMO and FundedNext
 # Payout processing (M19), starting values [DEFAULT]:
 trading_during_payout = "paused"  # D23: no new orders from request to approval (the debit)
 require_mfa = true             # M04: the login must have used MFA to change the wallet or ask
+# Step-up (M06): that second factor entered no more than this many minutes
+# before the wallet change or payout request, as Binance asks for a 2FA
+# code when a withdrawal address is added and FundedNext an OTP for each
+# payout request; the portal then signs the trader in again (OIDC max_age).
+step_up_minutes = 5            # 0: any login that used MFA
 # No waiting period on a new or changed payout wallet, as FTMO, FundedNext
 # and The5ers (checked 30 Oct 2026: the wallet is given with the request;
 # FundedNext confirms the request by OTP). A wait of N hours can be set here.

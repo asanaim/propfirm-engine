@@ -168,7 +168,13 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             # the wallet: MFA, a TRON address; usable at once
             body = {"address": USDT}
             no_mfa = await p.call("POST", "/me/wallet", body=body, mfa=False)
-            assert (no_mfa.status_code, no_mfa.json()["detail"]["code"]) == (403, "mfa_required")
+            assert (no_mfa.status_code, no_mfa.json()["detail"]["code"]) == (401, "mfa_required")
+            challenge = 'Bearer error="insufficient_user_authentication"'
+            assert no_mfa.headers["www-authenticate"] == challenge
+            # step-up: the second factor entered within 5 minutes (RFC 9470 max_age)
+            stale = await p.call("POST", "/me/wallet", body=body, login_age_s=301)
+            assert (stale.status_code, stale.json()["detail"]["code"]) == (401, "reauth_required")
+            assert stale.headers["www-authenticate"] == f"{challenge}, max_age=300"
             assert (await p.call("GET", "/me/wallet")).status_code == 404
             bad = await p.call("POST", "/me/wallet", body={"address": USDT[:-1] + "u"})
             assert (bad.status_code, bad.json()["detail"]["code"]) == (422, "invalid")
@@ -212,11 +218,13 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             )
             url = f"/accounts/{acc}/payouts"
             refused = await p.call("POST", url, mfa=False)
-            assert (refused.status_code, refused.json()["detail"]["code"]) == (403, "mfa_required")
+            assert (refused.status_code, refused.json()["detail"]["code"]) == (401, "mfa_required")
+            stale = await p.call("POST", url, login_age_s=301)
+            assert (stale.status_code, stale.json()["detail"]["code"]) == (401, "reauth_required")
             assert (await p.call("POST", url, "u2")).status_code == 404  # not registered/owner
 
             # cancelled by the trader before approval
-            first = (await p.call("POST", url)).json()
+            first = (await p.call("POST", url, login_age_s=299)).json()  # within 5 minutes
             assert (first["po"], first["status"], first["debit_cents"]) == (
                 "PO00000001",
                 "requested",

@@ -55,9 +55,10 @@ class PayoutRecord:
 class PayoutRefused(Exception):
     """A request the payout's state or the rules refuse (the code says why)."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, max_age_s: int | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.max_age_s = max_age_s  # step-up: how recent the second factor must be
 
 
 def _record(row: asyncpg.Record) -> PayoutRecord:

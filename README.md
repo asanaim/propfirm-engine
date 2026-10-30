@@ -276,9 +276,15 @@ USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
    only the sandbox provider exists (`PROPFIRM_SANDBOX=1`; it sends
    nothing); without it the payout endpoints answer 503.
 
-Changing the wallet and requesting a payout need a login that used a
-second factor (`require_mfa`; the access token's `amr` claim, which the
-Keycloak realm must be set to include). `payout_events` and `wallets` are
+Changing the wallet and requesting a payout need the second factor
+entered in the last 5 minutes (`require_mfa`, `step_up_minutes`; step-up,
+as Binance asks for a 2FA code when a withdrawal address is added and
+FundedNext an OTP for each payout request). Otherwise the API answers 401
+with `WWW-Authenticate: Bearer error="insufficient_user_authentication",
+max_age=300` (RFC 9470), and the portal signs the trader in again. It reads
+the access token's `amr` and `auth_time` claims; the development realm's
+tokens carry neither yet (realm setup comes with the portal login), so
+these requests are refused until it does. `payout_events` and `wallets` are
 append-only; the payout's facts (amount, debit, wallet) never change. The
 funded agreement states these terms (`funded-agreement-v2`; contracts
 signed on v1 keep their text).

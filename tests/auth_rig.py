@@ -35,6 +35,7 @@ def token(
     algorithm: str = "RS256",
     drop: tuple[str, ...] = (),
     amr: tuple[str, ...] = ("pwd", "otp"),
+    auth_time: int | None = None,  # seconds; default now
 ) -> str:
     now = int(time.time())
     claims: dict[str, Any] = {
@@ -46,6 +47,7 @@ def token(
         "email": email,
         "realm_access": {"roles": list(roles)},
         "amr": list(amr),
+        "auth_time": now if auth_time is None else auth_time,
     }
     for name in drop:
         claims.pop(name, None)
@@ -53,10 +55,15 @@ def token(
 
 
 def bearer(
-    subject: str = "user-1", roles: tuple[str, ...] = ("trader",), *, mfa: bool = True
+    subject: str = "user-1",
+    roles: tuple[str, ...] = ("trader",),
+    *,
+    mfa: bool = True,
+    auth_time: int | None = None,
 ) -> dict[str, str]:
     amr = ("pwd", "otp") if mfa else ("pwd",)
-    return {"Authorization": f"Bearer {token(subject, roles, f'{subject}@example.com', amr=amr)}"}
+    raw = token(subject, roles, f"{subject}@example.com", amr=amr, auth_time=auth_time)
+    return {"Authorization": f"Bearer {raw}"}
 
 
 @dataclass

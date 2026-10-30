@@ -40,6 +40,7 @@ class Principal:
     email: str | None
     roles: frozenset[str]
     mfa: bool = False  # the login used a second factor (token claim `amr`)
+    auth_time: int | None = None  # ms UTC: when the user last authenticated (`auth_time`)
 
     def has(self, role: str) -> bool:
         return role in self.roles
@@ -125,11 +126,16 @@ class TokenVerifier:
         email = claims.get("email")
         amr = claims.get("amr")
         methods = {m for m in amr if isinstance(m, str)} if isinstance(amr, list) else set()
+        raw_time = claims.get("auth_time")
+        auth_time: int | None = None
+        if isinstance(raw_time, int) and not isinstance(raw_time, bool) and raw_time >= 0:
+            auth_time = raw_time * 1000
         return Principal(
             subject=subject,
             email=email if isinstance(email, str) else None,
             roles=frozenset(r for r in roles or () if isinstance(r, str)),
             mfa=bool(methods & SECOND_FACTORS),
+            auth_time=auth_time,
         )
 
 
