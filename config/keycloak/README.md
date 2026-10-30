@@ -13,7 +13,16 @@ database (`docker compose --profile platform up`). It defines:
   user has;
 - every access token carries the audience `propfirm-api`, which the API
   requires;
-- three test users: `trader1@example.com` / `dev-trader-password`,
+- browser login (`browser-with-amr`, the default browser flow with two
+  settings): every token says how the user signed in (`amr`: `pwd`, and
+  `otp` when the authenticator code was entered) and when (`auth_time`).
+  The API reads both for wallet changes and payout requests (step-up). An
+  authenticator app is optional at login; once set up (the portal's
+  Security page, Keycloak action `CONFIGURE_TOTP`) it is asked for at every
+  login. The `amr` references last as long as the SSO session (36,000 s);
+- four test users: `trader1@example.com` / `dev-trader-password`,
+  `trader2@example.com` / `dev-trader2-password` with an authenticator
+  (TOTP secret `dev-totp-secret-trader2`, raw bytes, SHA-1, 6 digits, 30 s),
   `staff1@example.com` / `dev-staff-password` (employee) and
   `admin1@example.com` / `dev-admin-password` (admin).
 

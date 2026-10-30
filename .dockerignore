@@ -1,0 +1,4 @@
+.git
+portal/node_modules
+portal/dist
+.venv

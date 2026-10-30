@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import time
 
 import httpx
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from propfirm.api.app import Deps, create_app
 from propfirm.api.auth import AuthError, JwksKeys, TokenVerifier
 from tests.auth_rig import FakeCustomers
+from tests.keycloak_login import browser_login, claims
 
 pytestmark = pytest.mark.integration
 
@@ -68,3 +70,27 @@ def test_keycloak_tokens_verify_with_roles(keycloak_url: str) -> None:
                 assert (await api.get("/me")).status_code == 401
 
     asyncio.run(scenario())
+
+
+def test_a_portal_sign_in_records_how_and_when(keycloak_url: str) -> None:
+    """amr says which factors were used and auth_time when, in the access
+    and ID tokens, even when the code is redeemed a little later."""
+    before = int(time.time()) - 5
+    password_only = browser_login(
+        keycloak_url, "trader1@example.com", "dev-trader-password", pause_s=2.0
+    )
+    access, id_token = claims(password_only["access_token"]), claims(password_only["id_token"])
+    assert access["amr"] == id_token["amr"] == ["pwd"]
+    assert before <= access["auth_time"] <= int(time.time()) + 5
+    assert access["auth_time"] == id_token["auth_time"]
+    assert access["realm_access"]["roles"] == ["trader"] and access["aud"] == "propfirm-api"
+
+    with_code = browser_login(
+        keycloak_url,
+        "trader2@example.com",
+        "dev-trader2-password",
+        b"dev-totp-secret-trader2",
+        pause_s=2.0,
+    )
+    assert claims(with_code["access_token"])["amr"] == ["pwd", "otp"]
+    assert claims(with_code["id_token"])["amr"] == ["pwd", "otp"]
