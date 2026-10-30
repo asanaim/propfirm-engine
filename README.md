@@ -104,8 +104,11 @@ npm run typecheck && npm run lint && npm run build
 - The portal calls the API under `/api` on its own origin: Vite forwards it
   in development (`PROPFIRM_API_URL`, default http://127.0.0.1:8000), the
   web server in production; no CORS.
-- Design (D44): calm, one accent colour, light and dark themes, Inter (SIL
-  OFL) and Lucide icons (ISC); no platform-vendor fonts, icons or names.
+- Design (D44): Apple-inspired, nothing of Apple's or anyone else's: calm,
+  one accent colour (the firm's own blue, not a platform system colour),
+  light and dark themes, self-hosted Inter (SIL OFL) with no platform-font
+  fallback, Lucide icons (ISC); a clearance test fails the build on Apple
+  or other vendor names, fonts, icon sets or system colours in the portal.
   WCAG 2.2 AA: the colour tokens are checked by a contrast test; every page
   was checked with axe-core in both themes.
 
