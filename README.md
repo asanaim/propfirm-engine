@@ -92,8 +92,15 @@ npm run typecheck && npm run lint && npm run build
   1d by the 17:00 New York trading day), built by the projector from the
   price store into one-minute bars. The price source is named beside every
   chart and price table (`GET /market`; `PROPFIRM_PRICE_SOURCE` =
-  `synthetic` or `twelve_data`: "Prices by Twelve Data"); the chart carries
-  TradingView's attribution link, and the notices page its notice.
+  `synthetic` or `twelve_data`: "Data provided by Twelve Data", with "Twelve
+  Data" a followed link to twelvedata.com, as Twelve Data's attribution
+  guidelines ask); the chart carries TradingView's attribution logo and
+  link, and the notices page the NOTICE text of Lightweight Charts 5.2.1.
+- Third-party notices: `npm run build` (and `npm run dev`) writes
+  `public/third-party-notices.txt` with the licence and notice texts of every
+  package shipped to the browser, and fails if one is not permissively
+  licensed or has no text (`portal/notices/` keeps texts an npm package
+  lacks, copied from the upstream release).
 - The portal calls the API under `/api` on its own origin: Vite forwards it
   in development (`PROPFIRM_API_URL`, default http://127.0.0.1:8000), the
   web server in production; no CORS.

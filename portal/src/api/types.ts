@@ -142,9 +142,16 @@ export interface Quote {
   blocked: boolean;
 }
 
+/** The price source, to show beside every chart and price table. */
+export interface Attribution {
+  text: string; // e.g. "Data provided by Twelve Data"
+  link: string | null; // the part of the text that links ("Twelve Data")
+  url: string | null;
+}
+
 export interface Market {
   source: "synthetic" | "twelve_data";
-  attribution: string;
+  attribution: Attribution;
   symbols: { symbol: string; digits: number }[];
   intervals: string[];
 }

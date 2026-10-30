@@ -72,7 +72,7 @@ function server() {
     if (url === "/api/market") {
       const market = {
         source: "synthetic",
-        attribution: "Synthetic prices (development)",
+        attribution: { text: "Data provided by Twelve Data", link: "Twelve Data", url: "https://twelvedata.com/" },
         symbols: [{ symbol: "EUR/USD", digits: 5 }],
         intervals: ["1m", "1h"],
       };
@@ -101,7 +101,14 @@ it("shows the account's numbers from the live stream", async () => {
   const positions = screen.getByRole("table", { name: "Open positions" });
   const row = within(positions).getByRole("rowheader", { name: "EUR/USD" }).closest("tr");
   expect(row).toHaveTextContent("Buy10.001.10005—1.11000");
-  expect(await screen.findByText(/Synthetic prices \(development\)\. Chart by/)).toBeInTheDocument();
+  // Twelve Data's guidelines: this text near the data, "Twelve Data" a followed link
+  const links = await screen.findAllByRole("link", { name: "Twelve Data" });
+  expect(links).toHaveLength(2); // the chart and the price table
+  for (const link of links) {
+    expect(link).toHaveAttribute("href", "https://twelvedata.com/");
+    expect(link.getAttribute("rel") ?? "").not.toContain("nofollow");
+    expect(link.closest("p")).toHaveTextContent(/^Data provided by Twelve Data/);
+  }
   expect(screen.getByRole("link", { name: "TradingView" })).toHaveAttribute("href", "https://www.tradingview.com/");
   expect(await screen.findByRole("figure", { name: "EUR/USD 1m candles" })).toBeInTheDocument();
   expect(chart.setData).toHaveBeenCalledWith([
@@ -123,4 +130,11 @@ it("does not warn when equity is above the next floor", () => {
   const safe = { ...ACCOUNT, equity_cents: 9_900_001 };
   renderWith(<ResetCard account={safe} now={0} />, fakeAuth(), vi.fn());
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("names a source without a link as plain text", async () => {
+  const { Attribution } = await import("../components/Attribution");
+  renderWith(<Attribution source={{ text: "Synthetic prices (development)", link: null, url: null }} />, fakeAuth(), vi.fn());
+  expect(screen.getByText("Synthetic prices (development)")).toBeInTheDocument();
+  expect(screen.queryByRole("link")).toBeNull();
 });

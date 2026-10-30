@@ -79,9 +79,14 @@ def test_the_market_names_the_price_source_and_symbols() -> None:
     market = run("/market").json()
     assert (market["source"], market["attribution"]) == (
         "synthetic",
-        "Synthetic prices (development)",
+        {"text": "Synthetic prices (development)", "link": None, "url": None},
     )
-    assert run("/market", source="twelve_data").json()["attribution"] == "Prices by Twelve Data"
+    # Twelve Data's attribution guidelines: this text, "Twelve Data" a followed link
+    assert run("/market", source="twelve_data").json()["attribution"] == {
+        "text": "Data provided by Twelve Data",
+        "link": "Twelve Data",
+        "url": "https://twelvedata.com/",
+    }
     assert {"symbol": "EUR/USD", "digits": 5} in market["symbols"]
     assert market["intervals"] == ["1m", "5m", "15m", "1h", "4h", "1d"]
     assert run("/market", user=None).status_code == 401  # licensed data: signed in only

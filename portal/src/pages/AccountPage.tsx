@@ -1,9 +1,10 @@
 import { AlertTriangle, Radio } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useApi } from "../api/ApiProvider";
-import type { Bar, LiveAccount, Market, Quote } from "../api/types";
+import type { Attribution as AttributionSource, Bar, LiveAccount, Market, Quote } from "../api/types";
 import { useAccountStream } from "../api/useAccountStream";
 import { useAuth } from "../auth/AuthProvider";
+import { Attribution } from "../components/Attribution";
 import { PriceChart } from "../components/PriceChart";
 import { Problem } from "../components/Problem";
 import { Button, Card, Loading, Notice } from "../components/ui";
@@ -96,7 +97,7 @@ function TargetCard({ account }: { account: LiveAccount }) {
   );
 }
 
-function Quotes({ quotes, attribution }: { quotes: Record<string, Quote>; attribution: string }) {
+function Quotes({ quotes, attribution }: { quotes: Record<string, Quote>; attribution: AttributionSource | null }) {
   const list = Object.values(quotes).sort((a, b) => a.symbol.localeCompare(b.symbol));
   return (
     <>
@@ -123,7 +124,7 @@ function Quotes({ quotes, attribution }: { quotes: Record<string, Quote>; attrib
           </tbody>
         </table>
       </div>
-      <p className="attribution">{attribution}</p>
+      <Attribution source={attribution} />
     </>
   );
 }
@@ -192,13 +193,13 @@ function Chart({ market, quotes }: { market: Market; quotes: Record<string, Quot
       ) : (
         <Loading label="Loading chart" />
       )}
-      <p className="attribution">
-        {market.attribution}. Chart by{" "}
-        <a href="https://www.tradingview.com/" rel="noopener noreferrer" target="_blank">
+      <Attribution source={market.attribution}>
+        . Chart by{" "}
+        <a href="https://www.tradingview.com/" rel="noopener" target="_blank">
           TradingView
         </a>{" "}
         Lightweight Charts (<Link href="/notices">notices</Link>).
-      </p>
+      </Attribution>
     </Card>
   );
 }
@@ -356,7 +357,7 @@ export function AccountPage({ acc }: { acc: string }) {
         </>
       )}
       <h2>Prices</h2>
-      <Quotes quotes={live.quotes} attribution={market?.attribution ?? ""} />
+      <Quotes quotes={live.quotes} attribution={market?.attribution ?? null} />
     </div>
   );
 }

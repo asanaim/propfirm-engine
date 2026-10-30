@@ -160,9 +160,16 @@ class Deps:
     stream_max_s: float = 300.0  # a stream ends then (an access token lasts 5 minutes)
 
 
-ATTRIBUTION = {
-    "synthetic": "Synthetic prices (development)",
-    "twelve_data": "Prices by Twelve Data",
+# shown beside every chart and price table. Twelve Data's attribution
+# guidelines: "Data provided by Twelve Data", with "Twelve Data" a followed
+# (dofollow) link to https://twelvedata.com/ near the data, in each section.
+ATTRIBUTION: dict[str, dict[str, str | None]] = {
+    "synthetic": {"text": "Synthetic prices (development)", "link": None, "url": None},
+    "twelve_data": {
+        "text": "Data provided by Twelve Data",
+        "link": "Twelve Data",
+        "url": "https://twelvedata.com/",
+    },
 }
 
 # --- request bodies -----------------------------------------------------------------
