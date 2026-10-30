@@ -14,8 +14,14 @@ run in several processes at once.
 
 from typing import Protocol
 
+from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import opened, refusal_reason
-from propfirm.customers.lifecycle_store import Plan, ProgressionRecord, ProgressionStore
+from propfirm.customers.lifecycle_store import (
+    DecisionError,
+    Plan,
+    ProgressionRecord,
+    ProgressionStore,
+)
 from propfirm.customers.progression import next_stage
 from propfirm.customers.store import AccountRecord
 from propfirm.journal.inputs import Input, OpenAccount
@@ -51,11 +57,15 @@ class Lifecycle:
         policy: PolicySource,
         gateway: Submitter,
         wait_s: float = 5.0,
+        cases: Casework | None = None,
     ) -> None:
+        """`cases`: no funded review is approved while the customer has a
+        case not closed."""
         self._store = store
         self._policy = policy
         self._gateway = gateway
         self._wait_s = wait_s
+        self._cases = cases
 
     @property
     def store(self) -> ProgressionStore:
@@ -100,4 +110,8 @@ class Lifecycle:
     async def decide(
         self, prg: str, approve: bool, subject: str, email: str | None, reason: str, ts: int
     ) -> ProgressionRecord:
+        if approve and self._cases is not None:
+            record = await self._store.progression(prg)
+            if record is not None and await self._cases.has_open_case(record.cif):
+                raise DecisionError("open_case", "the customer has a case under review")
         return await self._store.decide(prg, approve, subject, email, reason, ts)

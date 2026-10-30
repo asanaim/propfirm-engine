@@ -7,7 +7,8 @@ Payable profit:
        moves it; only scaling (later) sets a new one. A payout returns a
        closed-balance account to B, so losses after a payout must be made
        back above B before the next one (high-water mark, I8);
-    V  profit removed for violations (none can be recorded yet: M16);
+    V  profit removed for violations: the remove_profit actions of confirmed
+       case decisions (customers.cases);
     P  = max(0, X - B - V), the payable profit;
     s  the product's profit split (the 90 % tier comes with scaling, later).
 The trader's share is s * P rounded down to the cent (`share_floor`); the
@@ -27,9 +28,10 @@ Eligibility, all of which must hold (M18):
   clean);
 - residence: the country gate (when on) allows the declared and document
   countries (D32).
-Two checks are recorded as not decided here: open integrity, fraud and
-compliance cases (no case system yet: M16, M17; the two approvers review),
-and the payout wallet (checked when a payout is requested, step 3d).
+- no case not closed (integrity, fraud, compliance: M16, M17, M20); the
+  detail never says more than "held for review" (no tipping off).
+One check is recorded as not decided here: the payout wallet (checked when
+a payout is requested, step 3d).
 
 The period runs from funding, or from the last payout; trading days and
 daily P&L count whole trading days (17:00 New York), so the trading day of
@@ -88,6 +90,9 @@ class FundedAccount:
     tier2_approved: bool
     residence_country: str
     document_country: str | None
+    # cases (M16, M17, M20)
+    open_case: bool = False  # the customer has a case not closed
+    violations_cents: int = 0  # profit removed by confirmed decisions (V)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +143,7 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
         checks.append(Check(name, PASS if ok else FAIL, detail))
 
     measured = account.balance_cents if payouts.basis == "closed_balance" else account.equity_cents
-    violations = 0
+    violations = account.violations_cents
     payable = max(0, measured - account.baseline_cents - violations)
     split = account.product.profit_split
     trader_share = share_floor(payable, split)
@@ -209,7 +214,7 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
         policy.access, declared=account.residence_country, document=account.document_country
     )
     check("residence", gate.allowed, ", ".join(gate.reasons) or "not restricted")
-    checks.append(Check("cases", LATER, "no case system yet (M16, M17): the approvers review"))
+    check("cases", not account.open_case, "held for review" if account.open_case else "none open")
     checks.append(Check("wallet", LATER, "checked when the payout is requested"))
 
     return Eligibility(

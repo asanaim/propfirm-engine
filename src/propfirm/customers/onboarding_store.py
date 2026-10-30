@@ -302,6 +302,18 @@ class OnboardingStore:
         )
         return None if row is None else KycResult(**dict(row))
 
+    async def verified_elsewhere(self, cif: str, date_of_birth: date) -> list[tuple[str, str]]:
+        """(CIF, verified name) of other customers verified with this date of birth."""
+        s = self._s
+        rows = await self._pool.fetch(
+            f"SELECT DISTINCT c.cif, r.full_name FROM {s}.kyc_results r "
+            f"JOIN {s}.kyc_cases c ON c.kyc = r.kyc WHERE r.result = 'approved' "
+            f"AND r.date_of_birth = $1 AND c.cif <> $2 ORDER BY c.cif",
+            date_of_birth,
+            cif,
+        )
+        return [(r["cif"], r["full_name"]) for r in rows]
+
     async def waiting_on(self, kyc: str) -> list[str]:
         """Onboardings whose current case is `kyc` and wait for its result."""
         rows = await self._pool.fetch(

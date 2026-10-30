@@ -80,7 +80,7 @@ def test_a_funded_accounts_payable_profit_and_checks(
                 "flat": "pass",
                 "identity": "pass",
                 "residence": "pass",
-                "cases": "not_decided_here",
+                "cases": "pass",
                 "wallet": "not_decided_here",
             }
             assert now["trading_days"] == 1 and not now["eligible"]

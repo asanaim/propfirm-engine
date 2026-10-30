@@ -61,6 +61,7 @@ from propfirm.journal.inputs import (
     ScheduleNews,
     StateCheckpointed,
     UpdateTrading,
+    VoidAccount,
     apply,
 )
 from propfirm.journal.setup import EngineSetup, SetupError, build
@@ -78,6 +79,7 @@ from propfirm.market.types import PriceUpdate
 from propfirm.rules.events import (
     AccountBreached,
     AccountStatus,
+    AccountVoided,
     BreachReason,
     DayStarted,
     StagePassed,
@@ -172,6 +174,7 @@ CODEC = Codec(
         ScheduleNews,
         CancelNews,
         UpdateTrading,
+        VoidAccount,
         Checkpoint,
         Malformed,
         PriceRef,
@@ -201,6 +204,7 @@ CODEC = Codec(
         DayStarted,
         AccountBreached,
         StagePassed,
+        AccountVoided,
         # ledger
         Entry,
         Posting,

@@ -133,6 +133,17 @@ class ContractPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class CasePolicy:
+    """Service levels of integrity, fraud and compliance cases: hours from an
+    alert to its case's due time, by severity."""
+
+    sla_hours: Mapping[str, int]  # low, medium, high
+
+    def due(self, severity: str, ts: int) -> int:
+        return ts + self.sla_hours[severity] * 3_600_000
+
+
+@dataclass(frozen=True, slots=True)
 class Policy:
     access: AccessPolicy
     news: NewsPolicy
@@ -141,6 +152,7 @@ class Policy:
     trading: TradingPolicy
     products: tuple[ProductPolicy, ...]
     contract: ContractPolicy
+    cases: CasePolicy
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         return tuple(r for p in self.products for r in p.rule_sets)
@@ -344,6 +356,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             trading=_trading(root.table("trading")),
             products=tuple(_product(t) for t in root.tables("products")),
             contract=_contract(root.table("contract")),
+            cases=_cases(root.table("cases")),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -354,6 +367,16 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
     if len(set(ids)) != len(ids):
         raise PolicyError("product ids must be unique")
     return policy
+
+
+def _cases(t: _Table) -> CasePolicy:
+    hours = t.table("sla_hours")
+    sla = {level: hours.integer(level, 1) for level in ("low", "medium", "high")}
+    hours.done()
+    t.done()
+    if not sla["low"] >= sla["medium"] >= sla["high"]:
+        raise PolicyError(f"{t.name('sla_hours')}: higher severity needs a shorter time")
+    return CasePolicy(sla)
 
 
 def _contract(t: _Table) -> ContractPolicy:

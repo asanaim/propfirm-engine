@@ -39,11 +39,14 @@ minimum_cents = 5000           # $50
 first_after_days = 14          # after funding
 pay_days = ["15", "last"]      # days of the month
 approvals_required = 2         # people who must approve each payout
-# Open decisions (D22, D23), set here as starting values [DEFAULT]:
-basis = "closed_balance"       # profit measured on "closed_balance" or "equity" at request
+# D22, D23, confirmed 30 Oct 2026. FTMO (reward on request 14 days from the
+# first trading day; account in profit with no open positions or pending
+# orders) and FundedNext (Stellar standard rewards) set no minimum trading
+# days and no maximum for a funded-account reward.
+basis = "closed_balance"       # profit measured on the closed balance at request
 flat_required = true           # no open position or pending order when requesting
-min_trading_days = 0           # trading days needed in the period since funding / last payout
-maximum_cents = 0              # largest amount to the trader per payout; 0 = no maximum
+min_trading_days = 0           # none, as FTMO and FundedNext
+maximum_cents = 0              # no maximum, as FTMO and FundedNext
 
 [scaling]                      # Lite, Classic and 1-Step funded accounts
 review_months = 4
@@ -151,6 +154,13 @@ template = "funded-agreement-v1"
 firm_name = ""
 governing_law = ""
 account_disclosure = "simulated"  # D1: "simulated" or "live"
+
+[cases.sla_hours]
+# Integrity, fraud and compliance cases (M16, M17, M20): hours from an alert
+# to its case's due time, by the case's highest severity [DEFAULT].
+low = 168
+medium = 72
+high = 24
 
 # --- products -------------------------------------------------------------------
 # Each stage becomes the rule-set version "<product>-<stage>-v<version>".

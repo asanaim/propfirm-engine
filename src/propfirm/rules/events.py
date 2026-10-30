@@ -14,6 +14,7 @@ class AccountStatus(StrEnum):
     ACTIVE = "active"
     PASSED = "passed"  # target met; read-only, awaiting review
     BREACHED = "breached"
+    VOIDED = "voided"  # an integrity decision (a case confirmed by two employees)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,4 +52,17 @@ class StagePassed:
     rsv_id: str
 
 
-type RuleEvent = DayStarted | AccountBreached | StagePassed
+@dataclass(frozen=True, slots=True)
+class AccountVoided:
+    """An integrity decision voided the account: its positions close at the
+    current prices (the close-out events follow) and it is locked. `case`
+    names the decision (a CAS id)."""
+
+    ts: int
+    account_id: str
+    case: str
+    equity_cents: int
+    rsv_id: str
+
+
+type RuleEvent = DayStarted | AccountBreached | StagePassed | AccountVoided

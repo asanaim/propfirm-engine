@@ -355,6 +355,67 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         ALTER TABLE {s}.accounts ADD COLUMN onboarding text REFERENCES {s}.onboardings (onb);
         """,
     ),
+    (
+        5,
+        """
+        CREATE SEQUENCE {s}.cas_seq;
+        CREATE SEQUENCE {s}.alr_seq;
+        CREATE TABLE {s}.cases (
+            cas text PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            opened_at bigint NOT NULL,
+            status text NOT NULL CHECK (status IN ('open', 'decision_pending', 'actioning',
+                'closed')),
+            severity text NOT NULL CHECK (severity IN ('low', 'medium', 'high')),
+            due_at bigint NOT NULL,
+            assignee text,
+            outcome text CHECK (outcome IN ('cleared', 'warning', 'actioned')),
+            proposed_by text,
+            closed_at bigint
+        );
+        -- one case not closed per customer
+        CREATE UNIQUE INDEX ON {s}.cases (cif) WHERE status <> 'closed';
+        CREATE INDEX ON {s}.cases (status, due_at);
+        CREATE TABLE {s}.case_events (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            cas text NOT NULL REFERENCES {s}.cases (cas),
+            kind text NOT NULL CHECK (kind IN ('opened', 'alert', 'assigned', 'note',
+                'closed', 'proposed', 'rejected', 'confirmed', 'applied', 'reopened')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.case_events (cas, id);
+        CREATE TRIGGER case_events_append_only BEFORE UPDATE OR DELETE ON {s}.case_events
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TABLE {s}.alerts (
+            alr text PRIMARY KEY,
+            cas text NOT NULL REFERENCES {s}.cases (cas),
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            acc text,
+            source text NOT NULL,
+            kind text NOT NULL CHECK (kind IN ('integrity', 'fraud', 'aml')),
+            severity text NOT NULL CHECK (severity IN ('low', 'medium', 'high')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.alerts (cif);
+        CREATE TRIGGER alerts_append_only BEFORE UPDATE OR DELETE ON {s}.alerts
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE FUNCTION {s}.case_facts_fixed() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'cases are append-only';
+            END IF;
+            IF (NEW.cas, NEW.cif, NEW.opened_at) IS DISTINCT FROM
+               (OLD.cas, OLD.cif, OLD.opened_at) THEN
+                RAISE EXCEPTION 'case facts never change';
+            END IF;
+            RETURN NEW;
+        END $$;
+        CREATE TRIGGER cases_facts_fixed BEFORE UPDATE OR DELETE ON {s}.cases
+            FOR EACH ROW EXECUTE FUNCTION {s}.case_facts_fixed();
+        """,
+    ),
 )
 
 

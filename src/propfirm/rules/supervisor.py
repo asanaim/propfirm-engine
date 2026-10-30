@@ -38,6 +38,7 @@ from propfirm.rules.clock import NEW_YORK_17, TradingClock
 from propfirm.rules.events import (
     AccountBreached,
     AccountStatus,
+    AccountVoided,
     BreachReason,
     DayStarted,
     RuleEvent,
@@ -214,6 +215,25 @@ class RuleSupervisor:
     @property
     def engine(self) -> TradingEngine:
         return self._engine
+
+    def void_account(self, account_id: str, case: str, ts: int) -> list[Event]:
+        """An integrity decision: close the account's positions at the current
+        prices and lock it (status voided). Only an active account."""
+        state = self._state(account_id)
+        if state.status is not AccountStatus.ACTIVE:
+            raise ValueError(f"{account_id} is {state.status.value}")
+        events = self._roll(ts)
+        now = self._engine.now
+        equity = self._engine.equity(account_id)
+        events.append(AccountVoided(now, account_id, case, equity, state.rules.rsv_id))
+        closed = self._engine.close_all(account_id, now, CloseReason.VOID)
+        self._record(closed)
+        events += closed
+        events += self._engine.lock_account(account_id, now)
+        state.status = AccountStatus.VOIDED
+        for other in self._active():
+            events += self._check(other)
+        return events
 
     def has_account(self, account_id: str) -> bool:
         return account_id in self._accounts

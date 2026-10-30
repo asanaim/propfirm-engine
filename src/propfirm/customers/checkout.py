@@ -31,6 +31,7 @@ from fractions import Fraction
 from typing import Any, Protocol
 
 from propfirm.access.gating import age_on, check_country
+from propfirm.customers.casework import Casework
 from propfirm.customers.pricing import DiscountKind, PricingError, price
 from propfirm.customers.providers import PaymentProvider, Screener
 from propfirm.customers.store import CifRecord, CustomerStore, OrderRecord
@@ -79,6 +80,7 @@ class Checkout:
         gateway: Submitter,
         wait_s: float = 5.0,
         funded: FundedGate | None = None,
+        cases: Casework | None = None,
     ) -> None:
         """`funded` holds funded orders until onboarding is done (None: they
         open at payment, as before step 3b; tests only)."""
@@ -89,6 +91,7 @@ class Checkout:
         self._gateway = gateway
         self._wait_s = wait_s
         self._funded = funded
+        self._cases = cases
 
     # --- registration ---------------------------------------------------------------
 
@@ -146,6 +149,9 @@ class Checkout:
             )
             if screening.result != "clear":
                 await self._store.block(cif.cif, cif.subject, ts, {"reason": "screening_hit"})
+                if self._cases is not None:
+                    detail = {"at": "first_purchase", "provider": screening.provider}
+                    await self._cases.alert(cif.cif, None, "screening", "aml", "high", detail, ts)
                 raise CheckoutError("screening", "this customer cannot buy")
         code_share: Fraction | None = None
         if code is not None:

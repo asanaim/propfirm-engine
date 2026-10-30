@@ -217,13 +217,37 @@ account's payable profit and every eligibility check, at that moment:
   trading days in the period; the account's own consistency rule over the
   period; the $50 minimum; no open position or pending order
   (`payouts.flat_required`); an approved Tier 2 check and a customer not
-  blocked; the country gate (when on). Open cases (no case system yet)
-  and the payout wallet (at request, step 3d) are shown as not decided
-  here;
+  blocked; the country gate (when on); no case under review (shown to the
+  trader only as "held for review"). The payout wallet (at request, step
+  3d) is shown as not decided here;
 - the next pay day (the 15th or the last day of the month, UTC dates).
 
-The open decisions this reads (D22, D23: basis, flat rule, trading days,
-maximum) are set in `[payouts]` of the policy as starting values.
+The payout settings (D22, D23) are in `[payouts]` of the policy: closed
+balance, flat at request, and, as FTMO and FundedNext, no minimum trading
+days and no maximum.
+
+## Integrity, fraud and compliance cases
+
+One case system for surveillance, fraud and AML (M16, M17, M20). An alert
+joins the customer's case that is not closed, or opens one (`CAS00000001`);
+a case's severity is its highest alert's, and its due time comes from
+`[cases.sla_hours]` (high 24 h, medium 72 h, low 168 h).
+
+- Alerts: employees (`POST /staff/cases`), and the platform itself: a
+  screening hit (at the first purchase or at funding; AML, high) and the
+  same verified identity on two customers (fraud, medium).
+- Work: `GET /staff/cases` (by status or customer, soonest due first,
+  `overdue=true`), `GET /staff/cases/{cas}` (alerts and history), `assign`,
+  `notes`, `decide`, `confirm`, `reject`, `reopen` (appeal).
+- Decision: cleared or warning by one employee; actions need a second
+  employee to confirm (four eyes): `remove_profit` (V, never paid),
+  `void_account` (the engine closes its positions and locks it: input
+  `VoidAccount`, event `AccountVoided`), `block_customer`. Nobody handles
+  a case about themselves.
+- While a customer has a case not closed: no funded review is approved, no
+  funded contract is issued, no payout is eligible.
+- Customers never see cases (no tipping off). `case_events` and `alerts`
+  are append-only.
 
 ## Conventions
 

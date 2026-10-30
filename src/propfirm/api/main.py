@@ -34,6 +34,8 @@ from fastapi import FastAPI
 
 from propfirm.api.app import Deps, create_app
 from propfirm.api.auth import JwksKeys, TokenVerifier
+from propfirm.customers.cases_store import CaseStore
+from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowScreening
@@ -72,7 +74,9 @@ async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> N
             log.exception("provisioning retry failed")
 
 
-async def _lifecycle_forever(lifecycle: Lifecycle, onboarding: Onboarding | None) -> None:
+async def _lifecycle_forever(
+    lifecycle: Lifecycle, onboarding: Onboarding | None, cases: Casework
+) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
         try:
@@ -80,6 +84,10 @@ async def _lifecycle_forever(lifecycle: Lifecycle, onboarding: Onboarding | None
             await lifecycle.advance(now_ms())
         except Exception:  # retried next round; passes wait in the journal
             log.exception("stage progression round failed")
+        try:
+            await cases.advance(now_ms())  # confirmed decisions not yet carried out
+        except Exception:  # retried next round
+            log.exception("carrying out case decisions failed")
         if onboarding is None:
             continue
         try:
@@ -103,14 +111,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         customers = await CustomerStore.open(pool, config.customer_schema)
         progressions = ProgressionStore(pool, config.customer_schema, config.schema)
         onboardings = OnboardingStore(pool, config.customer_schema)
+        case_store = CaseStore(pool, config.customer_schema)
         fixed = (
             await customers.rebuild_status()
             + await progressions.rebuild_status()
             + await onboardings.rebuild_status()
+            + await case_store.rebuild_status()
         )
         if fixed:
             log.warning("cached status differed from the history and was rebuilt: %s", fixed)
         settings = Settings(policy, await SettingsStore.open(pool, config.settings_schema), gateway)
+        cases = Casework(case_store, customers, settings, gateway)
         checkout = None
         if config.sandbox:
             checkout = Checkout(
@@ -120,6 +131,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 SandboxScreener(),
                 gateway,
                 funded=onboardings,
+                cases=cases,
             )
         kyc: KycProvider | None = None
         screener: Screener | None = None
@@ -141,10 +153,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 checkout,
                 sandbox=config.sandbox,
                 callback_url=config.public_url,
+                cases=cases,
             )
-        lifecycle = Lifecycle(progressions, settings, gateway)
+        lifecycle = Lifecycle(progressions, settings, gateway, cases=cases)
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
-        tasks.append(asyncio.create_task(_lifecycle_forever(lifecycle, onboarding)))
+        tasks.append(asyncio.create_task(_lifecycle_forever(lifecycle, onboarding, cases)))
         app.state.deps = Deps(
             live=LiveReader(client, config.live_prefix),
             history=HistoryReader(pool, config.read_schema),
@@ -158,6 +171,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings=settings,
             lifecycle=lifecycle,
             onboarding=onboarding,
+            cases=cases,
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,
             country_header=config.country_header,

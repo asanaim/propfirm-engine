@@ -20,6 +20,7 @@ from enum import StrEnum
 from propfirm._checks import require_int, require_text
 from propfirm.market.guards import GuardConfig
 from propfirm.market.types import PriceUpdate
+from propfirm.rules.events import AccountStatus
 from propfirm.rules.news import RestrictedEvent, event_window
 from propfirm.rules.products import RuleSet
 from propfirm.rules.supervisor import Event, RuleSupervisor
@@ -215,6 +216,21 @@ class UpdateTrading:
 
 
 @dataclass(frozen=True, slots=True)
+class VoidAccount:
+    """Void an active account on an integrity decision (`case`, a CAS id,
+    confirmed by two employees): positions close, the account is locked."""
+
+    account_id: str
+    case: str
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("account_id", self.account_id)
+        require_text("case", self.case)
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
 class Checkpoint:
     """Record a digest of the whole engine state in the chain and store a
     snapshot of it, so start-up can resume from here (sent by the scheduler)."""
@@ -238,6 +254,7 @@ type Input = (
     | ScheduleNews
     | CancelNews
     | UpdateTrading
+    | VoidAccount
     | Checkpoint
     | Malformed
 )
@@ -255,6 +272,7 @@ INPUT_TYPES = (
     ScheduleNews,
     CancelNews,
     UpdateTrading,
+    VoidAccount,
     Checkpoint,
     Malformed,
 )
@@ -272,6 +290,8 @@ class InputRejectReason(StrEnum):
     NEWS_STARTED = "news_started"  # a window that started or ended cannot be cancelled
     NO_AFFECTED_SYMBOLS = "no_affected_symbols"
     INVALID_TRADING_CONFIG = "invalid_trading_config"
+    UNKNOWN_ACCOUNT = "unknown_account"
+    ACCOUNT_NOT_ACTIVE = "account_not_active"
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,6 +395,12 @@ def apply(
             if refusal is not None:
                 return reject(item.config_version, InputRejectReason.INVALID_TRADING_CONFIG)
             return list(sup.reconfigure(item.config_version, item.instruments, item.guard, item.ts))
+        case VoidAccount():
+            if not sup.has_account(item.account_id):
+                return reject(item.account_id, InputRejectReason.UNKNOWN_ACCOUNT)
+            if sup.status(item.account_id) is not AccountStatus.ACTIVE:
+                return reject(item.account_id, InputRejectReason.ACCOUNT_NOT_ACTIVE)
+            return list(sup.void_account(item.account_id, item.case, item.ts))
         case Checkpoint():
             raise TypeError("Checkpoint is applied by the journal machine")
         case Malformed():
