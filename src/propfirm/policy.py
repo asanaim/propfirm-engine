@@ -236,6 +236,9 @@ def rule_set_view(r: RuleSet) -> dict[str, Any]:
         "min_trading_days": r.min_trading_days,
         "consistency_percent": percent_text(r.consistency),
         "consistency_at_pass": r.consistency_at_pass,
+        "target_basis": r.target_basis.value,  # "closed_balance" or "equity"
+        "flat_to_pass": r.flat_to_pass,  # no open position or pending order to pass
+        "tie_rule": r.tie_rule.value,  # a breach and a pass on the same check
     }
 
 

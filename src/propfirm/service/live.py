@@ -11,6 +11,7 @@ After each batch (at most every `publish_ms`) the engine process writes:
                              rule-set version (it may be older than the
                              catalogue's)
     {prefix}:quotes          hash: symbol -> current bid/ask, frozen, blocked
+    {prefix}:news            restricted events not over yet (the calendar)
 
 This is a cache, never a record: the journal decides and keeps everything,
 and a restart republishes it. It holds quotes and fill prices, which come
@@ -65,11 +66,40 @@ def account_view(machine: Machine, account_id: str) -> dict[str, Any]:
         "trading_days": sup.trading_days(account_id),
         "trading_day_ids": list(sup.trading_day_ids(account_id)),
         "day_pnl": [[day, cents] for day, cents in sup.day_pnl(account_id)],
-        "positions": view(engine.positions(account_id)),
+        "positions": _positions(machine, account_id),
         "pending_orders": view(engine.pending_orders(account_id)),
         "engine_ts": engine.now,
         "journal_seq": machine.seq,
     }
+
+
+def _positions(machine: Machine, account_id: str) -> list[dict[str, Any]]:
+    """Open positions with the price each would close at now and its P&L."""
+    engine = machine.supervisor.engine
+    floating = {pid: (price, pnl) for pid, price, pnl in engine.floating(account_id)}
+    out = []
+    for position in engine.positions(account_id):
+        data = view(position)
+        assert isinstance(data, dict)
+        price, pnl = floating[position.position_id]
+        out.append({**data, "current_price": price, "pnl_cents": pnl})
+    return out
+
+
+def news_view(machine: Machine) -> list[dict[str, Any]]:
+    """Restricted events not over yet: no trade opens or closes on the
+    listed symbols inside the window (M13)."""
+    engine = machine.supervisor.engine
+    return [
+        {
+            "event_id": event_id,
+            "start_ts": window.start_ts,
+            "end_ts": window.end_ts,
+            "symbols": sorted(window.symbols),
+        }
+        for event_id, window in engine.calendar()
+        if window.end_ts > engine.now
+    ]
 
 
 def quote_views(machine: Machine) -> dict[str, dict[str, Any]]:
@@ -110,6 +140,7 @@ class LivePublisher:
             pipe.set(f"{p}:account:{account_id}", _dumps(account_view(machine, account_id)))
         quotes = {symbol: _dumps(q) for symbol, q in quote_views(machine).items()}
         pipe.hset(f"{p}:quotes", mapping=quotes)
+        pipe.set(f"{p}:news", json.dumps(news_view(machine), sort_keys=True, separators=(",", ":")))
         await pipe.execute()
 
     async def flush(self) -> int:
@@ -130,6 +161,13 @@ class LiveReader:
 
     async def account(self, account_id: str) -> dict[str, Any] | None:
         return _loads(await self._client.get(f"{self._prefix}:account:{account_id}"))
+
+    async def news(self) -> list[dict[str, Any]]:
+        raw = await self._client.get(f"{self._prefix}:news")
+        if raw is None:
+            return []
+        data = json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
+        return data if isinstance(data, list) else []
 
     async def quotes(self) -> dict[str, dict[str, Any]]:
         key = f"{self._prefix}:quotes"
