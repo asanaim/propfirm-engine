@@ -113,6 +113,20 @@ class PositionClosed:
 
 
 @dataclass(frozen=True, slots=True)
+class CommissionCharged:
+    """The commission of a position that just opened, taken from the
+    account's balance (follows its PositionOpened)."""
+
+    ts: int
+    position_id: str
+    account_id: str
+    symbol: str
+    notional_cents: int  # at the fill price, rounded half-even (for the record)
+    commission_cents: int  # exact share of the exact notional, rounded half-even
+    config_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class StopsModified:
     ts: int
     position_id: str
@@ -196,6 +210,7 @@ type EngineEvent = (
     | OrderCancelled
     | PositionOpened
     | PositionClosed
+    | CommissionCharged
     | StopsModified
     | SymbolFrozen
     | SymbolResumed

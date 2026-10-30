@@ -66,16 +66,59 @@ symbol, or offers it on no account compared here.
 | XAG/USD | 0.0362 | 0.0638 | 0.0250 | 0.0290 | 0.0326 | 33 | $0.034 |
 | WTI | 0.0735 | 0.118 | 0.014 | 0.036 | 0.0548 | 6 | $0.06 |
 | Brent | 0.0655 | 0.1195 | 0.017 | 0.040 | 0.0528 | 6 | $0.06 |
-| BTC/USD | 53.55 | 53.13 | 6.40 | – | 53.13 | 5313 | $53.14 |
-| ETH/USD | 2.117 | 1.485 | 1.000 | – | 1.485 | 149 | $1.50 |
-| XRP/USD | 0.00233 | 0.00152 | – | – | 0.00193 | 20 | $0.0020 |
-| LTC/USD | 0.188 | 1.233 | – | – | 0.711 | 72 | $0.72 |
-| SOL/USD | – | – | – | – | – | 10 [E] | $0.10 |
+
+Crypto is priced differently (trading-v3, next section); its all-in figures
+are there.
 
 FTMO's ticker covers ten forex pairs; the crosses it does not show have
-three houses. SOL/USD has no benchmark (FTMO and FundedNext do not list
-it, Exness does not offer it on the Standard account, OANDA UK offers no
-crypto); 10 points is an estimate.
+three houses.
+
+## Crypto: raw spread plus commission (trading-v3)
+
+The prop firms price crypto as a raw spread plus a commission that is a
+percentage of the trade. Carrying all of that in the spread (trading-v2)
+gave BTC/USD a $53 spread, against FTMO's $1 and FundedNext's $21 on
+screen, and put a stop-loss $26 from the mid. From trading-v3 the engine
+does what the prop firms do:
+
+- **Spread:** the median of FTMO's and FundedNext's raw spreads (the mean
+  of the two), rounded up to a whole point.
+- **Commission:** 0.0525 % of the notional at the fill price, the median of
+  FTMO 0.065 % (read as round trip) and FundedNext 0.04 % (once), charged
+  once when a position opens, rounded half-even to the cent. It reduces
+  the balance at once, so it counts in the loss limits and the day's P&L.
+
+| Symbol | FTMO raw | FundedNext raw | `min_points` | Quoted spread | Commission at the 29 Oct price | Total |
+|---|---|---|---|---|---|---|
+| BTC/USD | 1.00 | 20.775 | 1089 | $10.90 | $42.45 (at $80,861) | $53.35 |
+| ETH/USD | 0.60 | 0.55 | 58 | $0.58 | $1.23 (at $2,335) | $1.81 |
+| XRP/USD | 0.0015 | 0.001005 | 13 | $0.0014 | $0.00067 (at $1.284) | $0.0021 |
+| LTC/USD | 0.15 | 1.21 | 68 | $0.68 | $0.031 (at $58.23) | $0.71 |
+| SOL/USD | – | – | 10 [E] | $0.10 | 0.0525 % | – |
+
+All-in cost of 1 BTC elsewhere on 29–30 Oct 2026 (spread + round-trip
+commission, at about $80,900):
+
+| House and account | All-in |
+|---|---|
+| FTMO ($1.00 raw + 0.065 %) | $53.55 |
+| FundedNext ($20.78 raw + 0.04 %) | $53.13 |
+| **This engine (trading-v3)** | **$53.35** |
+| OANDA Australia, spread only (50 % of the time at or below, October) | $43.80 |
+| IC Markets, all accounts (average; undated) | $12.01 |
+| Exness Zero ($0 spread + $4.375 a lot each side) | $8.75 |
+| Exness Standard, spread only | $6.40 |
+| Exness Raw Spread ($0.95 + $2 a lot each side) | $4.95 |
+| Exness Pro, spread only | $4.48 |
+
+The engine matches the prop firms it competes with in total cost, and its
+quoted spread ($10.90) sits between theirs ($1 and $21) and near the
+retail brokers' ($4.48 to $12). Exness and IC Markets are 4 to 12 times
+cheaper in total than all three prop firms and OANDA; lowering the
+commission to their level is a pricing decision (`trading.commission.crypto`).
+SOL/USD has no benchmark (FTMO and FundedNext do not list it, Exness does
+not let it trade on these accounts, OANDA does not offer it); its spread
+is an estimate and the crypto commission applies.
 
 ## Raw figures
 
@@ -124,7 +167,16 @@ USD/CAD 1.4, NZD/USD 1.4, EUR/GBP 1.3, EUR/JPY 1.6, EUR/CHF 1.6, EUR/AUD
 1.7, EUR/CAD 1.5, EUR/NZD 2.2, GBP/JPY 2.0, GBP/CHF 1.5, GBP/AUD 2.1,
 GBP/CAD 1.8, AUD/JPY 1.1, AUD/CAD 1.8, CAD/JPY 1.1, CHF/JPY 2.1; XAUUSD 24
 (point 0.001), XAGUSD 2.5 (0.001), USOIL 1.4 (0.001), UKOIL 1.7 (0.001),
-BTCUSD 64 (0.01), ETHUSD 10 (0.01).
+BTCUSD 64 (0.01), ETHUSD 10 (0.01). Other Exness accounts, same API, 30
+Oct 2026 (units of 10 points; commission per lot each side): Pro BTCUSD
+44.8, ETHUSD 7, commission 0; Raw Spread BTCUSD 9.5 + $2, ETHUSD 1.3 +
+$0.25; Zero BTCUSD 0 + $4.375, ETHUSD 0 + $0.50. XRP, LTC and SOL are
+marked not tradable on all four.
+
+OANDA Australia (division OAP), October 2026, 50 % of the time at or below:
+BTC_USD 43.8, ETH_USD 31.4, LTC_USD 5.4 pips; the live quote on its page
+fixed the pip at $1 (BTC), $0.10 (ETH) and $0.10 (LTC), so $43.80, $3.14
+and $0.54.
 
 OANDA, 50 % of the time at or below, last month (pips): EUR/USD 0.8,
 GBP/USD 1.2, USD/JPY 1.6, USD/CHF 1.5, AUD/USD 1.3, USD/CAD 1.8, NZD/USD
@@ -146,8 +198,8 @@ XAG_USD 289.7 (pip 0.0001), WTICO_USD 3.6 (pip 0.01), BCO_USD 4.0 (pip
   commission is charged only at the opening, with "Opening 1 lot = $7
   commission" and nothing at closing. The once-per-trade reading is used.
   Read as charged on both sides, 17 forex `min_points` values would rise by
-  1 to 9 points (largest: EUR/NZD 35 → 44), ETH/USD 149 → 212, BTC/USD
-  5313 → 5355, XRP/USD 20 → 22 and LTC/USD 72 → 73.
+  1 to 9 points (largest: EUR/NZD 35 → 44), and the crypto commission
+  median would be 0.0725 % instead of 0.0525 %.
 - **FTMO crypto commission.** FTMO's symbols page lists 0.065 %; it does
   not say per side or round trip. Its forex ($5) and metals (0.0014 %)
   figures equal twice the per-side rates in FTMO's 25 Sep 2025 trading
@@ -156,10 +208,10 @@ XAG_USD 289.7 (pip 0.0001), WTICO_USD 3.6 (pip 0.01), BCO_USD 4.0 (pip
   silver) are not stated on the page; they are the only units that put
   OANDA within the range of the other three houses (a factor of 10 either
   way would make OANDA's gold spread $5.29 or $0.053).
-- **Crypto spreads are a fixed number of points**, while the prop firms'
-  crypto commissions are a percentage of the price. At other prices the
-  all-in cost moves with the price; recalibrate when BTC or ETH moves
-  more than about 20 % from the prices above.
+- **Crypto raw spreads are a fixed number of points**; the commission is a
+  percentage, so it moves with the price as the prop firms' does.
+  Recalibrate the raw spreads when BTC or ETH moves more than about 20 %
+  from the prices above.
 - **Thin crypto coverage.** XRP and LTC have two houses each; LTC's two
   differ by a factor of 6.6 (FTMO $0.19, FundedNext $1.23). SOL has none.
 - **Reviewed and not used.** IC Markets' spreads page shows no date and its
@@ -195,7 +247,7 @@ multipliers with measured figures.
 4. FundedNext, CFDs symbols and conditions (commission by account model): https://fundednext.com/general-rules/cfds/symbols-and-conditions
 5. FundedNext Help Center, commission charges for the Stellar Instant account (charged only at the opening): https://help.fundednext.com/en/articles/11641300-what-are-the-commission-charges-for-the-stellar-instant-account
 6. Exness, public instruments API for the Standard account (`mt5_mini_real_vc`), read 29 Oct 2026: https://www.exness.com/pwapi/api/v1/account-types/mt5_mini_real_vc/instruments/ ; table footnote on https://www.exness.com/commodities/
-7. OANDA, Historical spreads (UK), read 29 Oct 2026: https://www.oanda.com/uk-en/trading/historical-spreads/ ; data from https://labs-api.oanda.com/v1/spreads/spread-stability-and-average?instrument=EUR_USD&division=OEL
+7. OANDA, Historical spreads (UK), read 29 Oct 2026: https://www.oanda.com/uk-en/trading/historical-spreads/ ; data from https://labs-api.oanda.com/v1/spreads/spread-stability-and-average?instrument=EUR_USD&division=OEL ; Australia (crypto), read 30 Oct 2026: https://www.oanda.com/au-en/trading/historical-spreads/
 8. Fusion Markets, rollover: https://fusionmarkets.freshdesk.com/support/solutions/articles/51000307963
 9. Twelve Data, WebSocket FAQ (no bid or ask over WebSocket, the reason the engine sets spreads itself): https://support.twelvedata.com/en/articles/5194610-websocket-faq
 10. IC Markets, Spreads (reviewed, not used): https://www.icmarkets.com/global/en/trading-pricing/spreads/

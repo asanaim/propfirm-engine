@@ -45,7 +45,13 @@ from propfirm.rules.events import (
 )
 from propfirm.rules.products import MaxLossKind, RuleSet, TargetBasis, TieRule
 from propfirm.trading.engine import TradingEngine
-from propfirm.trading.events import CloseReason, EngineEvent, PositionClosed, PositionOpened
+from propfirm.trading.events import (
+    CloseReason,
+    CommissionCharged,
+    EngineEvent,
+    PositionClosed,
+    PositionOpened,
+)
 from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest
 
@@ -302,6 +308,8 @@ class RuleSupervisor:
                 state.trading_days.add(self._day)
             elif isinstance(event, PositionClosed):
                 state.day_pnl[self._day] = state.day_pnl.get(self._day, 0) + event.pnl_cents
+            elif isinstance(event, CommissionCharged):  # the day's P&L is net of commission
+                state.day_pnl[self._day] = state.day_pnl.get(self._day, 0) - event.commission_cents
 
     def _check(self, state: _State) -> list[Event]:
         equity = self._engine.equity(state.account_id)
