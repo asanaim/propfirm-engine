@@ -35,7 +35,7 @@ from propfirm.policy import (
 from propfirm.rules.products import RULESETS
 from propfirm.service.setup import policy_changes, setup_from_policy
 from propfirm.trading.events import OrderRejected, PositionOpened, TradingConfigChanged
-from propfirm.trading.instruments import default_instruments
+from propfirm.trading.instruments import SpreadAndCommission, default_instruments
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
 RAW: dict[str, Any] = tomllib.loads(DEFAULT_POLICY.read_text("utf-8"))
@@ -60,14 +60,20 @@ def lite(data: dict[str, Any]) -> dict[str, Any]:
 def test_shipped_policy_is_the_confirmed_configuration() -> None:
     assert SHIPPED.rule_sets() == tuple(RULESETS.values())
     defaults = tuple(default_instruments().values())
-    assert SHIPPED.trading.config_version == "trading-v2"  # the market-following spread
+    assert SHIPPED.trading.config_version == "trading-v3"  # crypto: raw spread + commission
     shipped = SHIPPED.trading.instruments
     assert tuple(replace(s, spread=d.spread) for s, d in zip(shipped, defaults, strict=True)) == (
         defaults
     )  # only the spread differs from the engine defaults
-    normal = {s.name: s.spread.min_points for s in shipped}
+    normal = {s.name: s.spread_model.min_points for s in shipped}
     assert (normal["EUR/USD"], normal["GBP/USD"], normal["USD/JPY"]) == (8, 11, 14)  # pips x 10
-    assert (normal["XAU/USD"], normal["WTI"], normal["BTC/USD"]) == (47, 6, 5_313)  # cents
+    assert (normal["XAU/USD"], normal["WTI"], normal["BTC/USD"]) == (47, 6, 1_089)  # cents
+    commission = {s.name: s.commission for s in shipped}
+    crypto = {"BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "LTC/USD"}
+    assert {n for n, c in commission.items() if c} == crypto
+    assert commission["BTC/USD"] == Fraction(525, 1_000_000)  # 0.0525 %
+    btc = next(s.spread for s in shipped if s.name == "BTC/USD")
+    assert isinstance(btc, SpreadAndCommission) and btc.spread.max_points == 10_890
     eurusd = next(s.spread for s in shipped if s.name == "EUR/USD")
     assert eurusd == MarketSpreadConfig(
         min_points=8,
@@ -162,6 +168,9 @@ def _drop(path: list[Any]) -> Callable[[dict[str, Any]], None]:
         _drop(["trading", "spread", "rollover_after_minutes"]),
         _set(["trading", "spread", "rollover_multiplier"], 0),
         _set(["trading", "spread", "rollover_before_minutes"], 1_440),  # window a day or more
+        _drop(["trading", "commission", "crypto"]),
+        _set(["trading", "commission", "crypto"], 0.05),  # number, not text
+        _set(["trading", "commission", "crypto"], "1"),  # 1 % or more
         _set(["trading", "gap_threshold_ms_by_symbol"], {"EURUSD": 5000}),
         _set(["payouts", "pay_days"], ["15", "31"]),
         _set(["unexpected"], 1),
@@ -245,11 +254,11 @@ def test_trading_changes_need_a_new_config_version() -> None:
 
     def versioned(data: dict[str, Any]) -> None:
         leverage(data)
-        data["trading"]["config_version"] = "trading-v3"
+        data["trading"]["config_version"] = "trading-v4"
         data["trading"]["delay_threshold_ms"] = 3_000
 
     (item,) = policy_changes(parse_policy(edited(versioned)), machine(), T0)
-    assert isinstance(item, UpdateTrading) and item.config_version == "trading-v3"
+    assert isinstance(item, UpdateTrading) and item.config_version == "trading-v4"
     assert {s.name for s in item.instruments} == {"XAU/USD", "XAG/USD"}  # only what changed
     assert item.guard is not None and item.guard.delay_threshold_ms == 3_000
 
@@ -288,10 +297,10 @@ def gold(**changes: Any) -> Any:
 def test_new_leverage_applies_to_new_positions_only() -> None:
     d = opened()
     first = next(e for e in d.buy("o1", 10, T0 + 1) if isinstance(e, PositionOpened))
-    events = d.send(UpdateTrading("trading-v3", (gold(leverage=Fraction(25)),), None, T0 + 2))
-    assert events == [TradingConfigChanged(T0 + 2, "trading-v3", ("XAU/USD",), False)]
+    events = d.send(UpdateTrading("trading-v4", (gold(leverage=Fraction(25)),), None, T0 + 2))
+    assert events == [TradingConfigChanged(T0 + 2, "trading-v4", ("XAU/USD",), False)]
     second = next(e for e in d.buy("o2", 10, T0 + 3) if isinstance(e, PositionOpened))
-    assert second.config_version == "trading-v3" and first.config_version == "trading-v2"
+    assert second.config_version == "trading-v4" and first.config_version == "trading-v3"
     held = {p.position_id: p.margin_usd for p in d.machine.supervisor.engine.positions("A")}
     assert held["o2"] == 2 * held["o1"]  # 1:25 instead of 1:50, same price
     assert cents_ceil(held["o1"]) == first.margin_cents  # the open position kept its margin
@@ -301,7 +310,7 @@ def test_new_lot_caps_and_guards_apply() -> None:
     d = opened()
     d.send(
         UpdateTrading(
-            "trading-v3",
+            "trading-v4",
             (gold(max_order_volume_per_100k=50, max_symbol_volume_per_100k=50),),
             GuardConfig(delay_threshold_ms=500),
             T0 + 1,
@@ -316,9 +325,9 @@ def test_new_lot_caps_and_guards_apply() -> None:
 @pytest.mark.parametrize(
     "update",
     [
-        UpdateTrading("trading-v2", (), None, T0),  # version already in force
-        UpdateTrading("trading-v3", (gold(contract_size=1),), None, T0),  # fixed field
-        UpdateTrading("trading-v3", (gold(), gold()), None, T0),  # listed twice
+        UpdateTrading("trading-v3", (), None, T0),  # version already in force
+        UpdateTrading("trading-v4", (gold(contract_size=1),), None, T0),  # fixed field
+        UpdateTrading("trading-v4", (gold(), gold()), None, T0),  # listed twice
     ],
 )
 def test_trading_changes_that_are_refused(update: UpdateTrading) -> None:
@@ -332,10 +341,10 @@ def test_trading_changes_that_are_refused(update: UpdateTrading) -> None:
 
 def test_changed_settings_survive_a_snapshot() -> None:
     d = opened()
-    d.send(UpdateTrading("trading-v3", (gold(leverage=Fraction(25)),), GuardConfig(500), T0 + 1))
+    d.send(UpdateTrading("trading-v4", (gold(leverage=Fraction(25)),), GuardConfig(500), T0 + 1))
     state = CODEC.decode(CODEC.encode(d.machine.state()))
     assert state == d.machine.state()
     engine = machine().supervisor.engine
     engine.restore(d.machine.state().engine)
-    assert engine.config_version == "trading-v3"
+    assert engine.config_version == "trading-v4"
     assert engine.instruments["XAU/USD"].leverage == 25 and engine.guard_config == GuardConfig(500)

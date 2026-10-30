@@ -9,6 +9,9 @@ Sources of each value (Confirmed Configuration):
   stated per $100,000 of initial balance and scaled to the account by
   `scaled_cap` (Plan v4: caps scale with account size; values set in P3).
 - Minimum spreads: [DEFAULT] development placeholders, calibrated in P3.
+- Commission: none by default. A symbol priced with `SpreadAndCommission`
+  pays a commission when a position opens (the shipped policy sets one on
+  crypto, as prop firms charge it; see docs/spread-benchmarks.md).
 
 Volumes are in hundredths of a lot (0.01 lot = 1).
 """
@@ -54,6 +57,29 @@ _MIN_SPREAD: Mapping[str, int] = {
 _MAJORS = frozenset({"EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD", "NZD/USD"})
 
 
+_ONE_PERCENT = Fraction(1, 100)
+
+
+@dataclass(frozen=True, slots=True)
+class SpreadAndCommission:
+    """A market spread plus a commission charged once, when a position
+    opens: `commission` of the position's notional at the fill price (in
+    USD, rounded half-even to the cent). This is how prop firms price
+    crypto: a raw spread, and a commission as a share of the trade."""
+
+    spread: MarketSpreadConfig
+    commission: Fraction  # share of the notional, e.g. 0.0525 % = Fraction(21, 40_000)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.spread, MarketSpreadConfig):
+            raise TypeError("spread must be a MarketSpreadConfig")
+        if not isinstance(self.commission, Fraction) or not 0 < self.commission < _ONE_PERCENT:
+            raise ValueError("commission must be a Fraction above 0 and below 1 %")
+
+
+type Pricing = AnySpreadConfig | SpreadAndCommission
+
+
 @dataclass(frozen=True, slots=True)
 class InstrumentSpec:
     symbol: SymbolSpec
@@ -62,11 +88,13 @@ class InstrumentSpec:
     quote_currency: str
     max_order_volume_per_100k: int
     max_symbol_volume_per_100k: int
-    spread: AnySpreadConfig
+    spread: Pricing  # the spread model, with any commission
 
     def __post_init__(self) -> None:
-        if not isinstance(self.spread, (SpreadConfig, MarketSpreadConfig)):
-            raise TypeError("spread must be a SpreadConfig or MarketSpreadConfig")
+        if not isinstance(self.spread, (SpreadConfig, MarketSpreadConfig, SpreadAndCommission)):
+            raise TypeError(
+                "spread must be a SpreadConfig, MarketSpreadConfig or SpreadAndCommission"
+            )
         require_int("contract_size", self.contract_size, minimum=1)
         require_text("quote_currency", self.quote_currency)
         require_int("max_order_volume_per_100k", self.max_order_volume_per_100k, minimum=1)
@@ -83,6 +111,18 @@ class InstrumentSpec:
     @property
     def digits(self) -> int:
         return self.symbol.digits
+
+    @property
+    def spread_model(self) -> AnySpreadConfig:
+        """The spread settings alone."""
+        return self.spread.spread if isinstance(self.spread, SpreadAndCommission) else self.spread
+
+    @property
+    def commission(self) -> Fraction:
+        """Commission as a share of the notional, charged when a position opens (0: none)."""
+        if isinstance(self.spread, SpreadAndCommission):
+            return self.spread.commission
+        return Fraction(0)
 
 
 CAP_BASIS_CENTS = 10_000_000  # $100,000

@@ -89,6 +89,7 @@ from propfirm.trading.engine import EngineState
 from propfirm.trading.events import (
     AccountOpened,
     CloseReason,
+    CommissionCharged,
     DuplicateUpdate,
     FeedGap,
     NewsCancelled,
@@ -105,7 +106,7 @@ from propfirm.trading.events import (
     SymbolResumed,
     TradingConfigChanged,
 )
-from propfirm.trading.instruments import InstrumentSpec
+from propfirm.trading.instruments import InstrumentSpec, SpreadAndCommission
 from propfirm.trading.orders import OrderRequest, OrderType, PendingOrder, Position, Side
 
 CHAIN_VERSION = "propfirm-journal-v2"  # v2: keyed price digests, checkpoints
@@ -187,6 +188,7 @@ CODEC = Codec(
         OrderCancelled,
         PositionOpened,
         PositionClosed,
+        CommissionCharged,
         StopsModified,
         SymbolFrozen,
         SymbolResumed,
@@ -208,6 +210,7 @@ CODEC = Codec(
         SymbolSpec,
         SpreadConfig,
         MarketSpreadConfig,
+        SpreadAndCommission,
         GuardConfig,
         NewsWindow,
         RuleSet,

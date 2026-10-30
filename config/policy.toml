@@ -50,7 +50,7 @@ split_percent_after = "90"
 max_allocation_cents = 40000000  # $400,000 per trader
 
 [trading]
-config_version = "trading-v2"
+config_version = "trading-v3"
 delay_threshold_ms = 2000      # older updates freeze the symbol
 gap_threshold_ms = 60000       # no update for longer freezes the symbol
 gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
@@ -116,11 +116,26 @@ rollover_after_minutes = 15    # to 17:15 New York
 "XAG/USD" = 33                 # $0.033 an ounce
 "WTI" = 6                      # $0.06 a barrel
 "Brent" = 6                    # $0.06 a barrel
-"BTC/USD" = 5313               # $53.13 (at BTC $80,900; commissions are % of price)
-"ETH/USD" = 149                # $1.49 (at ETH $2,335)
+# Crypto: the raw spread only (median of FTMO's and FundedNext's raw
+# spreads); the commission below is charged on top, as those firms do.
+"BTC/USD" = 1089               # $10.89 raw
+"ETH/USD" = 58                 # $0.58 raw
 "SOL/USD" = 10                 # $0.10 [E]: no house publishes SOL; calibrate in P3
-"XRP/USD" = 20                 # $0.0020 (two houses)
-"LTC/USD" = 72                 # $0.72 (two houses, far apart)
+"XRP/USD" = 13                 # $0.0013 raw
+"LTC/USD" = 68                 # $0.68 raw (FTMO $0.15, FundedNext $1.21)
+
+[trading.commission]
+# Charged once, when a position opens, as a percent of its notional at the
+# fill price (in USD, rounded half-even to the cent); it counts in balance,
+# equity, the loss limits and the day's P&L. "0" = none: the spread above
+# carries the whole cost (forex, metals, oil match the houses' all-in cost).
+# Crypto: median of FTMO 0.065 % and FundedNext 0.04 %. With the raw spread
+# this keeps BTC's total cost at about $53 a coin at $80,900, as at those
+# firms, while the spread a trader sees is about $11.
+forex = "0"
+metal = "0"
+oil = "0"
+crypto = "0.0525"
 
 # --- products -------------------------------------------------------------------
 # Each stage becomes the rule-set version "<product>-<stage>-v<version>".

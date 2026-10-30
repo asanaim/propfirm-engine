@@ -33,7 +33,12 @@ from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import MarketSpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
-from propfirm.trading.instruments import InstrumentSpec, default_instrument
+from propfirm.trading.instruments import (
+    InstrumentSpec,
+    Pricing,
+    SpreadAndCommission,
+    default_instrument,
+)
 
 DEFAULT_POLICY = Path(__file__).resolve().parents[2] / "config" / "policy.toml"
 _PERCENT = re.compile(r"(0|[1-9][0-9]*)(\.[0-9]+)?")
@@ -378,7 +383,10 @@ def _trading(t: _Table) -> TradingPolicy:
     gap = t.integer("gap_threshold_ms", 1)
     by_symbol = t.mapping("gap_threshold_ms_by_symbol")
     leverage_t, caps_t, spread_t = t.table("leverage"), t.table("lot_caps"), t.table("spread")
+    commission_t = t.table("commission")
     t.done()
+    commission = {c: commission_t.required_percent(c.value) for c in AssetClass}
+    commission_t.done()
     leverage = {c: leverage_t.ratio(c.value) for c in AssetClass}
     leverage_t.done()
     caps: dict[AssetClass, tuple[int, int]] = {}
@@ -410,14 +418,18 @@ def _trading(t: _Table) -> TradingPolicy:
                 leverage=leverage[symbol.asset_class],
                 max_order_volume_per_100k=order_cap,
                 max_symbol_volume_per_100k=symbol_cap,
-                spread=_market_spread(
-                    mins_t.integer(symbol.name, 1),
-                    max_multiple,
-                    window,
-                    min_samples,
-                    vol,
-                    news,
-                    rollover,
+                spread=_pricing(
+                    _market_spread(
+                        mins_t.integer(symbol.name, 1),
+                        max_multiple,
+                        window,
+                        min_samples,
+                        vol,
+                        news,
+                        rollover,
+                    ),
+                    commission[symbol.asset_class],
+                    commission_t.name(symbol.asset_class.value),
                 ),
             )
         )
@@ -430,6 +442,16 @@ def _trading(t: _Table) -> TradingPolicy:
             raise PolicyError(f"trading.gap_threshold_ms_by_symbol.{name} must be >= 1")
     guard = GuardConfig(delay, gap, dict(sorted(by_symbol.items())) or None)
     return TradingPolicy(config_version, tuple(instruments), guard)
+
+
+def _pricing(spread: MarketSpreadConfig, commission: Fraction, where: str) -> Pricing:
+    """The spread alone, or with a commission when the asset class has one."""
+    if commission == 0:
+        return spread
+    try:
+        return SpreadAndCommission(spread, commission)
+    except ValueError as exc:
+        raise PolicyError(f"{where}: {exc}") from exc
 
 
 def _market_spread(

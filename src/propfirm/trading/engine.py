@@ -43,6 +43,11 @@ Money:
   and released pro rata on partial closes. Checked when a position opens;
   pending orders reserve none. Hedged positions are margined gross.
 - Equity = balance + unrealized P&L (longs at bid, shorts at ask).
+- Commission (only symbols priced with `SpreadAndCommission`): a share of
+  the notional at the fill price, charged once when a position opens and
+  posted to the ledger at once, so it counts in balance, equity, the loss
+  limits and the day's P&L. Rounded half-even to the cent. The margin
+  check requires margin plus commission.
 - Not implemented: margin call and stop-out (not in the project record; the
   loss limits of the rules engine, step 5, act far earlier).
 """
@@ -62,6 +67,7 @@ from propfirm.money import cents_ceil, cents_half_even
 from propfirm.trading.events import (
     AccountOpened,
     CloseReason,
+    CommissionCharged,
     DuplicateUpdate,
     EngineEvent,
     FeedGap,
@@ -84,6 +90,7 @@ from propfirm.trading.orders import OrderRequest, OrderType, PendingOrder, Posit
 
 FIRM_CAPITAL = "firm:capital"
 FIRM_TRADING_PNL = "firm:trading_pnl"
+FIRM_COMMISSION = "firm:commission"
 
 
 def balance_account(account_id: str) -> str:
@@ -144,7 +151,7 @@ class TradingEngine:
         self._version = require_text("config_version", config_version)
         self._guards = FeedGuards(guard_config or GuardConfig(), self._instruments)
         self._sequences = SequenceTracker()
-        self._spreads = {s: SpreadModel(spec.spread) for s, spec in self._instruments.items()}
+        self._spreads = {s: SpreadModel(spec.spread_model) for s, spec in self._instruments.items()}
         self._news = tuple(news_windows)
         self._blocks = tuple(trade_blocks)
         self._routes: dict[str, tuple[str, bool]] = {}
@@ -246,7 +253,7 @@ class TradingEngine:
                 events.append(self._reject(request.order_id, request.account_id, opened))
             else:
                 self._used_ids.add(request.order_id)
-                events.append(opened)
+                events.extend(opened)
             return events
         assert request.level is not None
         self._orders[request.order_id] = PendingOrder(request, self._now)
@@ -432,7 +439,7 @@ class TradingEngine:
         for spec in instruments:
             if spec != self._instruments[spec.name]:
                 self._instruments[spec.name] = spec
-            self._spreads[spec.name].reconfigure(spec.spread)
+            self._spreads[spec.name].reconfigure(spec.spread_model)
         self._guards.reconfigure(guard)
 
     def lock_account(self, account_id: str, ts: int) -> list[EngineEvent]:
@@ -661,16 +668,20 @@ class TradingEngine:
         )
         return open_volume + pending_volume
 
-    def _open_position(self, request: OrderRequest, quote: Quote) -> PositionOpened | RejectReason:
+    def _open_position(
+        self, request: OrderRequest, quote: Quote
+    ) -> tuple[PositionOpened] | tuple[PositionOpened, CommissionCharged] | RejectReason:
         spec = self._instruments[request.symbol]
         price = quote.ask if request.side is Side.BUY else quote.bid
         try:
-            margin = self._margin_usd(spec, price, request.volume)
+            notional = self._notional_usd(spec, price, request.volume)
             free = self.free_margin(request.account_id)
         except _NoRate:
             return RejectReason.NO_CONVERSION_RATE
+        margin = notional / spec.leverage
         margin_cents = cents_ceil(margin)
-        if margin_cents > free:
+        commission_cents = cents_half_even(notional * spec.commission)
+        if margin_cents + commission_cents > free:
             return RejectReason.INSUFFICIENT_MARGIN
         self._positions[request.order_id] = Position(
             position_id=request.order_id,
@@ -684,7 +695,7 @@ class TradingEngine:
             take_profit=request.take_profit,
             margin_usd=margin,
         )
-        return PositionOpened(
+        opened = PositionOpened(
             ts=self._now,
             position_id=request.order_id,
             account_id=request.account_id,
@@ -699,6 +710,29 @@ class TradingEngine:
             margin_cents=margin_cents,
             config_version=self._version,
         )
+        if commission_cents == 0:
+            return (opened,)
+        self._ledger.post(
+            transfer(
+                f"commission:{request.order_id}",
+                self._now,
+                "commission",
+                debit=FIRM_COMMISSION,
+                credit=balance_account(request.account_id),
+                amount=commission_cents,
+                reference=request.order_id,
+            )
+        )
+        charged = CommissionCharged(
+            ts=self._now,
+            position_id=request.order_id,
+            account_id=request.account_id,
+            symbol=request.symbol,
+            notional_cents=cents_half_even(notional),
+            commission_cents=commission_cents,
+            config_version=self._version,
+        )
+        return (opened, charged)
 
     def _trigger_orders(self, quote: Quote) -> list[EngineEvent]:
         events: list[EngineEvent] = []
@@ -713,7 +747,7 @@ class TradingEngine:
             if isinstance(opened, RejectReason):
                 events.append(OrderCancelled(self._now, order_id, request.account_id, opened))
             else:
-                events.append(opened)
+                events.extend(opened)
         return events
 
     def _trigger_stops(self, quote: Quote) -> list[EngineEvent]:
@@ -809,9 +843,9 @@ class TradingEngine:
         quote_ccy = Fraction(move * volume * spec.contract_size, 10**spec.digits * 100)
         return self._to_usd(spec.quote_currency, quote_ccy)
 
-    def _margin_usd(self, spec: InstrumentSpec, price: int, volume: int) -> Fraction:
+    def _notional_usd(self, spec: InstrumentSpec, price: int, volume: int) -> Fraction:
         notional = Fraction(price * volume * spec.contract_size, 10**spec.digits * 100)
-        return self._to_usd(spec.quote_currency, notional) / spec.leverage
+        return self._to_usd(spec.quote_currency, notional)
 
     def _to_usd(self, currency: str, amount: Fraction) -> Fraction:
         if currency == "USD":
