@@ -20,9 +20,10 @@ Agreement $contract_id, issued $issued_utc (UTC).
 
 4. Profit split and payouts
    The Trader receives $split_percent % of the profit made on the account
-   and payable under these terms. The first payout may be requested
-   $first_after_days days after the account opens, and each later one
-   $interval_days days after the previous payout; the minimum payout is
+   and payable under these terms. The first payout may be requested from
+   the trading day $first_after_days days after that of the first trade on
+   the account (trading days end at 17:00 New York time), and each later
+   one $interval_days days after the previous payout; the minimum payout is
    $minimum_usd (USD). Every payout needs the approval of $approvals people
    at the Firm; once approved, it is taken from the account and sent to the
    Trader's own wallet, whose address the Trader gives and is responsible

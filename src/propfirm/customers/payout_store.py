@@ -12,6 +12,7 @@ from typing import Any
 
 import asyncpg
 
+from propfirm.customers.notifications import Notice, insert_notice
 from propfirm.customers.payout_flow import (
     IN_PROGRESS,
     PAYOUT_KINDS,
@@ -72,8 +73,16 @@ class PayoutStore:
     # --- wallets ----------------------------------------------------------------------
 
     async def add_wallet(
-        self, cif: str, network: str, address: str, subject: str, ts: int, detail: dict[str, Any]
+        self,
+        cif: str,
+        network: str,
+        address: str,
+        subject: str,
+        ts: int,
+        detail: dict[str, Any],
+        notice: Notice,
     ) -> Wallet:
+        """The wallet and its security email, in one transaction."""
         s = self._s
         async with self._pool.acquire() as conn, conn.transaction():
             number = await conn.fetchval(f"SELECT nextval('{s}.wal_seq')")
@@ -90,7 +99,9 @@ class PayoutStore:
                 json.dumps(detail, sort_keys=True),
             )
             assert row is not None
-            return Wallet(**dict(row))
+            wallet = Wallet(**dict(row))
+            await insert_notice(conn, s, cif, notice, ts, {"wal": wallet.wal})
+            return wallet
 
     async def wallet(self, cif: str) -> Wallet | None:
         """The customer's wallet in use: the latest added."""

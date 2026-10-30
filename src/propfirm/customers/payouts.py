@@ -17,8 +17,9 @@ separate line. A payout maximum, when set, caps the trader's amount.
 
 Eligibility, all of which must hold (M18):
 - funded: a funded account, active (not breached, passed or locked);
-- waiting period: the first payout no sooner than `first_after_days` after
-  funding, a later one no sooner than `interval_days` after the last;
+- waiting period (as FTMO): the first payout from the trading day
+  `first_after_days` after the first trade's (17:00 New York days), a later
+  one no sooner than `interval_days` after the last;
 - trading days in the period (`min_trading_days`, D22);
 - consistency (D19): when the account's rule set has the rule, its best
   day in the period is at most that share of the period's realized profit;
@@ -119,7 +120,7 @@ class Eligibility:
     debit_cents: int  # what leaves the account: the gross paid on (G, or P) plus V
     period_start: int  # ms UTC
     trading_days: int  # in the period
-    opens_at: int  # ms UTC: the end of the waiting period
+    opens_at: int | None  # ms UTC: the end of the waiting period; None: no trade yet
     checks: tuple[Check, ...]
 
     @property
@@ -160,13 +161,25 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
     check("funded", funded and active, f"stage {account.stage}, {account.status}")
 
     period_start = account.last_payout_at or account.funded_at
+    opens: int | None
     if account.last_payout_at is None:
-        opens = account.funded_at + payouts.first_after_days * _DAY_MS
-        rule = f"{payouts.first_after_days} days after funding"
+        # as FTMO: on the n-th trading day after the first trade's, or later
+        funded_day = NEW_YORK_17.day_start(account.funded_at)
+        traded = [d for d in account.trading_day_ids if d >= funded_day]
+        n = payouts.first_after_days
+        if traded:
+            opens = NEW_YORK_17.day_start(min(traded) + n * _DAY_MS + _DAY_MS // 2)
+            rule = f"{n} days after the first trade"
+        else:
+            opens, rule = None, f"no trade yet; the first payout {n} days after the first trade"
     else:
         opens = account.last_payout_at + payouts.interval_days * _DAY_MS
         rule = f"{payouts.interval_days} days after the last payout"
-    check("waiting_period", now >= opens, f"from {_utc_iso(opens)} ({rule})")
+    check(
+        "waiting_period",
+        opens is not None and now >= opens,
+        rule if opens is None else f"from {_utc_iso(opens)} ({rule})",
+    )
 
     first_day = NEW_YORK_17.day_start(period_start)
     days = [d for d in account.trading_day_ids if d >= first_day]

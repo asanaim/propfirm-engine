@@ -181,7 +181,7 @@ def test_the_contract_states_the_terms_in_force() -> None:
         "Rule set lite-funded-v1: maximum loss 6 % (static)",
         "daily loss limit 3 %",
         "receives 80 % of the profit",
-        "14 days after the account opens",
+        "from the trading day 14 days after that of the first trade on the account",
         "each later one 14 days after the previous payout",
         "once approved, it is taken from the account and sent to the Trader's own wallet",
         "minimum payout is 50.00 (USD)",

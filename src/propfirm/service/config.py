@@ -7,7 +7,7 @@ they are never written to logs or to the repository.
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from propfirm.policy import DEFAULT_POLICY
@@ -42,6 +42,12 @@ class ServiceConfig:
     didit_workflow_id: str | None = None
     didit_webhook_secret: str | None = None  # secret
     public_url: str | None = None  # the portal's address, for the provider's callback
+    smtp_host: str | None = None  # security emails; without it, the sandbox mailer
+    smtp_port: int = 587
+    smtp_tls: str = "starttls"  # or "implicit" (port 465)
+    smtp_username: str | None = None
+    smtp_password: str | None = field(default=None, repr=False)  # secret
+    mail_from: str | None = None  # the From address; required with SMTP_HOST
     batch: int = 200  # inputs per transaction, at most
     block_ms: int = 1_000  # how long one stream read waits for input
     publish_ms: int = 250  # live state is published at most this often
@@ -64,7 +70,13 @@ class ServiceConfig:
             raise ConfigError(
                 "DIDIT_API_KEY, DIDIT_WORKFLOW_ID and DIDIT_WEBHOOK_SECRET go together"
             )
-        for name in ("batch", "block_ms", "publish_ms"):
+        if self.smtp_host and not self.mail_from:
+            raise ConfigError("MAIL_FROM is required with SMTP_HOST")
+        if self.smtp_tls not in ("starttls", "implicit"):
+            raise ConfigError("SMTP_TLS must be starttls or implicit")
+        if bool(self.smtp_username) != bool(self.smtp_password):
+            raise ConfigError("SMTP_USERNAME and SMTP_PASSWORD go together")
+        for name in ("batch", "block_ms", "publish_ms", "smtp_port"):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ConfigError(f"{name} must be a positive integer")
@@ -118,6 +130,12 @@ class ServiceConfig:
             didit_workflow_id=env.get("DIDIT_WORKFLOW_ID") or None,
             didit_webhook_secret=env.get("DIDIT_WEBHOOK_SECRET") or None,
             public_url=env.get("PROPFIRM_PUBLIC_URL") or None,
+            smtp_host=env.get("SMTP_HOST") or None,
+            smtp_port=number("SMTP_PORT", 587),
+            smtp_tls=text("SMTP_TLS", "starttls"),
+            smtp_username=env.get("SMTP_USERNAME") or None,
+            smtp_password=env.get("SMTP_PASSWORD") or None,
+            mail_from=env.get("MAIL_FROM") or None,
             batch=number("PROPFIRM_BATCH", 200),
             block_ms=number("PROPFIRM_BLOCK_MS", 1_000),
             publish_ms=number("PROPFIRM_PUBLISH_MS", 250),

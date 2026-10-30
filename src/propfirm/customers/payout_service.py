@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from propfirm.customers.casework import Casework, Submitter
+from propfirm.customers.notifications import wallet_notice
 from propfirm.customers.onboarding_store import OnboardingStore
 from propfirm.customers.payout_flow import tron_address_valid
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, PayoutStore, Wallet
@@ -131,11 +132,18 @@ class Payouts:
     async def add_wallet(
         self, cif: CifRecord, subject: str, mfa: bool, address: str, ts: int
     ) -> Wallet:
-        """A new payout wallet replaces the one in use, after the cooling-off period."""
+        """A new payout wallet replaces the one in use (after the cooling-off
+        period, if one is set); the customer is emailed at the registered
+        address."""
         await self._mfa(mfa)
         if not tron_address_valid(address):
             raise PayoutRefused("invalid", "not a TRON (TRC-20) address")
-        return await self._store.add_wallet(cif.cif, NETWORK, address, subject, ts, {"mfa": mfa})
+        previous = await self._store.wallet(cif.cif)
+        notice = wallet_notice(
+            cif.email, cif.full_name, address, previous.address if previous else None, ts
+        )
+        detail = {"mfa": mfa}
+        return await self._store.add_wallet(cif.cif, NETWORK, address, subject, ts, detail, notice)
 
     async def request(
         self, acc: str, cif: CifRecord, subject: str, mfa: bool, ts: int

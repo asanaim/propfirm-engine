@@ -217,8 +217,10 @@ account's payable profit and every eligibility check, at that moment:
   included; it may not be set below a refundable fee); `debit_cents`, what
   leaves the account: P + V (capped: G + V, G = the share paid ÷ s rounded
   up to the cent, the rest of P stays payable);
-- checks: funded and active; 14 days since funding for the first payout,
-  14 days since the last for a later one (`interval_days`);
+- checks: funded and active; the first payout from the trading day 14
+  days after that of the first trade on the account (as FTMO; trading days
+  end at 17:00 New York), a later one 14 days after the last
+  (`interval_days`);
   trading days in the period; the account's own consistency rule over the
   period; the $50 minimum; no open position or pending order
   (`payouts.flat_required`); an approved Tier 2 check and a customer not
@@ -239,7 +241,16 @@ USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
 1. Wallet: `POST /me/wallet` `{"address": "T..."}` (a TRON address,
    checked by its Base58Check checksum); a new one replaces the old and is
    usable at once, as at FTMO, FundedNext and The5ers
-   (`wallet_cooling_off_hours` = 0; a wait can be set).
+   (`wallet_cooling_off_hours` = 0; a wait can be set). Every wallet added
+   or changed emails the customer's registered address ("Your payout wallet
+   was changed": the new and previous wallet, the time, what to do if it was
+   not them), as exchanges do for a new withdrawal address. The email is
+   written in the same transaction as the wallet (an outbox) and sent by the
+   background round, retried every minute; through SMTP when `SMTP_HOST` and
+   `MAIL_FROM` are set (`SMTP_PORT` 587, `SMTP_TLS` `starttls` or
+   `implicit`, `SMTP_USERNAME`, `SMTP_PASSWORD`; any transactional provider
+   such as Amazon SES or Postmark), otherwise through the sandbox mailer,
+   which sends nothing.
 2. Request: `POST /accounts/{acc}/payouts`, when eligible. The request
    keeps the eligibility it was based on, the trader's amount and the
    debit. One payout in progress per account; until it is debited (or

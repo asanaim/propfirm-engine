@@ -14,7 +14,7 @@ from propfirm.rules.clock import NEW_YORK_17
 POLICY = load_policy()
 DAY = 86_400_000
 FUNDED = 1_791_000_000_000  # 2026-10-03 (UTC), a Saturday
-NOW = FUNDED + 15 * DAY  # 2026-10-18
+NOW = FUNDED + 17 * DAY  # 2026-10-20, past the waiting period (D1 + 14 days)
 D1 = NEW_YORK_17.day_start(FUNDED + 2 * DAY)
 D2 = NEW_YORK_17.day_start(FUNDED + 3 * DAY)
 D3 = NEW_YORK_17.day_start(FUNDED + 4 * DAY)
@@ -154,14 +154,28 @@ def test_the_wallet_and_a_pending_payout() -> None:
 
 
 def test_payouts_on_request_after_the_waiting_period() -> None:
-    early = eligibility(POLICY, funded(), FUNDED + 14 * DAY - 1)
+    opens = NEW_YORK_17.day_start(D1 + 14 * DAY + DAY // 2)  # as FTMO: from the first trade
+    assert opens == D1 + 14 * DAY  # no clock change in between
+    early = eligibility(POLICY, funded(), opens - 1)
     assert {c.name: c.status for c in early.checks}["waiting_period"] == FAIL
-    assert not early.eligible and early.opens_at == FUNDED + 14 * DAY
-    on_time = eligibility(POLICY, funded(), FUNDED + 14 * DAY)
+    assert not early.eligible and early.opens_at == opens
+    on_time = eligibility(POLICY, funded(), opens)
     assert {c.name: c.status for c in on_time.checks}["waiting_period"] == PASS
     assert on_time.eligible  # on request: any day, no pay day to wait for
     detail = {c.name: c.detail for c in on_time.checks}["waiting_period"]
-    assert detail == "from 2026-10-17T04:00:00+00:00 (14 days after funding)"
+    assert detail == "from 2026-10-18T21:00:00+00:00 (14 days after the first trade)"
+    untraded = eligibility(POLICY, funded(trading_day_ids=()), NOW)
+    wait = next(c for c in untraded.checks if c.name == "waiting_period")
+    assert (wait.status, untraded.opens_at) == (FAIL, None)
+    assert wait.detail == "no trade yet; the first payout 14 days after the first trade"
+    before = NEW_YORK_17.day_start(FUNDED - 5 * DAY)  # a day before funding does not count
+    late = eligibility(POLICY, funded(trading_day_ids=(before, D3)), NOW)
+    assert late.opens_at == D3 + 14 * DAY
+    # across the November clock change: still the 17:00 New York boundary
+    autumn = NEW_YORK_17.day_start(1_792_800_000_000)  # 2026-10-24 (New York, EDT)
+    shifted = eligibility(POLICY, funded(trading_day_ids=(autumn,)), NOW)
+    assert shifted.opens_at == NEW_YORK_17.day_start(autumn + 14 * DAY + DAY // 2)
+    assert shifted.opens_at == autumn + 14 * DAY + 3_600_000  # EST: an hour later in UTC
     last = FUNDED + 20 * DAY
     after = funded(last_payout_at=last)
     soon = eligibility(POLICY, after, last + 14 * DAY - 1)

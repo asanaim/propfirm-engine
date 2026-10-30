@@ -486,6 +486,35 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.payout_facts_fixed();
         """,
     ),
+    (
+        7,
+        """
+        CREATE SEQUENCE {s}.ntf_seq;
+        -- security emails (outbox); personal data: insert-only by the code,
+        -- erasable
+        CREATE TABLE {s}.notifications (
+            ntf text PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            kind text NOT NULL CHECK (kind IN ('wallet_changed')),
+            recipient text NOT NULL,
+            subject text NOT NULL,
+            body text NOT NULL,
+            created_at bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.notifications (cif);
+        CREATE TABLE {s}.notification_events (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            ntf text NOT NULL REFERENCES {s}.notifications (ntf) ON DELETE CASCADE,
+            kind text NOT NULL CHECK (kind IN ('sent', 'failed')),
+            ts bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.notification_events (ntf, id);
+        CREATE TRIGGER notification_events_append_only BEFORE UPDATE ON {s}.notification_events
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

@@ -172,10 +172,30 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             assert (await p.call("GET", "/me/wallet")).status_code == 404
             bad = await p.call("POST", "/me/wallet", body={"address": USDT[:-1] + "u"})
             assert (bad.status_code, bad.json()["detail"]["code"]) == (422, "invalid")
+            assert p.notifications is not None
+            assert await p.notifications.store.pending() == []  # nothing changed: no email
             added = await p.call("POST", "/me/wallet", body=body)
             assert added.status_code == 201, added.text
             assert added.json()["wal"] == "WAL00000001"
             assert (await p.call("GET", "/me/wallet")).json()["address"] == USDT
+
+            # the security email: to the registered address, sent by the next round
+            assert p.notifications is not None and p.mailer is not None
+            (queued,) = await p.notifications.store.for_customer("CIF00000001")
+            assert (queued["ntf"], queued["recipient"], queued["events"]) == (
+                "NTF00000001",
+                "u1@example.com",
+                [],
+            )
+            await p.notifications.advance(clock())
+            ((to, subject, text),) = p.mailer.sent
+            assert (to, subject) == ("u1@example.com", "Your payout wallet was added")
+            assert USDT in text and "If you did not make this change" in text
+            (sent,) = await p.notifications.store.for_customer("CIF00000001")
+            assert [e["kind"] for e in sent["events"]] == ["sent"]
+            await p.notifications.advance(clock())  # sent once
+            assert len(p.mailer.sent) == 1
+            assert await p.notifications.store.pending() == []
             cooling = {c["name"]: c["status"] for c in (await view())["checks"]}
             assert (cooling["wallet"], cooling["waiting_period"]) == ("pass", "fail")
             early = await p.call("POST", f"/accounts/{acc}/payouts")
@@ -354,6 +374,11 @@ def test_the_pay_day_check_fails_a_payout_that_changed(
             # a wallet changed after the request
             po, _ = await approved()
             await p.call("POST", "/me/wallet", body={"address": OTHER})
+            assert p.notifications is not None and p.mailer is not None
+            await p.notifications.advance(clock())
+            (_, changed_subject, changed_text) = p.mailer.sent[-1]
+            assert changed_subject == "Your payout wallet was changed"
+            assert f"Previous wallet: {USDT}" in changed_text and OTHER in changed_text
             await p.payouts.advance(clock() + 1)
             changed = await p.payouts.store.payout(po)
             assert changed is not None and changed.status == "failed"
@@ -401,9 +426,15 @@ def test_the_pay_day_check_fails_a_payout_that_changed(
                     f"UPDATE {s}.wallets SET address = 'x'",
                     f"UPDATE {s}.payouts SET debit_cents = 1",
                     f"DELETE FROM {s}.payouts",
+                    f"UPDATE {s}.notification_events SET kind = 'sent'",
                 ):
                     with pytest.raises(asyncpg.RaiseError):
                         await pool.execute(sql)
+                # emails are personal data: erasable, with their send records
+                erased = await pool.execute(
+                    f"DELETE FROM {s}.notifications WHERE cif = 'CIF00000001'"
+                )
+                assert erased == "DELETE 2"
                 await pool.execute(f"UPDATE {s}.payouts SET status = 'paid' WHERE po = $1", po)
             finally:
                 await pool.close()

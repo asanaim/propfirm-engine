@@ -17,7 +17,10 @@ again, debited by the engine, sent, confirmed).
 
 Payouts run only with PROPFIRM_SANDBOX=1 (the sandbox payout provider sends
 nothing) until the NOWPayments payout client is connected (C6); without it,
-the payout endpoints answer 503.
+the payout endpoints answer 503. Security emails (a payout wallet added or
+changed) go out through SMTP when SMTP_HOST and MAIL_FROM are set (with
+SMTP_PORT, SMTP_TLS, SMTP_USERNAME, SMTP_PASSWORD), otherwise through the
+sandbox mailer, which sends nothing; payouts never run without one of them.
 
 Funded onboarding runs with the sandbox identity check under
 PROPFIRM_SANDBOX=1, or with Didit when DIDIT_API_KEY, DIDIT_WORKFLOW_ID and
@@ -47,6 +50,13 @@ from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowScreening
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
+from propfirm.customers.notifications import (
+    Mailer,
+    Notifications,
+    NotificationStore,
+    SandboxMailer,
+    SmtpMailer,
+)
 from propfirm.customers.onboarding_store import OnboardingStore
 from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutStore
@@ -88,7 +98,11 @@ async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> N
 
 
 async def _lifecycle_forever(
-    lifecycle: Lifecycle, onboarding: Onboarding | None, cases: Casework, payouts: Payouts | None
+    lifecycle: Lifecycle,
+    onboarding: Onboarding | None,
+    cases: Casework,
+    payouts: Payouts | None,
+    notifications: Notifications | None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -106,6 +120,11 @@ async def _lifecycle_forever(
                 await payouts.advance(now_ms())  # each payout's next step, recorded first
             except Exception:  # retried next round
                 log.exception("payout round failed")
+        if notifications is not None:
+            try:
+                await notifications.advance(now_ms())  # security emails not sent yet
+            except Exception:  # retried next round
+                log.exception("sending notices failed")
         if onboarding is None:
             continue
         try:
@@ -177,8 +196,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         lifecycle = Lifecycle(progressions, settings, gateway, cases=cases)
         live = LiveReader(client, config.live_prefix)
+        mailer: Mailer | None = None
+        if config.smtp_host:
+            assert config.mail_from is not None
+            mailer = SmtpMailer(
+                config.smtp_host,
+                config.smtp_port,
+                config.mail_from,
+                config.smtp_username,
+                config.smtp_password,
+                config.smtp_tls,
+            )
+        elif config.sandbox:
+            mailer = SandboxMailer()
+        notifications = (
+            Notifications(NotificationStore(pool, config.customer_schema), mailer)
+            if mailer
+            else None
+        )
         payouts = None
-        if config.sandbox:
+        if config.sandbox and notifications is not None:
             payouts = Payouts(
                 payout_store,
                 customers,
@@ -190,7 +227,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 cases=cases,
             )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
-        tasks.append(asyncio.create_task(_lifecycle_forever(lifecycle, onboarding, cases, payouts)))
+        tasks.append(
+            asyncio.create_task(
+                _lifecycle_forever(lifecycle, onboarding, cases, payouts, notifications)
+            )
+        )
         app.state.deps = Deps(
             live=live,
             history=HistoryReader(pool, config.read_schema),

@@ -23,6 +23,7 @@ from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycProvider, SandboxKyc
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
+from propfirm.customers.notifications import Notifications, NotificationStore, SandboxMailer
 from propfirm.customers.onboarding_store import OnboardingStore
 from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutStore
@@ -68,6 +69,8 @@ class Platform:
     onboarding: Onboarding | None = None  # with funded=True
     cases: Casework | None = None
     payouts: Payouts | None = None
+    notifications: Notifications | None = None
+    mailer: SandboxMailer | None = None
 
     async def call(
         self,
@@ -156,6 +159,8 @@ async def platform(
         cases=cases,
     )
     live = LiveReader(client, config.live_prefix)
+    mailer = SandboxMailer()
+    notifications = Notifications(NotificationStore(pool, config.customer_schema), mailer)
     payouts = Payouts(
         PayoutStore(pool, config.customer_schema),
         store,
@@ -223,6 +228,8 @@ async def platform(
             onboarding,
             cases,
             payouts,
+            notifications,
+            mailer,
         )
     finally:
         await stop_engine()
@@ -398,7 +405,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6]
+            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

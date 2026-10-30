@@ -36,7 +36,7 @@ after_minutes = 2
 
 [payouts]
 minimum_cents = 5000           # $50
-first_after_days = 14          # after funding
+first_after_days = 14          # the 14th trading day after the first trade, as FTMO
 # On request, as FTMO (first reward from day 14, then a 14-day cycle; sent
 # 1-2 business days after approval) and FundedNext (paid within 24 hours);
 # replaces the 15th and last day of the month (D17), 30 Oct 2026.
