@@ -27,6 +27,15 @@ def cents_ceil(usd: Fraction) -> int:
     return math.ceil(usd * 100)
 
 
+def share_floor(cents: int, share: Fraction) -> int:
+    """A share of an amount in cents, rounded down to the cent.
+
+    Used for the trader's share of payable profit: a payout never exceeds the
+    share; the firm's share is the rest. [DEFAULT policy]
+    """
+    return math.floor(cents * share)
+
+
 def points_to_price(points: int, digits: int) -> Fraction:
     """Exact price from integer points: points / 10**digits."""
     return Fraction(points, 10**digits)

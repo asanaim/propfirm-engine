@@ -8,7 +8,8 @@ office's carry `staff` and `admin`):
 - signed in, any role: /quotes (Twelve Data licence: display to logged-in
   users only);
 - trader: their own CIF, orders, accounts (an account shows its own
-  target and limits), progressions and funded onboardings; buying; their
+  target and limits, and a funded account its payable profit and payout
+  eligibility), progressions and funded onboardings; buying; their
   identity check, contract and signature; trading their own accounts.
   Someone else's account answers 404, so ids cannot be probed;
 - employee (role `staff`): reads every account, its history and inputs;
@@ -49,6 +50,7 @@ from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, di
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
 from propfirm.customers.onboarding_store import OnboardingRecord, OnboardingStateError
+from propfirm.customers.payouts import Eligibility, FundedAccount, eligibility
 from propfirm.customers.store import (
     AccountRecord,
     AlreadyRegisteredError,
@@ -62,6 +64,7 @@ from propfirm.policy import (
     PolicySource,
     ProductPolicy,
     parse_countries,
+    parse_percent,
     percent_text,
     rule_set_view,
 )
@@ -110,6 +113,10 @@ class Customers(Protocol):
     async def orders_for(self, cif: str) -> list[OrderRecord]: ...
 
     async def order(self, ord_id: str) -> OrderRecord | None: ...
+
+    async def account(self, acc: str) -> AccountRecord | None: ...
+
+    async def cif(self, cif: str) -> CifRecord | None: ...
 
 
 def _today() -> date:
@@ -353,6 +360,28 @@ def _onboarding_refused(exc: OnboardingStateError) -> HTTPException:
     return HTTPException(
         status_code=ONBOARDING_ERRORS[exc.code], detail={"code": exc.code, "message": str(exc)}
     )
+
+
+def eligibility_view(e: Eligibility) -> dict[str, Any]:
+    return {
+        "acc": e.acc,
+        "as_of": e.as_of,
+        "eligible": e.eligible,
+        "basis": e.basis,
+        "measured_cents": e.measured_cents,
+        "baseline_cents": e.baseline_cents,
+        "violations_cents": e.violations_cents,
+        "payable_cents": e.payable_cents,
+        "split_percent": e.split_percent,
+        "trader_share_cents": e.trader_share_cents,
+        "firm_share_cents": e.firm_share_cents,
+        "fee_refund_cents": e.fee_refund_cents,
+        "trader_amount_cents": e.trader_amount_cents,
+        "period_start": e.period_start,
+        "trading_days": e.trading_days,
+        "next_pay_date": e.next_pay_date.isoformat(),
+        "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in e.checks],
+    }
 
 
 def _answer(outcome: Outcome) -> JSONResponse:
@@ -749,6 +778,50 @@ def create_app(
         if found is None:
             raise HTTPException(status_code=404, detail="unknown account")
         return found
+
+    @app.get("/accounts/{account_id}/payout")
+    async def payout(deps: D, me: Me, account_id: Ident) -> dict[str, Any]:
+        """The account's payable profit and every payout eligibility check,
+        now. Readable by its owner and by employees."""
+        await _may_read(deps, me, account_id)
+        record = await deps.customers.account(account_id)
+        live = await deps.live.account(account_id)
+        if record is None or live is None:
+            raise HTTPException(status_code=404, detail="unknown account")
+        policy = await _policy(deps)
+        order = await deps.customers.order(record.ord)
+        cif = await deps.customers.cif(record.cif)
+        assert order is not None and cif is not None
+        try:
+            product = policy.product(record.product_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=409, detail="product not in the policy") from exc
+        tier2 = await deps.onboarding.store.approved_case(cif.cif) if deps.onboarding else None
+        rules = live["rules"]
+        account = FundedAccount(
+            acc=account_id,
+            product=product,
+            stage=rules["stage"],
+            consistency=parse_percent(rules["consistency_percent"] or "", "consistency", True),
+            funded_at=record.created_at,
+            baseline_cents=record.size_cents,
+            fee_paid_cents=order.price_cents,
+            payouts_paid=0,  # payouts come with step 3d
+            last_payout_at=None,
+            status=live["status"],
+            locked=live["locked"],
+            balance_cents=live["balance_cents"],
+            equity_cents=live["equity_cents"],
+            open_positions=len(live["positions"]),
+            pending_orders=len(live["pending_orders"]),
+            trading_day_ids=live.get("trading_day_ids", []),
+            day_pnl=[(d, c) for d, c in live.get("day_pnl", [])],
+            cif_status=cif.status,
+            tier2_approved=tier2 is not None,
+            residence_country=cif.residence_country,
+            document_country=tier2.document_country if tier2 else None,
+        )
+        return eligibility_view(eligibility(policy, account, deps.clock()))
 
     @app.get("/accounts/{account_id}/history")
     async def history(

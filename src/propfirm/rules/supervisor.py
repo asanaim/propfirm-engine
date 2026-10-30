@@ -231,6 +231,16 @@ class RuleSupervisor:
     def trading_days(self, account_id: str) -> int:
         return len(self._state(account_id).trading_days)
 
+    def trading_day_ids(self, account_id: str) -> tuple[int, ...]:
+        """The trading days (their 17:00 New York start, ms UTC) with an
+        opening fill, oldest first."""
+        return tuple(sorted(self._state(account_id).trading_days))
+
+    def day_pnl(self, account_id: str) -> tuple[tuple[int, int], ...]:
+        """Realized P&L per trading day, net of commission: (day id, cents),
+        oldest first (the figures the consistency rule reads)."""
+        return tuple(sorted(self._state(account_id).day_pnl.items()))
+
     def floors(self, account_id: str) -> tuple[int, int]:
         """(daily floor, max floor) in cents."""
         state = self._state(account_id)

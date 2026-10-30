@@ -82,6 +82,7 @@ async def platform(
     funded: bool = False,
     kyc: KycProvider | None = None,
     didit_webhook_secret: str | None = None,
+    clock: Callable[[], int] = now_ms,
 ) -> AsyncIterator[Platform]:
     """`funded`: funded orders wait for funded onboarding (sandbox identity
     check), as the API process runs it; otherwise they open at payment."""
@@ -148,6 +149,7 @@ async def platform(
         sandbox=sandbox,
         country_header="X-Country",
         today=lambda: TODAY,
+        clock=clock,
         wait_s=wait_s,
     )
     api = httpx.AsyncClient(

@@ -73,6 +73,10 @@ class PayoutPolicy:
     first_after_days: int
     pay_days: tuple[str, ...]  # "1".."28" or "last"
     approvals_required: int
+    basis: str = "closed_balance"  # D22/D23: "closed_balance" or "equity" at request
+    flat_required: bool = True  # D23: no open position or pending order at request
+    min_trading_days: int = 0  # D22: trading days in the period
+    maximum_cents: int = 0  # D22: largest trader amount per payout; 0 = none
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +112,7 @@ class ProductPolicy:
         return next((r for r in self.rule_sets if r.stage is stage), None)
 
 
+PAYOUT_BASES = ("closed_balance", "equity")
 _TEMPLATE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 DISCLOSURES = ("simulated", "live")
 
@@ -392,8 +397,16 @@ def _payouts(t: _Table) -> PayoutPolicy:
         first_after_days=t.integer("first_after_days"),
         pay_days=days,
         approvals_required=t.integer("approvals_required", 1),
+        basis=t.text("basis"),
+        flat_required=t.boolean("flat_required"),
+        min_trading_days=t.integer("min_trading_days"),
+        maximum_cents=t.integer("maximum_cents"),
     )
     t.done()
+    if policy.basis not in PAYOUT_BASES:
+        raise PolicyError(f"{t.name('basis')} must be one of {PAYOUT_BASES}")
+    if policy.maximum_cents and policy.maximum_cents < policy.minimum_cents:
+        raise PolicyError(f"{t.name('maximum_cents')} must be 0 or >= minimum_cents")
     return policy
 
 

@@ -202,6 +202,29 @@ Each step is an event in `onboarding_events` (append-only, like
 `contracts`); identity-check data (`kyc_cases`, `kyc_results`) is never
 edited by the code but stays erasable.
 
+## Payable profit and payout eligibility
+
+`GET /accounts/{acc}/payout` (the owner, or an employee) shows a funded
+account's payable profit and every eligibility check, at that moment:
+
+- payable profit P = X − B − V, never below 0: X the closed balance (or the
+  equity, `payouts.basis`), B the baseline (the initial capital; a payout
+  never moves it), V profit removed for violations (none yet);
+- the trader's share s·P rounded down to the cent (s the product's split),
+  the firm's share the rest; a fee refund (1-Step: with the 3rd payout) on
+  its own line; `payouts.maximum_cents` caps the trader's amount;
+- checks: funded and active; 14 days since funding for the first payout;
+  trading days in the period; the account's own consistency rule over the
+  period; the $50 minimum; no open position or pending order
+  (`payouts.flat_required`); an approved Tier 2 check and a customer not
+  blocked; the country gate (when on). Open cases (no case system yet)
+  and the payout wallet (at request, step 3d) are shown as not decided
+  here;
+- the next pay day (the 15th or the last day of the month, UTC dates).
+
+The open decisions this reads (D22, D23: basis, flat rule, trading days,
+maximum) are set in `[payouts]` of the policy as starting values.
+
 ## Conventions
 
 See `CLAUDE.md`. In short: money is integer cents, prices are integer
@@ -225,7 +248,7 @@ or rules uses floating point.
 - [ ] Step 3: lifecycle Stage 1 → Stage 2 → Funded, payouts
   - [x] 3a: stage progression (next evaluation account, funded review)
   - [x] 3b: funded onboarding (Tier 2 verification, contract, signature)
-  - [ ] 3c: payable profit and payout eligibility
+  - [x] 3c: payable profit and payout eligibility
   - [ ] 3d: payout processing (two-person approval)
 - [ ] Step 4: trader portal
 - [ ] Step 5: back office

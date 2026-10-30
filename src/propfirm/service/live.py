@@ -52,6 +52,8 @@ def account_view(machine: Machine, account_id: str) -> dict[str, Any]:
         "target_balance_cents": sup.target(account_id),  # None: no target (funded)
         "rules": rule_set_view(sup.rule_set(account_id)),  # this account's own version
         "trading_days": sup.trading_days(account_id),
+        "trading_day_ids": list(sup.trading_day_ids(account_id)),
+        "day_pnl": [[day, cents] for day, cents in sup.day_pnl(account_id)],
         "positions": view(engine.positions(account_id)),
         "pending_orders": view(engine.pending_orders(account_id)),
         "engine_ts": engine.now,
