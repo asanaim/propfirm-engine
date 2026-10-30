@@ -55,6 +55,36 @@ stand-ins (no money moves). Test users: `trader1@example.com` /
 `config/keycloak/README.md`. `docker compose --profile platform down` stops
 them; add `-v` to delete the journal and start over.
 
+## Trader portal (P2 step 4)
+
+`portal/`: React 19.3.1, Vite 8.3.4 and TypeScript 6.0 (strict). Node 22.
+
+```
+cd portal
+npm ci
+npm run dev          # http://localhost:5173, with the platform running
+npm test             # unit tests (Vitest, jsdom)
+npm run typecheck && npm run lint && npm run build
+```
+
+- Login: Keycloak, Authorization Code with PKCE (OAuth 2.0 for
+  Browser-Based Apps); tokens stay in memory, a reload signs in again
+  silently through the Keycloak session. Two-factor authentication
+  (authenticator app) is optional at login, as at FundedNext, and required
+  with a fresh code for wallet changes and payouts: when the API answers
+  RFC 9470 `insufficient_user_authentication`, the portal sends the trader
+  to sign in again, or to set up an authenticator.
+- Pages: overview (registration on the first visit), challenges (the
+  catalogue and checkout; sandbox payment under `PROPFIRM_SANDBOX=1`),
+  accounts and orders, security.
+- The portal calls the API under `/api` on its own origin: Vite forwards it
+  in development (`PROPFIRM_API_URL`, default http://127.0.0.1:8000), the
+  web server in production; no CORS.
+- Design (D44): calm, one accent colour, light and dark themes, Inter (SIL
+  OFL) and Lucide icons (ISC); no platform-vendor fonts, icons or names.
+  WCAG 2.2 AA: the colour tokens are checked by a contrast test; every page
+  was checked with axe-core in both themes.
+
 ## Who sees what
 
 | View | Role | Sees and does |
@@ -275,6 +305,10 @@ or rules uses floating point.
   - [x] 3c: payable profit and payout eligibility
   - [ ] 3d: payout processing (two-person approval)
 - [ ] Step 4: trader portal
+  - [ ] 4a: foundation, login (PKCE, optional 2FA, step-up), registration, checkout, accounts
+  - [ ] 4b: account dashboard, live prices, chart
+  - [ ] 4c: order ticket, positions, history, rulebook, news calendar
+  - [ ] 4d: funded onboarding, wallet, payouts
 - [ ] Step 5: back office
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)
 - [ ] Step 7: staging, backups and restore drill, security scans

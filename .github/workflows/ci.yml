@@ -58,3 +58,21 @@ jobs:
           docker logs keycloak
           exit 1
       - run: uv run --frozen pytest
+
+  portal:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: portal
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.23.4"
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
