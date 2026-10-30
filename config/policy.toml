@@ -37,7 +37,10 @@ after_minutes = 2
 [payouts]
 minimum_cents = 5000           # $50
 first_after_days = 14          # after funding
-pay_days = ["15", "last"]      # days of the month
+# On request, as FTMO (first reward from day 14, then a 14-day cycle; sent
+# 1-2 business days after approval) and FundedNext (paid within 24 hours);
+# replaces the 15th and last day of the month (D17), 30 Oct 2026.
+interval_days = 14             # a later payout no sooner than this after the last
 approvals_required = 2         # people who must approve each payout
 # D22, D23, confirmed 30 Oct 2026. FTMO (reward on request 14 days from the
 # first trading day; account in profit with no open positions or pending
@@ -48,7 +51,7 @@ flat_required = true           # no open position or pending order when requesti
 min_trading_days = 0           # none, as FTMO and FundedNext
 maximum_cents = 0              # no maximum, as FTMO and FundedNext
 # Payout processing (M19), starting values [DEFAULT]:
-trading_during_payout = "paused"  # D23: no new orders from request to debit (or denial)
+trading_during_payout = "paused"  # D23: no new orders from request to approval (the debit)
 require_mfa = true             # M04: the login must have used MFA to change the wallet or ask
 # No waiting period on a new or changed payout wallet, as FTMO, FundedNext
 # and The5ers (checked 30 Oct 2026: the wallet is given with the request;
@@ -157,7 +160,7 @@ crypto = "0.0525"
 # M18). Text in config/contracts/<template>.txt. Until firm_name (C14) and
 # governing_law (counsel) are set, a contract is issued only in the sandbox,
 # marked DRAFT.
-template = "funded-agreement-v1"
+template = "funded-agreement-v2"
 firm_name = ""
 governing_law = ""
 account_disclosure = "simulated"  # D1: "simulated" or "live"

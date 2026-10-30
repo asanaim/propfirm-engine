@@ -220,11 +220,6 @@ def _usd(cents: int) -> str:
     return f"{cents // 100:,}.{cents % 100:02d}"
 
 
-def _days(pay_days: tuple[str, ...]) -> str:
-    named = ["the last day" if d == "last" else d for d in pay_days]
-    return named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1]
-
-
 DISCLOSURE = {
     "simulated": (
         "All trading on this account is simulated: orders are not sent to any "
@@ -277,7 +272,7 @@ def render_contract(
         "disclosure": DISCLOSURE[terms.account_disclosure],
         "split_percent": percent_text(product.profit_split),
         "first_after_days": str(payouts.first_after_days),
-        "pay_days": _days(payouts.pay_days),
+        "interval_days": str(payouts.interval_days),
         "minimum_usd": _usd(payouts.minimum_cents),
         "approvals": str(payouts.approvals_required),
         "review_months": str(scaling.review_months),

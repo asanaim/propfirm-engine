@@ -3,7 +3,6 @@ account, through the API, against PostgreSQL, Valkey and a running engine."""
 
 import asyncio
 from dataclasses import replace
-from datetime import UTC, date, datetime
 from typing import Any
 
 import asyncpg
@@ -124,11 +123,6 @@ def instant_without_consistency() -> Policy:
     return replace(policy, products=products)
 
 
-def pay_day_ms(pay_date: str) -> int:
-    day = date.fromisoformat(pay_date)
-    return int(datetime(day.year, day.month, day.day, 1, tzinfo=UTC).timestamp() * 1000)
-
-
 async def staff(p: Platform, method: str, url: str, who: str, body: object = None) -> Any:
     return await p.call(method, url, who, body, STAFF)
 
@@ -208,7 +202,7 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
                 "requested",
                 profit,
             )
-            assert first["pay_date"] == ready["next_pay_date"]
+            assert ready["opens_at"] <= clock()  # on request: no pay day to wait for
             pending = {c["name"]: c["status"] for c in (await view())["checks"]}
             assert pending["no_pending_payout"] == "fail"
             again = await p.call("POST", url)
@@ -236,6 +230,8 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             assert (await p.call("POST", approve, "u1", reason)).status_code == 403  # a trader
             one = (await staff(p, "POST", approve, "staff-1", reason)).json()
             assert (one["status"], one["approvals"]) == ("requested", 1)
+            await p.payouts.advance(clock())  # nothing is taken on one approval
+            assert (await p.payouts.store.payout(po)).status == "requested"  # type: ignore[union-attr]
             twice = await staff(p, "POST", approve, "staff-1", reason)
             assert (twice.status_code, twice.json()["detail"]["code"]) == (409, "not_allowed")
             two = (await staff(p, "POST", approve, "staff-2", reason)).json()
@@ -246,13 +242,8 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             other = await p.call("POST", f"/me/payouts/{po}/cancel", "u2")
             assert (other.status_code, other.json()["detail"]["code"]) == (404, "unknown")
 
-            # nothing happens before the pay day
-            record = (await staff(p, "GET", f"/staff/payouts/{po}", "staff-3")).json()
-            pay_ts = max(pay_day_ms(record["pay_date"]), clock() + 1)
-            await p.payouts.advance(pay_ts - 2 * DAY)
-            assert (await p.payouts.store.payout(po)).status == "approved"  # type: ignore[union-attr]
-
-            # on the pay day: checked again, debited, sent, paid
+            # once approved: checked again, debited, sent, paid in the next round
+            pay_ts = clock() + 1
             await p.payouts.advance(pay_ts)
             done = await p.payouts.store.payout(po)
             assert done is not None and done.status == "paid", done
@@ -290,6 +281,9 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
                 False,
             )
             assert after["violations_cents"] == 0  # taken out with the payout
+            cycle = next(c for c in after["checks"] if c["name"] == "waiting_period")
+            assert (cycle["status"], after["opens_at"]) == ("fail", pay_ts + 14 * DAY)
+            assert cycle["detail"].endswith("(14 days after the last payout)")
             await p.payouts.advance(pay_ts + 1)  # nothing more to do
             assert (await p.payouts.store.payout(po)).status == "paid"  # type: ignore[union-attr]
             mine = (await p.call("GET", url)).json()
@@ -341,7 +335,7 @@ def test_the_pay_day_check_fails_a_payout_that_changed(
                     await staff(p, "POST", f"/staff/payouts/{po}/approve", who, reason)
                 record = await p.payouts.store.payout(po)  # type: ignore[union-attr]
                 assert record is not None and record.status == "approved"
-                return po, max(pay_day_ms(record.pay_date.isoformat()), clock() + 1)
+                return po, clock() + 1
 
             # a case opened after approval: held, nothing taken
             po, pay_ts = await approved()
@@ -358,9 +352,9 @@ def test_the_pay_day_check_fails_a_payout_that_changed(
             await staff(p, "POST", f"{cas}/decide", "staff-1", cleared)
 
             # a wallet changed after the request
-            po, pay_ts = await approved()
+            po, _ = await approved()
             await p.call("POST", "/me/wallet", body={"address": OTHER})
-            await p.payouts.advance(pay_ts)
+            await p.payouts.advance(clock() + 1)
             changed = await p.payouts.store.payout(po)
             assert changed is not None and changed.status == "failed"
             assert changed.failure == "the payout wallet changed since the request"
@@ -427,7 +421,7 @@ async def _payable(p: Platform, acc: str) -> Any:
 
 async def ready_to_pay(p: Platform, offset: dict[str, int], clock: Any) -> tuple[str, str, int]:
     """An Instant account in profit, a wallet, a payout approved twice;
-    returns (ACC, PO, a time on its pay day)."""
+    returns (ACC, PO, a time after the approval)."""
     acc = await funded_instant(p)
     await eventually(lambda: _payable(p, acc))
     await p.call("POST", "/me/wallet", body={"address": USDT})
@@ -440,7 +434,7 @@ async def ready_to_pay(p: Platform, offset: dict[str, int], clock: Any) -> tuple
     assert p.payouts is not None
     record = await p.payouts.store.payout(po)
     assert record is not None and record.status == "approved"
-    return acc, po, max(pay_day_ms(record.pay_date.isoformat()), clock() + 1)
+    return acc, po, clock() + 1
 
 
 class SlowProvider:

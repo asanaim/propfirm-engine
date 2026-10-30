@@ -442,7 +442,6 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ord text NOT NULL REFERENCES {s}.orders (ord),
             wal text NOT NULL REFERENCES {s}.wallets (wal),
             requested_at bigint NOT NULL,
-            pay_date date NOT NULL,
             trader_amount_cents bigint NOT NULL CHECK (trader_amount_cents > 0),
             debit_cents bigint NOT NULL CHECK (debit_cents > 0),
             status text NOT NULL CHECK (status IN ('requested', 'approved', 'debited', 'sent',
@@ -455,7 +454,7 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         -- one payout in progress per account
         CREATE UNIQUE INDEX ON {s}.payouts (acc) WHERE status IN ('requested', 'approved');
-        CREATE INDEX ON {s}.payouts (status, pay_date);
+        CREATE INDEX ON {s}.payouts (status);
         CREATE INDEX ON {s}.payouts (ord);
         CREATE TABLE {s}.payout_events (
             id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -474,10 +473,10 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             IF TG_OP = 'DELETE' THEN
                 RAISE EXCEPTION 'payouts are append-only';
             END IF;
-            IF (NEW.po, NEW.acc, NEW.cif, NEW.ord, NEW.wal, NEW.requested_at, NEW.pay_date,
+            IF (NEW.po, NEW.acc, NEW.cif, NEW.ord, NEW.wal, NEW.requested_at,
                 NEW.trader_amount_cents, NEW.debit_cents)
                IS DISTINCT FROM
-               (OLD.po, OLD.acc, OLD.cif, OLD.ord, OLD.wal, OLD.requested_at, OLD.pay_date,
+               (OLD.po, OLD.acc, OLD.cif, OLD.ord, OLD.wal, OLD.requested_at,
                 OLD.trader_amount_cents, OLD.debit_cents) THEN
                 RAISE EXCEPTION 'payout facts never change';
             END IF;

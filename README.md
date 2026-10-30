@@ -217,14 +217,16 @@ account's payable profit and every eligibility check, at that moment:
   included; it may not be set below a refundable fee); `debit_cents`, what
   leaves the account: P + V (capped: G + V, G = the share paid ÷ s rounded
   up to the cent, the rest of P stays payable);
-- checks: funded and active; 14 days since funding for the first payout;
+- checks: funded and active; 14 days since funding for the first payout,
+  14 days since the last for a later one (`interval_days`);
   trading days in the period; the account's own consistency rule over the
   period; the $50 minimum; no open position or pending order
   (`payouts.flat_required`); an approved Tier 2 check and a customer not
   blocked; the country gate (when on); no case under review (shown to the
   trader only as "held for review"); no payout of the account in progress;
   a payout wallet (past its waiting period, if one is set);
-- the next pay day (the 15th or the last day of the month, UTC dates).
+- `opens_at`: when a payout may be requested (on request, as FTMO and
+  FundedNext; no fixed pay days).
 
 The payout settings (D22, D23) are in `[payouts]` of the policy: closed
 balance, flat at request, and, as FTMO and FundedNext, no minimum trading
@@ -239,16 +241,17 @@ USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
    usable at once, as at FTMO, FundedNext and The5ers
    (`wallet_cooling_off_hours` = 0; a wait can be set).
 2. Request: `POST /accounts/{acc}/payouts`, when eligible. The request
-   keeps the eligibility it was based on, the trader's amount, the debit
-   and the next pay day. One payout in progress per account; until it is
-   debited (or denied, cancelled, failed) the account takes no new orders
+   keeps the eligibility it was based on, the trader's amount and the
+   debit. One payout in progress per account; until it is debited (or
+   denied, cancelled, failed) the account takes no new orders
    (`trading_during_payout = "paused"`, 409 `payout_pending`). The trader
    may cancel until it is fully approved (`POST /me/payouts/{po}/cancel`).
 3. Approval: `POST /staff/payouts/{po}/approve` by `approvals_required` (2)
    different employees, never on their own customer record; one `deny`
    ends it. `GET /staff/payouts`, `GET /staff/payouts/{po}` (wallet and
    history).
-4. Pay day (the API's background round): eligibility is computed again;
+4. Once approved (the API's background round, every second): eligibility
+   is computed again;
    anything changed (a check failing, the amount, the wallet) fails the
    payout and nothing is taken. Otherwise the engine takes `debit_cents`
    out of the account (input `DebitPayout`, event `PayoutDebited`, ledger
@@ -265,8 +268,9 @@ USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
 Changing the wallet and requesting a payout need a login that used a
 second factor (`require_mfa`; the access token's `amr` claim, which the
 Keycloak realm must be set to include). `payout_events` and `wallets` are
-append-only; the payout's facts (amount, debit, wallet, pay day) never
-change.
+append-only; the payout's facts (amount, debit, wallet) never change. The
+funded agreement states these terms (`funded-agreement-v2`; contracts
+signed on v1 keep their text).
 
 ## Integrity, fraud and compliance cases
 

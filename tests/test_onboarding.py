@@ -170,7 +170,7 @@ def contract(policy: Any = None) -> Any:
 
 def test_the_contract_states_the_terms_in_force() -> None:
     text = contract()
-    assert text.template == "funded-agreement-v1" and text.draft
+    assert text.template == "funded-agreement-v2" and text.draft
     assert text.sha256 == hashlib.sha256(text.body.encode()).hexdigest()
     body = text.body
     assert "DRAFT" in body and "[NOT SET" in body  # firm name and law not decided
@@ -182,7 +182,8 @@ def test_the_contract_states_the_terms_in_force() -> None:
         "daily loss limit 3 %",
         "receives 80 % of the profit",
         "14 days after the account opens",
-        "day 15 and the last day of each month",
+        "each later one 14 days after the previous payout",
+        "once approved, it is taken from the account and sent to the Trader's own wallet",
         "minimum payout is 50.00 (USD)",
         "approval of 2 people",
         "up to 400,000.00",

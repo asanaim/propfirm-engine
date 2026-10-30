@@ -8,7 +8,6 @@ progress per account.
 
 import json
 from dataclasses import dataclass
-from datetime import date
 from typing import Any
 
 import asyncpg
@@ -42,7 +41,6 @@ class PayoutRecord:
     ord: str
     wal: str
     requested_at: int
-    pay_date: date
     trader_amount_cents: int
     debit_cents: int
     status: str
@@ -119,7 +117,6 @@ class PayoutStore:
         cif: str,
         ord_id: str,
         wal: str,
-        pay_date: date,
         trader_amount: int,
         debit: int,
         ts: int,
@@ -137,16 +134,15 @@ class PayoutStore:
             po = f"PO{number:08d}"
             try:
                 await conn.execute(
-                    f"INSERT INTO {s}.payouts (po, acc, cif, ord, wal, requested_at, pay_date, "
+                    f"INSERT INTO {s}.payouts (po, acc, cif, ord, wal, requested_at, "
                     f"trader_amount_cents, debit_cents, status) "
-                    f"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'requested')",
+                    f"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested')",
                     po,
                     acc,
                     cif,
                     ord_id,
                     wal,
                     ts,
-                    pay_date,
                     trader_amount,
                     debit,
                 )
@@ -207,12 +203,10 @@ class PayoutStore:
         )
         return found
 
-    async def due(self, today: date) -> list[PayoutRecord]:
-        """Approved payouts whose pay day has come."""
+    async def due(self) -> list[PayoutRecord]:
+        """Approved payouts: taken from the account next."""
         rows = await self._pool.fetch(
-            f"SELECT * FROM {self._s}.payouts WHERE status = 'approved' AND pay_date <= $1 "
-            f"ORDER BY po",
-            today,
+            f"SELECT * FROM {self._s}.payouts WHERE status = 'approved' ORDER BY po"
         )
         return [_record(r) for r in rows]
 

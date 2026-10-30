@@ -12,7 +12,7 @@ second, turns new stage passes into progressions, opens the next
 evaluation accounts, and moves funded onboardings on (starting them for
 approved funded reviews, reading identity-check outcomes no webhook
 brought, issuing contracts and opening signed funded accounts), carries out
-confirmed case decisions, and moves payouts on (on the pay day: checked
+confirmed case decisions, and moves payouts on (once approved: checked
 again, debited by the engine, sent, confirmed).
 
 Payouts run only with PROPFIRM_SANDBOX=1 (the sandbox payout provider sends

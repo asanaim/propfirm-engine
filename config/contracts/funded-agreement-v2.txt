@@ -1,0 +1,44 @@
+FUNDED TRADER AGREEMENT
+Template funded-agreement-v2. $draft_notice
+
+Agreement $contract_id, issued $issued_utc (UTC).
+
+1. Parties
+   $firm_name ("the Firm"), and
+   $trader_name, customer $cif, identity verified under case $kyc_case
+   ("the Trader").
+
+2. The account
+   Account $acc, product $product_name, allocation $allocation_usd (USD).
+   Rule set $rsv_id: maximum loss $max_loss_percent % ($max_loss_kind),
+   daily loss limit $daily_loss_percent %, consistency rule $consistency.
+   The account's rules are those of rule set $rsv_id; they do not change
+   while the account is open.
+
+3. Nature of the account
+   $disclosure
+
+4. Profit split and payouts
+   The Trader receives $split_percent % of the profit made on the account
+   and payable under these terms. The first payout may be requested
+   $first_after_days days after the account opens, and each later one
+   $interval_days days after the previous payout; the minimum payout is
+   $minimum_usd (USD). Every payout needs the approval of $approvals people
+   at the Firm; once approved, it is taken from the account and sent to the
+   Trader's own wallet, whose address the Trader gives and is responsible
+   for. A breach of the account's rules ends the account; profit is never
+   paid twice.
+
+5. Scaling
+   After $review_months months, with at least $min_net_profit_percent % net
+   profit and $min_paid_payouts paid payouts, the allocation may grow by
+   $scaling_step_percent % of the initial allocation, up to $max_allocation_usd
+   (USD) per trader.
+
+6. Identity and signature
+   The Trader signs electronically as the person verified under case
+   $kyc_case. The Firm records the signature with the text's SHA-256
+   digest, the time, the signing login, network address and device.
+
+7. Governing law
+   $governing_law

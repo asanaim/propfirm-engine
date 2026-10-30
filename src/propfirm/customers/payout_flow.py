@@ -8,13 +8,14 @@ that used MFA may set it (policy). How ownership is proven beyond that is
 open (D31).
 
 A payout (PO00000001), from request to money sent:
-1. requested by the trader, with the eligibility snapshot: the trader's
-   amount, what leaves the account (P + V), the next pay day; the account
-   takes no new orders meanwhile when trading is paused (D23);
+1. requested by the trader when eligible (on request, as FTMO and
+   FundedNext), with the eligibility snapshot: the trader's amount and what
+   leaves the account (P + V); the account takes no new orders until the
+   debit when trading is paused (D23);
 2. approved by `approvals_required` different employees (never their own),
    or denied by one (until the debit is attempted); the trader may cancel
    before approval is complete;
-3. on the pay day, eligibility is computed again: anything changed and the
+3. once approved, eligibility is computed again: anything changed and the
    payout fails (the trader may ask again);
 4. the engine takes the amount out of the account (DebitPayout; one per
    payout, ever);

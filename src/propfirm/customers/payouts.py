@@ -18,7 +18,7 @@ separate line. A payout maximum, when set, caps the trader's amount.
 Eligibility, all of which must hold (M18):
 - funded: a funded account, active (not breached, passed or locked);
 - waiting period: the first payout no sooner than `first_after_days` after
-  funding (later payouts: one per pay day);
+  funding, a later one no sooner than `interval_days` after the last;
 - trading days in the period (`min_trading_days`, D22);
 - consistency (D19): when the account's rule set has the rule, its best
   day in the period is at most that share of the period's realized profit;
@@ -40,15 +40,14 @@ The period runs from funding, or from the last payout; trading days and
 daily P&L count whole trading days (17:00 New York), so the trading day of
 the last payout counts in the new period [DEFAULT].
 
-Payouts are paid on the policy's pay days (UTC dates): the next one on or
-after the end of the waiting period is shown.
+Payouts are paid on request (as FTMO and FundedNext): `opens_at` is the
+first moment one may be requested.
 """
 
-import calendar
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from fractions import Fraction
 from typing import Any
 
@@ -120,7 +119,7 @@ class Eligibility:
     debit_cents: int  # what leaves the account: the gross paid on (G, or P) plus V
     period_start: int  # ms UTC
     trading_days: int  # in the period
-    next_pay_date: date
+    opens_at: int  # ms UTC: the end of the waiting period
     checks: tuple[Check, ...]
 
     @property
@@ -128,20 +127,8 @@ class Eligibility:
         return all(c.status != FAIL for c in self.checks)
 
 
-def pay_dates(start: date, pay_days: Sequence[str]) -> date:
-    """The first pay day on or after `start` ("last": the month's last day)."""
-    day = start
-    for _ in range(62):
-        last = calendar.monthrange(day.year, day.month)[1]
-        names = {str(day.day)} | ({"last"} if day.day == last else set())
-        if names & set(pay_days):
-            return day
-        day += timedelta(days=1)
-    raise ValueError(f"no pay day in {pay_days!r}")
-
-
-def _utc_date(ts: int) -> date:
-    return datetime.fromtimestamp(ts / 1000, UTC).date()
+def _utc_iso(ts: int) -> str:
+    return datetime.fromtimestamp(ts / 1000, UTC).isoformat()
 
 
 def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility:
@@ -175,17 +162,11 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
     period_start = account.last_payout_at or account.funded_at
     if account.last_payout_at is None:
         opens = account.funded_at + payouts.first_after_days * _DAY_MS
-        check(
-            "waiting_period",
-            now >= opens,
-            f"first payout from {_utc_date(opens).isoformat()} "
-            f"({payouts.first_after_days} days after funding)",
-        )
-        earliest = max(_utc_date(opens), _utc_date(now))
+        rule = f"{payouts.first_after_days} days after funding"
     else:
-        earliest = max(_utc_date(account.last_payout_at) + timedelta(days=1), _utc_date(now))
-        check("waiting_period", True, "one payout per pay day")
-    next_pay = pay_dates(earliest, payouts.pay_days)
+        opens = account.last_payout_at + payouts.interval_days * _DAY_MS
+        rule = f"{payouts.interval_days} days after the last payout"
+    check("waiting_period", now >= opens, f"from {_utc_iso(opens)} ({rule})")
 
     first_day = NEW_YORK_17.day_start(period_start)
     days = [d for d in account.trading_day_ids if d >= first_day]
@@ -241,7 +222,7 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
         check(
             "wallet",
             now >= usable,
-            f"usable from {datetime.fromtimestamp(usable / 1000, UTC).isoformat()} "
+            f"usable from {_utc_iso(usable)} "
             f"({payouts.wallet_cooling_off_hours} h after it was added)",
         )
 
@@ -261,7 +242,7 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
         debit_cents=debit,
         period_start=period_start,
         trading_days=len(days),
-        next_pay_date=next_pay,
+        opens_at=opens,
         checks=tuple(checks),
     )
 
@@ -286,6 +267,6 @@ def eligibility_json(e: Eligibility) -> dict[str, Any]:
         "debit_cents": e.debit_cents,
         "period_start": e.period_start,
         "trading_days": e.trading_days,
-        "next_pay_date": e.next_pay_date.isoformat(),
+        "opens_at": e.opens_at,
         "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in e.checks],
     }

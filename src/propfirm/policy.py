@@ -71,7 +71,7 @@ class NewsPolicy:
 class PayoutPolicy:
     minimum_cents: int
     first_after_days: int
-    pay_days: tuple[str, ...]  # "1".."28" or "last"
+    interval_days: int  # a later payout no sooner than this after the last one
     approvals_required: int
     basis: str = "closed_balance"  # D22/D23: "closed_balance" or "equity" at request
     flat_required: bool = True  # D23: no open position or pending order at request
@@ -416,16 +416,10 @@ def _news(t: _Table) -> NewsPolicy:
 
 
 def _payouts(t: _Table) -> PayoutPolicy:
-    days = t.texts("pay_days")
-    for day in days:
-        if day != "last" and not (day.isdigit() and 1 <= int(day) <= 28):
-            raise PolicyError(f'{t.name("pay_days")}: {day!r} must be 1 to 28 or "last"')
-    if not days or len(set(days)) != len(days):
-        raise PolicyError(f"{t.name('pay_days')} must list distinct days")
     policy = PayoutPolicy(
         minimum_cents=t.integer("minimum_cents", 1),
         first_after_days=t.integer("first_after_days"),
-        pay_days=days,
+        interval_days=t.integer("interval_days", 1),
         approvals_required=t.integer("approvals_required", 1),
         basis=t.text("basis"),
         flat_required=t.boolean("flat_required"),

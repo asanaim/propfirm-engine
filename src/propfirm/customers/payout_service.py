@@ -1,8 +1,8 @@
-"""Payouts, the service: wallets, requests, approvals, and the pay-day run
+"""Payouts, the service: wallets, requests, approvals, and the payout run
 (the process is in `customers.payout_flow`).
 
-`advance(ts)` runs every round: approved payouts whose pay day has come are
-checked again and debited by the engine (DebitPayout, refused a second time
+`advance(ts)` runs every round: approved payouts are checked again and
+debited by the engine (DebitPayout, refused a second time
 for the same PO, so a retry after a crash or a lost answer never takes the
 money twice); debited payouts are sent by the payout provider (idempotent
 on the PO); sent payouts are polled until the provider confirms them.
@@ -10,7 +10,6 @@ on the PO); sent payouts are polled until the provider confirms them.
 
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from propfirm.customers.casework import Casework, Submitter
@@ -165,7 +164,6 @@ class Payouts:
             cif.cif,
             record.ord,
             wallet.wal,
-            e.next_pay_date,
             e.trader_amount_cents,
             e.debit_cents,
             ts,
@@ -189,13 +187,12 @@ class Payouts:
     async def deny(self, po: str, staff: str, reason: str, ts: int) -> PayoutRecord:
         return await self._store.decide(po, "denied", staff, ts, {"reason": reason})
 
-    # --- the pay-day run ------------------------------------------------------------
+    # --- the payout run -------------------------------------------------------------
 
     async def advance(self, ts: int) -> None:
         """Move each payout one step on; a payout debited in this round is
         sent in the same round (each step is recorded before the next)."""
-        today = datetime.fromtimestamp(ts / 1000, UTC).date()
-        await self._each(await self._store.due(today), self._debit, ts)
+        await self._each(await self._store.due(), self._debit, ts)
         await self._each(await self._store.payouts(status="debited"), self._send, ts)
         await self._each(await self._store.payouts(status="sent"), self._confirm, ts)
 

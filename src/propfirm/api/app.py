@@ -418,7 +418,6 @@ def payout_view(p: PayoutRecord) -> dict[str, Any]:
         "cif": p.cif,
         "wal": p.wal,
         "requested_at": p.requested_at,
-        "pay_date": p.pay_date.isoformat(),
         "trader_amount_cents": p.trader_amount_cents,
         "debit_cents": p.debit_cents,
         "status": p.status,

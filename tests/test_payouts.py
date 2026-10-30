@@ -1,13 +1,12 @@
 """Payable profit and payout eligibility (M18), without a database."""
 
 from dataclasses import replace
-from datetime import date
 from fractions import Fraction
 from typing import Any
 
 import pytest
 
-from propfirm.customers.payouts import FAIL, PASS, FundedAccount, eligibility, pay_dates
+from propfirm.customers.payouts import FAIL, PASS, FundedAccount, eligibility
 from propfirm.money import share_floor
 from propfirm.policy import DEFAULT_POLICY, AccessPolicy, PolicyError, load_policy, parse_policy
 from propfirm.rules.clock import NEW_YORK_17
@@ -154,24 +153,25 @@ def test_the_wallet_and_a_pending_payout() -> None:
     assert [n for n, status in found.items() if status == FAIL] == ["no_pending_payout"]
 
 
-def test_the_waiting_period_and_the_next_pay_day() -> None:
-    early = eligibility(POLICY, funded(), FUNDED + 13 * DAY)
+def test_payouts_on_request_after_the_waiting_period() -> None:
+    early = eligibility(POLICY, funded(), FUNDED + 14 * DAY - 1)
     assert {c.name: c.status for c in early.checks}["waiting_period"] == FAIL
-    assert not early.eligible
-    assert early.next_pay_date == date(2026, 10, 31)  # 14 days -> 17 Oct; then the last day
+    assert not early.eligible and early.opens_at == FUNDED + 14 * DAY
     on_time = eligibility(POLICY, funded(), FUNDED + 14 * DAY)
     assert {c.name: c.status for c in on_time.checks}["waiting_period"] == PASS
-    later = eligibility(POLICY, funded(), FUNDED + 40 * DAY)  # 12 Nov
-    assert later.next_pay_date == date(2026, 11, 15)
-
-
-def test_pay_days() -> None:
-    days = ("15", "last")
-    assert pay_dates(date(2026, 2, 16), days) == date(2026, 2, 28)
-    assert pay_dates(date(2028, 2, 16), days) == date(2028, 2, 29)  # leap year
-    assert pay_dates(date(2026, 3, 1), days) == date(2026, 3, 15)
-    assert pay_dates(date(2026, 3, 15), days) == date(2026, 3, 15)
-    assert pay_dates(date(2026, 12, 31), ("1",)) == date(2027, 1, 1)
+    assert on_time.eligible  # on request: any day, no pay day to wait for
+    detail = {c.name: c.detail for c in on_time.checks}["waiting_period"]
+    assert detail == "from 2026-10-17T04:00:00+00:00 (14 days after funding)"
+    last = FUNDED + 20 * DAY
+    after = funded(last_payout_at=last)
+    soon = eligibility(POLICY, after, last + 14 * DAY - 1)
+    assert {c.name: c.status for c in soon.checks}["waiting_period"] == FAIL
+    assert soon.opens_at == last + 14 * DAY
+    cycle = eligibility(POLICY, after, last + 14 * DAY)
+    found = {c.name: (c.status, c.detail) for c in cycle.checks}["waiting_period"]
+    assert found[0] == PASS and found[1].endswith("(14 days after the last payout)")
+    weekly = replace(POLICY, payouts=replace(POLICY.payouts, interval_days=7))
+    assert eligibility(weekly, after, last + 7 * DAY).opens_at == last + 7 * DAY
 
 
 @pytest.mark.parametrize(
