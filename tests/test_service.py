@@ -17,6 +17,8 @@ from propfirm.journal.inputs import (
     Input,
     ModifyStops,
     PlaceOrder,
+    PlaceTrailingEntry,
+    SetTrailingStop,
 )
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import FixedPolicy, load_policy
@@ -243,6 +245,46 @@ def test_close_and_stops() -> None:
         ClosePosition("A", "p1", NOW, None),
         ModifyStops("A", "p1", 1, None, NOW),
     ]
+
+
+def test_trailing_entry_and_trailing_stop_become_inputs() -> None:
+    g = FakeGateway()
+    body = {"symbol": "EUR/USD", "side": "sell", "volume": 10, "distance": 150, "step": 5}
+    assert call(g, "POST", "/accounts/A/trailing-orders", body).status_code == 200
+    call(g, "POST", "/accounts/A/trailing-orders", {**body, "order_id": "mine-2"})
+    stop = {"distance": 80, "step": 1}
+    assert call(g, "PUT", "/accounts/A/positions/p1/trailing-stop", stop).status_code == 200
+    assert g.sent == [
+        PlaceTrailingEntry("gen1", "A", "EUR/USD", Side.SELL, 10, 150, 5, NOW),
+        PlaceTrailingEntry("mine-2", "A", "EUR/USD", Side.SELL, 10, 150, 5, NOW),
+        SetTrailingStop("gen1", "A", "p1", 80, 1, NOW),
+    ]
+    assert call(g, "POST", "/accounts/B/trailing-orders", body).status_code == 404
+    staff = call(g, "POST", "/accounts/A/trailing-orders", body, user="staff-1", roles=("staff",))
+    assert staff.status_code == 403
+    assert len(g.sent) == 3
+
+
+TRAIL = {"symbol": "EUR/USD", "side": "buy", "volume": 10, "distance": 100, "step": 1}
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "body"),
+    [
+        ("POST", "/accounts/A/trailing-orders", {**TRAIL, "distance": 1.5}),  # float
+        ("POST", "/accounts/A/trailing-orders", {**TRAIL, "step": "1"}),  # string
+        ("POST", "/accounts/A/trailing-orders", {**TRAIL, "level": 110_000}),  # unknown field
+        ("POST", "/accounts/A/trailing-orders", {k: v for k, v in TRAIL.items() if k != "step"}),
+        ("POST", "/accounts/A/trailing-orders", {**TRAIL, "side": "long"}),
+        ("PUT", "/accounts/A/positions/p1/trailing-stop", {"distance": 10}),
+        ("PUT", "/accounts/A/positions/p1/trailing-stop", {"distance": True, "step": 1}),
+        ("PUT", "/accounts/A/positions/p!/trailing-stop", {"distance": 10, "step": 1}),
+    ],
+)
+def test_trailing_requests_the_api_refuses(method: str, url: str, body: dict[str, Any]) -> None:
+    g = FakeGateway()
+    assert call(g, method, url, body).status_code == 422
+    assert g.sent == []
 
 
 GOOD = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 10}

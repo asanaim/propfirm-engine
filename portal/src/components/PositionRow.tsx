@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useApi } from "../api/ApiProvider";
-import type { LivePendingOrder, LivePosition } from "../api/types";
+import type { LivePendingOrder, LivePosition, LiveTrailingOrder } from "../api/types";
 import { formatCents, formatLots, formatPrice } from "../lib/money";
-import { parsePrice } from "../lib/price";
+import { parsePoints, parsePrice } from "../lib/price";
 import { describeOutcome, type Outcome } from "./OrderTicket";
 
 function useAction(digits: number) {
@@ -31,11 +31,29 @@ function Message({ message }: { message: { tone: string; text: string } | null }
   );
 }
 
-/** An open position: its floating P&L, close, and stop loss / take profit. */
-export function PositionRow({ acc, position: p, digits, canTrade }: { acc: string; position: LivePosition; digits: number; canTrade: boolean }) {
+/** An open position: its floating P&L, close, stop loss / take profit, and
+trailing stop. */
+export function PositionRow({
+  acc,
+  position: p,
+  digits,
+  canTrade,
+  trailing,
+}: {
+  acc: string;
+  position: LivePosition;
+  digits: number;
+  canTrade: boolean;
+  trailing?: LiveTrailingOrder | undefined;
+}) {
   const api = useApi();
   const { busy, message, run } = useAction(digits);
   const [editing, setEditing] = useState(false);
+  const [trailingForm, setTrailingForm] = useState(false);
+  const [distance, setDistance] = useState(trailing === undefined ? "" : String(trailing.distance));
+  const [step, setStep] = useState(trailing === undefined ? "1" : String(trailing.step));
+  const distancePoints = parsePoints(distance);
+  const stepPoints = parsePoints(step);
   const [sl, setSl] = useState(p.stop_loss === null ? "" : formatPrice(p.stop_loss, digits));
   const [tp, setTp] = useState(p.take_profit === null ? "" : formatPrice(p.take_profit, digits));
   const slPoints = sl.trim() === "" ? null : parsePrice(sl, digits);
@@ -69,6 +87,22 @@ export function PositionRow({ acc, position: p, digits, canTrade }: { acc: strin
             {p.take_profit === null ? "—" : formatPrice(p.take_profit, digits)}
           </>
         )}
+        {trailingForm ? (
+          <span className="inline-form">
+            <label>
+              <span className="visually-hidden">Trailing distance in points for {label}</span>
+              <input inputMode="numeric" placeholder="Distance (points)" value={distance} onChange={(e) => { setDistance(e.target.value); }} />
+            </label>
+            <label>
+              <span className="visually-hidden">Trailing step in points for {label}</span>
+              <input inputMode="numeric" placeholder="Step (points)" value={step} onChange={(e) => { setStep(e.target.value); }} />
+            </label>
+          </span>
+        ) : (
+          trailing !== undefined && (
+            <span className="muted block">Trailing stop {formatPrice(trailing.level, digits)}</span>
+          )
+        )}
       </td>
       <td className="actions">
         {canTrade && editing && (
@@ -92,10 +126,34 @@ export function PositionRow({ acc, position: p, digits, canTrade }: { acc: strin
             </button>
           </>
         )}
-        {canTrade && !editing && (
+        {canTrade && trailingForm && (
+          <>
+            <button
+              type="button"
+              className="button button-secondary small"
+              disabled={busy || distancePoints === null || stepPoints === null}
+              onClick={() =>
+                void run(async () => {
+                  const outcome = await api.put<Outcome>(`${base}/trailing-stop`, { distance: distancePoints, step: stepPoints });
+                  setTrailingForm(false);
+                  return outcome;
+                })
+              }
+            >
+              Set trailing stop
+            </button>
+            <button type="button" className="button button-quiet small" onClick={() => { setTrailingForm(false); }}>
+              Cancel
+            </button>
+          </>
+        )}
+        {canTrade && !editing && !trailingForm && (
           <>
             <button type="button" className="button button-secondary small" aria-label={`Change stops of ${label}`} onClick={() => { setEditing(true); }}>
               Stops
+            </button>
+            <button type="button" className="button button-secondary small" aria-label={`Trailing stop of ${label}`} onClick={() => { setTrailingForm(true); }}>
+              Trail
             </button>
             <button
               type="button"
@@ -133,6 +191,52 @@ export function PendingRow({ acc, order, digits, canTrade }: { acc: string; orde
             type="button"
             className="button button-secondary small"
             aria-label={`Cancel ${label}`}
+            disabled={busy}
+            onClick={() => void run(() => api.delete<Outcome>(`/accounts/${acc}/orders/${encodeURIComponent(o.order_id)}`))}
+          >
+            Cancel
+          </button>
+        )}
+        <Message message={message} />
+      </td>
+    </tr>
+  );
+}
+
+const TRAILING_KIND = { buy: "Trailing buy", sell: "Trailing sell" } as const;
+
+/** A working trailing order: its current level and its last move, with the
+as-of time (M09), and its cancel button. */
+export function TrailingRow({ acc, order: o, digits, canTrade }: { acc: string; order: LiveTrailingOrder; digits: number; canTrade: boolean }) {
+  const api = useApi();
+  const { busy, message, run } = useAction(digits);
+  const what =
+    o.kind === "entry"
+      ? `${TRAILING_KIND[o.side]} ${formatLots(o.volume ?? 0)} ${o.symbol}`
+      : `trailing stop of ${o.side} ${o.symbol} position ${o.position_id ?? ""}`;
+  const moved = o.moved_at === o.placed_at ? "set when placed" : "last moved";
+  const asOf = new Date(o.moved_at).toLocaleTimeString(undefined, { timeStyle: "medium" });
+  return (
+    <tr>
+      <th scope="row">{o.symbol}</th>
+      <td>{o.kind === "entry" ? TRAILING_KIND[o.side] : `Trailing stop · ${o.side} position`}</td>
+      <td>{o.volume === null ? "whole position" : formatLots(o.volume)}</td>
+      <td>
+        {o.distance} / {o.step}
+      </td>
+      <td>{formatPrice(o.level, digits)}</td>
+      <td>
+        <time dateTime={new Date(o.moved_at).toISOString()}>
+          {moved} {asOf}
+        </time>{" "}
+        <span className="muted">(price update {o.moved_seq})</span>
+      </td>
+      <td className="actions">
+        {canTrade && (
+          <button
+            type="button"
+            className="button button-secondary small"
+            aria-label={`Cancel ${what}`}
             disabled={busy}
             onClick={() => void run(() => api.delete<Outcome>(`/accounts/${acc}/orders/${encodeURIComponent(o.order_id)}`))}
           >

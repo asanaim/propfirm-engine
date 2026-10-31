@@ -58,8 +58,10 @@ from propfirm.journal.inputs import (
     OpenAccount,
     Outage,
     PlaceOrder,
+    PlaceTrailingEntry,
     RuleSetAdded,
     ScheduleNews,
+    SetTrailingStop,
     StateCheckpointed,
     UpdateTrading,
     VoidAccount,
@@ -109,9 +111,19 @@ from propfirm.trading.events import (
     SymbolFrozen,
     SymbolResumed,
     TradingConfigChanged,
+    TrailingMoved,
+    TrailingPlaced,
 )
 from propfirm.trading.instruments import InstrumentSpec, SpreadAndCommission
-from propfirm.trading.orders import OrderRequest, OrderType, PendingOrder, Position, Side
+from propfirm.trading.orders import (
+    OrderRequest,
+    OrderType,
+    PendingOrder,
+    Position,
+    Side,
+    TrailingKind,
+    TrailingOrder,
+)
 
 CHAIN_VERSION = "propfirm-journal-v2"  # v2: keyed price digests, checkpoints
 PRICE_KEY_BYTES = 32
@@ -209,6 +221,8 @@ CODEC = Codec(
         StagePassed,
         AccountVoided,
         PayoutDebited,
+        TrailingPlaced,
+        TrailingMoved,
         # ledger
         Entry,
         Posting,
@@ -232,6 +246,7 @@ CODEC = Codec(
         Quote,
         PendingOrder,
         Position,
+        TrailingOrder,
         # enums
         Side,
         OrderType,
@@ -246,6 +261,10 @@ CODEC = Codec(
         TieRule,
         AssetClass,
         EventScope,
+        TrailingKind,
+        # inputs added later (registration order does not affect encodings)
+        PlaceTrailingEntry,
+        SetTrailingStop,
     )
 )
 

@@ -487,6 +487,7 @@ main:focus {
 }
 
 .table-wrap {
+  position: relative; /* contains visually hidden labels, so they cannot widen the page */
   overflow-x: auto;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -702,6 +703,10 @@ tbody th {
   display: flex;
   gap: var(--space-2);
   align-items: center;
+}
+
+.block {
+  display: block;
 }
 
 .inline-form {

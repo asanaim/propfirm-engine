@@ -18,7 +18,13 @@ from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import Quote
 from propfirm.market.synthetic import Delay, Silence, SyntheticConfig, generate
 from propfirm.trading.engine import TradingEngine
-from propfirm.trading.events import EngineEvent, PositionClosed, PositionOpened
+from propfirm.trading.events import (
+    EngineEvent,
+    PositionClosed,
+    PositionOpened,
+    TrailingMoved,
+    TrailingPlaced,
+)
 from propfirm.trading.instruments import default_instruments
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
@@ -54,6 +60,7 @@ def run_session(seed: int) -> Session:
         events += engine.open_account(account, cents, T0)
     applied: dict[tuple[str, int], Quote] = {}
     pnl: dict[str, int] = dict.fromkeys(FUNDING, 0)
+    levels: dict[str, tuple[int, int, int, str, Side, str]] = {}  # trailing orders
     n = 0
 
     def record(new: list[EngineEvent], from_command: bool) -> None:
@@ -71,6 +78,16 @@ def run_session(seed: int) -> Session:
             if isinstance(e, PositionClosed):
                 assert e.close_price == (quote.bid if e.side is Side.BUY else quote.ask)
                 pnl[e.account_id] += e.pnl_cents
+            if isinstance(e, TrailingPlaced):
+                levels[e.order_id] = (e.level, e.distance, e.step, e.kind.value, e.side, e.symbol)
+            if isinstance(e, TrailingMoved):  # by an applied price, a step in the trader's favour
+                level, distance, step, kind, side, symbol = levels[e.order_id]
+                moved_by = applied[(symbol, e.price_seq)]
+                if (kind == "entry") == (side is Side.BUY):  # follows the ask
+                    assert e.level == moved_by.ask + distance <= level - step
+                else:
+                    assert e.level == moved_by.bid - distance >= level + step
+                levels[e.order_id] = (e.level, distance, step, kind, side, symbol)
         events.extend(new)
 
     for update in generate(feed, T0, T0 + 90_000):
@@ -94,8 +111,19 @@ def random_command(
 ) -> list[EngineEvent]:
     account = rng.choice(list(FUNDING))
     ts = now + rng.randrange(50)
-    action = rng.randrange(6)
+    action = rng.randrange(8)
     positions = engine.positions(account)
+    if action == 6 and positions:
+        position = rng.choice(positions)
+        distance, step = rng.choice([0, 1, 20, 150]), rng.choice([0, 1, 5, 40])
+        return engine.set_trailing_stop(f"t{n}", account, position.position_id, distance, step, ts)
+    if action == 7:
+        distance, step = rng.choice([1, 30, 120, 400]), rng.choice([1, 10])
+        side = rng.choice([Side.BUY, Side.SELL])
+        lots = rng.choice([0, 10, 100])
+        return engine.place_trailing_entry(
+            f"o{n}", account, rng.choice(SYMS), side, lots, distance, step, ts
+        )
     if action == 4 and positions:
         position = rng.choice(positions)
         volume = rng.choice([None, 1, position.volume])
@@ -107,9 +135,10 @@ def random_command(
         sl = rng.choice([None, mid - rng.randrange(1, 500), mid + rng.randrange(1, 500)])
         tp = rng.choice([None, mid - rng.randrange(1, 500), mid + rng.randrange(1, 500)])
         return engine.modify_stops(account, position.position_id, sl, tp, ts)
-    pending = engine.pending_orders(account)
-    if action == 3 and pending:
-        return engine.cancel_order(account, rng.choice(pending).request.order_id, ts)
+    working = [o.request.order_id for o in engine.pending_orders(account)]
+    working += [o.order_id for o, _ in engine.trailing_orders(account)]
+    if action == 3 and working:
+        return engine.cancel_order(account, rng.choice(working), ts)
     symbol = rng.choice(SYMS)
     side = rng.choice([Side.BUY, Side.SELL])
     order_type = rng.choice([OrderType.MARKET, OrderType.LIMIT, OrderType.STOP])
@@ -148,4 +177,9 @@ def test_sessions_actually_trade() -> None:
         "SymbolFrozen",
         "SymbolResumed",
         "StaleUpdate",
+        "TrailingPlaced",
+        "TrailingMoved",
     } <= kinds
+    events = run_session(7).events
+    assert any(isinstance(e, PositionOpened) and e.order_type == "trailing" for e in events)
+    assert any(isinstance(e, PositionClosed) and e.reason == "trailing_stop" for e in events)

@@ -15,6 +15,14 @@ export function parsePrice(text: string, digits: number): number | null {
   return Number.isSafeInteger(points) && points > 0 ? points : null;
 }
 
+/** Whole points, at least 1 (trailing distance and step). */
+export function parsePoints(text: string): number | null {
+  const t = text.trim();
+  if (!/^\d+$/.test(t)) return null;
+  const points = Number(t);
+  return Number.isSafeInteger(points) && points >= 1 ? points : null;
+}
+
 export function parseLots(text: string): number | null {
   const volume = parsePrice(text, 2);
   return volume !== null && volume >= 1 ? volume : null;
@@ -37,6 +45,8 @@ export const REJECTIONS: Record<string, string> = {
   unknown_order: "This order is no longer pending.",
   account_locked: "This account is closed for trading.",
   news_window: "No trades open or close around a listed news event (see the news calendar).",
+  invalid_trailing: "Distance and step must be whole points, at least 1, and the level must stay above zero.",
+  position_closed: "The position closed, so its trailing stop was cancelled.",
 };
 
 export function rejection(reason: unknown): string {

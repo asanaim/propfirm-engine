@@ -62,6 +62,7 @@ const ACCOUNT: LiveAccount = {
     },
   ],
   pending_orders: [],
+  trailing_orders: [],
   engine_ts: 0,
 };
 

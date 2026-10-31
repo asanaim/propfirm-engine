@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from propfirm.market.guards import FreezeReason
-from propfirm.trading.orders import OrderType, Side
+from propfirm.trading.orders import OrderType, Side, TrailingKind
 
 
 class RejectReason(StrEnum):
@@ -29,6 +29,8 @@ class RejectReason(StrEnum):
     UNKNOWN_ORDER = "unknown_order"
     ACCOUNT_LOCKED = "account_locked"
     NEWS_WINDOW = "news_window"
+    INVALID_TRAILING = "invalid_trailing"  # distance or step below 1, or no level >= 1
+    POSITION_CLOSED = "position_closed"  # a trailing stop whose position closed
 
 
 class CloseReason(StrEnum):
@@ -37,6 +39,7 @@ class CloseReason(StrEnum):
     TAKE_PROFIT = "take_profit"
     BREACH = "breach"
     VOID = "void"
+    TRAILING_STOP = "trailing_stop"
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +140,38 @@ class StopsModified:
 
 
 @dataclass(frozen=True, slots=True)
+class TrailingPlaced:
+    """A trailing order started working at `level`, set from the price
+    update `price_seq` (an entry: `volume`; a stop: `position_id`)."""
+
+    ts: int
+    order_id: str
+    account_id: str
+    symbol: str
+    side: Side  # the position's side (opened by an entry, protected by a stop)
+    kind: TrailingKind
+    volume: int | None
+    position_id: str | None
+    distance: int
+    step: int
+    level: int
+    price_seq: int
+    config_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class TrailingMoved:
+    """A trailing order's level moved to `level`, caused by price update
+    `price_seq` (replay reproduces every move)."""
+
+    ts: int
+    order_id: str
+    account_id: str
+    level: int
+    price_seq: int
+
+
+@dataclass(frozen=True, slots=True)
 class SymbolFrozen:
     ts: int
     symbol: str
@@ -213,6 +248,8 @@ type EngineEvent = (
     | PositionClosed
     | CommissionCharged
     | StopsModified
+    | TrailingPlaced
+    | TrailingMoved
     | SymbolFrozen
     | SymbolResumed
     | FeedGap

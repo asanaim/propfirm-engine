@@ -25,7 +25,7 @@ from propfirm.rules.news import RestrictedEvent, event_window
 from propfirm.rules.products import RuleSet
 from propfirm.rules.supervisor import Event, RuleSupervisor
 from propfirm.trading.instruments import InstrumentSpec
-from propfirm.trading.orders import OrderRequest
+from propfirm.trading.orders import OrderRequest, Side
 
 
 def _ts(value: int) -> None:
@@ -61,6 +61,52 @@ class PlaceOrder:
     def __post_init__(self) -> None:
         if not isinstance(self.request, OrderRequest):
             raise TypeError("request must be an OrderRequest")
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class PlaceTrailingEntry:
+    """A trailing buy or trailing sell (M09): distance and step in points.
+    The engine rejects values below 1 with a recorded reason."""
+
+    order_id: str
+    account_id: str
+    symbol: str
+    side: Side
+    volume: int
+    distance: int
+    step: int
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("order_id", self.order_id)
+        require_text("account_id", self.account_id)
+        require_text("symbol", self.symbol)
+        if not isinstance(self.side, Side):
+            raise TypeError("side must be a Side")
+        for name in ("volume", "distance", "step"):
+            require_int(name, getattr(self, name))
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class SetTrailingStop:
+    """Put a trailing stop on a position, replacing any it has; cancelled
+    like any working order (CancelOrder with its order id)."""
+
+    order_id: str
+    account_id: str
+    position_id: str
+    distance: int
+    step: int
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("order_id", self.order_id)
+        require_text("account_id", self.account_id)
+        require_text("position_id", self.position_id)
+        for name in ("distance", "step"):
+            require_int(name, getattr(self, name))
         _ts(self.ts)
 
 
@@ -275,6 +321,8 @@ type Input = (
     | DebitPayout
     | Checkpoint
     | Malformed
+    | PlaceTrailingEntry
+    | SetTrailingStop
 )
 
 INPUT_TYPES = (
@@ -294,6 +342,8 @@ INPUT_TYPES = (
     DebitPayout,
     Checkpoint,
     Malformed,
+    PlaceTrailingEntry,
+    SetTrailingStop,
 )
 
 
@@ -377,6 +427,30 @@ def apply(
             )
         case PlaceOrder():
             return list(sup.place_order(item.request, item.ts))
+        case PlaceTrailingEntry():
+            return list(
+                sup.place_trailing_entry(
+                    item.order_id,
+                    item.account_id,
+                    item.symbol,
+                    item.side,
+                    item.volume,
+                    item.distance,
+                    item.step,
+                    item.ts,
+                )
+            )
+        case SetTrailingStop():
+            return list(
+                sup.set_trailing_stop(
+                    item.order_id,
+                    item.account_id,
+                    item.position_id,
+                    item.distance,
+                    item.step,
+                    item.ts,
+                )
+            )
         case CancelOrder():
             return list(sup.cancel_order(item.account_id, item.order_id, item.ts))
         case ClosePosition():

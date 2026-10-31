@@ -110,6 +110,23 @@ export interface LivePendingOrder {
   placed_at: number;
 }
 
+/** A working trailing order (M09): a trailing buy or sell (`entry`), or a
+position's trailing stop. Levels, distance and step are integer points. */
+export interface LiveTrailingOrder {
+  order_id: string;
+  symbol: string;
+  side: "buy" | "sell"; // the position's side: opened by an entry, protected by a stop
+  kind: "entry" | "stop";
+  volume: number | null; // entries only
+  position_id: string | null; // stops only
+  distance: number;
+  step: number;
+  level: number; // the current trigger level
+  moved_at: number; // engine time of the price that set the level (ms UTC)
+  moved_seq: number; // that price update's id
+  placed_at: number;
+}
+
 /** GET /accounts/{acc} and the stream's `account` event (engine live state). */
 export interface LiveAccount {
   account_id: string;
@@ -133,6 +150,7 @@ export interface LiveAccount {
   trading_days: number;
   positions: LivePosition[];
   pending_orders: LivePendingOrder[];
+  trailing_orders: LiveTrailingOrder[];
   engine_ts: number;
 }
 

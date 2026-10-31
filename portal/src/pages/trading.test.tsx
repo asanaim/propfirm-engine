@@ -1,8 +1,8 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { LivePendingOrder, LivePosition, Market } from "../api/types";
+import type { LivePendingOrder, LivePosition, LiveTrailingOrder, Market } from "../api/types";
 import { describeOutcome, OrderTicket } from "../components/OrderTicket";
-import { PendingRow, PositionRow } from "../components/PositionRow";
+import { PendingRow, PositionRow, TrailingRow } from "../components/PositionRow";
 import { fakeAuth, renderWith } from "../test-utils";
 import { tradesCsv, tradesOf, type HistoryEvent } from "./HistoryPage";
 import { NewsPage } from "./NewsPage";
@@ -152,6 +152,83 @@ it("cancels a pending order", async () => {
   await userEvent.setup().click(screen.getByRole("button", { name: "Cancel limit sell 0.10 EUR/USD" }));
   expect(await screen.findByText("Order cancelled.")).toBeInTheDocument();
   expect(calls[0]).toMatchObject({ url: "/api/accounts/ACC00000001/orders/o9", method: "DELETE" });
+});
+
+it("places a trailing sell with distance and step in whole points", async () => {
+  const placed = { status: "done", events: [{ type: "TrailingPlaced", level: 109_845 }] };
+  const { calls, fetcher } = recorder(() => [200, placed]);
+  renderWith(<OrderTicket acc="ACC00000001" market={MARKET} quotes={QUOTES} disabled={false} />, fakeAuth(), fetcher);
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText("Order type"), "trailing");
+  expect(screen.queryByLabelText("Stop loss (optional)")).toBeNull();
+  const sell = screen.getByRole("button", { name: "Sell 0.10 EUR/USD trailing" });
+  expect(sell).toBeDisabled();
+  expect(screen.getByText("Distance: whole points, at least 1.")).toBeInTheDocument();
+  await user.type(screen.getByLabelText("Distance (points)"), "150");
+  await user.clear(screen.getByLabelText("Step (points)"));
+  await user.type(screen.getByLabelText("Step (points)"), "1.5");
+  expect(screen.getByText("Step: whole points, at least 1.")).toBeInTheDocument();
+  await user.clear(screen.getByLabelText("Step (points)"));
+  await user.type(screen.getByLabelText("Step (points)"), "5");
+  expect(screen.getByText(/150 points = 0\.00150\. A trailing buy starts at 1\.10155; a trailing sell at 1\.09845\./)).toBeInTheDocument();
+  await user.click(sell);
+  expect(await screen.findByText("Trailing order working at 1.09845.")).toBeInTheDocument();
+  expect(calls[0]).toEqual({
+    url: "/api/accounts/ACC00000001/trailing-orders",
+    method: "POST",
+    body: { symbol: "EUR/USD", side: "sell", volume: 10, distance: 150, step: 5 },
+  });
+});
+
+const STOP: LiveTrailingOrder = {
+  order_id: "t1",
+  symbol: "EUR/USD",
+  side: "buy",
+  kind: "stop",
+  volume: null,
+  position_id: "p1",
+  distance: 100,
+  step: 10,
+  level: 109_895,
+  moved_at: Date.UTC(2026, 9, 30, 12, 0, 5),
+  moved_seq: 42,
+  placed_at: Date.UTC(2026, 9, 30, 12, 0, 0),
+};
+
+it("sets a position's trailing stop and shows its level", async () => {
+  const { calls, fetcher } = recorder(() => [200, { status: "done", events: [{ type: "TrailingPlaced", level: 109_905 }] }]);
+  renderWith(
+    inTable(<PositionRow acc="ACC00000001" position={POSITION} digits={5} canTrade={true} trailing={STOP} />),
+    fakeAuth(),
+    fetcher,
+  );
+  expect(screen.getByRole("row")).toHaveTextContent("Trailing stop 1.09895");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Trailing stop of Buy 1.00 EUR/USD" }));
+  const distance = screen.getByLabelText("Trailing distance in points for Buy 1.00 EUR/USD");
+  expect(distance).toHaveValue("100");
+  await user.clear(distance);
+  await user.type(distance, "90");
+  await user.click(screen.getByRole("button", { name: "Set trailing stop" }));
+  expect(await screen.findByText("Trailing order working at 1.09905.")).toBeInTheDocument();
+  expect(calls[0]).toEqual({
+    url: "/api/accounts/ACC00000001/positions/p1/trailing-stop",
+    method: "PUT",
+    body: { distance: 90, step: 10 },
+  });
+});
+
+it("lists a trailing order with its level and last move, and cancels it", async () => {
+  const entry: LiveTrailingOrder = { ...STOP, order_id: "e1", kind: "entry", side: "sell", volume: 10, position_id: null };
+  const { calls, fetcher } = recorder(() => [200, { status: "done", events: [{ type: "OrderCancelled" }] }]);
+  renderWith(inTable(<TrailingRow acc="ACC00000001" order={entry} digits={5} canTrade={true} />), fakeAuth(), fetcher);
+  const row = screen.getByRole("row");
+  expect(row).toHaveTextContent("Trailing sell0.10100 / 101.09895last moved");
+  expect(row).toHaveTextContent("(price update 42)");
+  expect(within(row).getByText(/last moved/).closest("time")).toHaveAttribute("datetime", "2026-10-30T12:00:05.000Z");
+  await userEvent.setup().click(screen.getByRole("button", { name: "Cancel Trailing sell 0.10 EUR/USD" }));
+  expect(await screen.findByText("Order cancelled.")).toBeInTheDocument();
+  expect(calls[0]).toMatchObject({ url: "/api/accounts/ACC00000001/orders/e1", method: "DELETE" });
 });
 
 it("describes each kind of outcome", () => {
