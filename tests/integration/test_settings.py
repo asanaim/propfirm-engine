@@ -227,3 +227,35 @@ def test_the_news_action_log_is_append_only_and_names_manual_events(
             await pool.close()
 
     asyncio.run(scenario())
+
+
+def test_news_source_alerts_are_kept_append_only(database_url: str, pg_schema: str) -> None:
+    from propfirm.newsfeed.alerts import SourceAlerts, SourceStore
+
+    schema = f"{pg_schema}_srcalerts"
+
+    async def scenario() -> None:
+        pool = await asyncpg.create_pool(database_url, min_size=1, max_size=2)
+        try:
+            await SettingsStore.open(pool, schema)
+            alerts = SourceAlerts(SourceStore(pool, schema), None, ())
+            await alerts.update([("bls", "403")], ["ecb"], 1_000)
+            await alerts.update([("bls", "403")], [], 1_000 + 24 * 3_600_000)
+            (alert,) = await alerts.open_alerts()
+            assert (alert.source, alert.since, alert.last_notice) == (
+                "bls",
+                1_000,
+                1_000 + 86_400_000,
+            )
+            await alerts.update([], ["bls"], 2 * 86_400_000)
+            assert await alerts.open_alerts() == []
+            await alerts.update([("bls", "500")], [], 3 * 86_400_000)
+            (again,) = await alerts.open_alerts()
+            assert (again.since, again.last_error) == (3 * 86_400_000, "500")
+            with pytest.raises(asyncpg.RaiseError, match="append-only"):
+                await pool.execute(f"DELETE FROM {schema}.news_source_events")
+        finally:
+            await pool.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+            await pool.close()
+
+    asyncio.run(scenario())

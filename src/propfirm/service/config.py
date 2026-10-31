@@ -13,6 +13,7 @@ from pathlib import Path
 from propfirm.policy import DEFAULT_POLICY
 from propfirm.rules.calendar import DEFAULT_NEWS_DIR
 
+_EMAIL = re.compile(r"[^@\s,]+@[^@\s,]+\.[^@\s,]+")
 _NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 _KEY = re.compile(r"[A-Za-z0-9:_.-]{1,200}")
 
@@ -36,6 +37,8 @@ class ServiceConfig:
     news_collector: bool = True  # read the publishers' schedules (needs internet access)
     collect_hours: int = 6  # how often the collector runs
     collector_agent: str = "propfirm-news-collector/1.0"  # User-Agent: name the firm
+    news_alert_emails: tuple[str, ...] = ()  # staff and admins told when a source fails
+    news_alert_remind_hours: int = 24  # reminder while a source still fails
     customer_schema: str = "customers"  # CIF, orders, accounts (personal data)
     settings_schema: str = "settings"  # admin setting changes
     oidc_issuer: str = ""  # e.g. http://localhost:8080/realms/propfirm (API only)
@@ -84,9 +87,19 @@ class ServiceConfig:
             raise ConfigError("SMTP_TLS must be starttls or implicit")
         if bool(self.smtp_username) != bool(self.smtp_password):
             raise ConfigError("SMTP_USERNAME and SMTP_PASSWORD go together")
+        for address in self.news_alert_emails:
+            if not _EMAIL.fullmatch(address):
+                raise ConfigError(f"NEWS_ALERT_EMAILS: {address!r} is not an email address")
         if not self.collector_agent.strip() or len(self.collector_agent) > 200:
             raise ConfigError("PROPFIRM_COLLECTOR_AGENT must be 1 to 200 characters")
-        for name in ("batch", "block_ms", "publish_ms", "smtp_port", "collect_hours"):
+        for name in (
+            "batch",
+            "block_ms",
+            "publish_ms",
+            "smtp_port",
+            "collect_hours",
+            "news_alert_remind_hours",
+        ):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ConfigError(f"{name} must be a positive integer")
@@ -142,6 +155,10 @@ class ServiceConfig:
             news_collector=flag("PROPFIRM_NEWS_COLLECTOR", True),
             collect_hours=number("PROPFIRM_COLLECT_HOURS", 6),
             collector_agent=text("PROPFIRM_COLLECTOR_AGENT", "propfirm-news-collector/1.0"),
+            news_alert_emails=tuple(
+                a.strip() for a in env.get("NEWS_ALERT_EMAILS", "").split(",") if a.strip()
+            ),
+            news_alert_remind_hours=number("NEWS_ALERT_REMIND_HOURS", 24),
             customer_schema=text("PROPFIRM_CUSTOMER_SCHEMA", "customers"),
             settings_schema=text("PROPFIRM_SETTINGS_SCHEMA", "settings"),
             oidc_issuer=text("OIDC_ISSUER", ""),

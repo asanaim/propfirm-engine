@@ -68,6 +68,7 @@ from propfirm.customers.providers import (
 )
 from propfirm.customers.store import CustomerStore
 from propfirm.journal.stream import InputStreamWriter
+from propfirm.newsfeed.alerts import SourceAlerts, SourceStore
 from propfirm.newsfeed.collector import Collector, collect_forever
 from propfirm.policy import load_policy
 from propfirm.rules.calendar import load_calendars
@@ -264,7 +265,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 response.raise_for_status()
                 return response.text
 
-            collector = Collector(news, live, fetch)
+            if not config.news_alert_emails:
+                log.warning("NEWS_ALERT_EMAILS is empty: source failures show only in /staff/news")
+            alerts = SourceAlerts(
+                SourceStore(pool, config.settings_schema),
+                mailer,
+                config.news_alert_emails,
+                config.news_alert_remind_hours,
+            )
+            collector = Collector(news, live, fetch, alerts=alerts)
             tasks.append(
                 asyncio.create_task(collect_forever(collector, config.collect_hours * 3600, now_ms))
             )
@@ -289,6 +298,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             cases=cases,
             payouts=payouts,
             news=news,
+            source_alerts=SourceAlerts(SourceStore(pool, config.settings_schema), None, ()),
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,
             country_header=config.country_header,
