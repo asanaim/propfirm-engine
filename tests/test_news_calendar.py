@@ -407,3 +407,27 @@ def test_the_calendar_directory_is_configurable() -> None:
     assert ServiceConfig.from_env({**env, "PROPFIRM_NEWS_DIR": "/srv/news"}).news_dir == Path(
         "/srv/news"
     )
+
+
+def test_start_up_publishes_every_month_skipping_what_the_engine_has() -> None:
+    from propfirm.api.main import SYSTEM_CALENDAR, _publish_calendars
+
+    news, gateway, log = desk()
+
+    class Shown:
+        async def news(self) -> list[dict[str, Any]]:
+            return [{"event_id": "2026-12-04-us-employment"}]
+
+    asyncio.run(_publish_calendars(news, Shown()))  # type: ignore[arg-type]
+    sent = {a.event_id for a in log.actions}
+    assert "2026-12-04-us-employment" not in sent  # the engine already shows it
+    assert {"2026-11-06-us-employment", "2026-12-09-fomc-decision"} <= sent
+    assert {(a.author, a.result) for a in log.actions} == {(SYSTEM_CALENDAR, "done")}
+    assert log.actions[0].reason.startswith("automatic at start-up (news-2026-11-v1")
+    engine = gateway.machine.supervisor.engine
+    admin = Author("admin-1", None, "withdrawn")
+    asyncio.run(news.cancel("2026-12-09-fomc-decision", admin, NOV_6_NFP))
+    again = asyncio.run(news.publish_all(STAFF, NOV_6_NFP + 1))
+    fomc = [a for a in again if a.event_id == "2026-12-09-fomc-decision"]
+    assert [(a.result, a.detail) for a in fomc] == [("rejected", "duplicate_news_event")]
+    assert engine.news_event("2026-12-09-fomc-decision") is None  # a cancel is not undone

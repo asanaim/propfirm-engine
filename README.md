@@ -177,10 +177,13 @@ No trade opens or closes on an affected symbol from 2 minutes before to
   local time and zone, and the source address. Times convert to UTC when
   the file is read; a local time that a daylight-saving change skips or
   repeats is refused. Every change is a new `version` in git.
-- Monthly: an employee publishes the month
-  (`POST /staff/news/calendars/{month}/publish`, with a reason). Windows
-  already started are left out; a repeat changes nothing (the engine
-  refuses duplicates).
+- Publication is automatic: when the API starts, every calendar file is
+  published (author `system:calendar`), so a new month goes live with the
+  deploy that adds its file. Events the engine already shows and windows
+  already started are skipped; anything else repeated is refused by the
+  engine, so a cancelled event never comes back. An employee can publish a
+  month again by hand (`POST /staff/news/calendars/{month}/publish`, with a
+  reason).
 - Unscheduled events: an employee adds a window with a reason
   (`POST /staff/news/events`). Bank of Japan decisions have no fixed time:
   when the statement is out, an employee marks it published

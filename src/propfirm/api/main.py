@@ -75,7 +75,7 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
-from propfirm.settings.newsdesk import NewsDesk, NewsStore
+from propfirm.settings.newsdesk import Author, NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
 
@@ -97,6 +97,22 @@ async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> N
             await checkout.reconcile(now_ms())
         except Exception:  # retried next round; the order stays paid
             log.exception("provisioning retry failed")
+
+
+SYSTEM_CALENDAR = "system:calendar"
+
+
+async def _publish_calendars(news: NewsDesk, live: LiveReader) -> None:
+    """Publish the calendar files at start-up; events the engine already
+    shows are skipped, and any other repeat is refused by the engine."""
+    try:
+        known = frozenset(e["event_id"] for e in await live.news())
+        versions = ", ".join(c.version for c in news.calendars) or "none"
+        who = Author(SYSTEM_CALENDAR, None, f"automatic at start-up ({versions})")
+        done = await news.publish_all(who, now_ms(), known)
+        log.info("news calendar: %d events sent at start-up", len(done))
+    except Exception:
+        log.exception("news calendar publication at start-up failed")
 
 
 async def _lifecycle_forever(
@@ -232,6 +248,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 cases=cases,
             )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
+        tasks.append(asyncio.create_task(_publish_calendars(news, live)))
         tasks.append(
             asyncio.create_task(
                 _lifecycle_forever(lifecycle, onboarding, cases, payouts, notifications)

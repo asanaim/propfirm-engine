@@ -3,8 +3,13 @@ calendar to the engine, manual windows, the no-fixed-time Bank of Japan
 case, and cancellations. Every action is logged (`news_actions`, append-
 only) with who, why, the input sent and the engine's answer.
 
-Who may do what [DEFAULT]:
-- employees (staff) publish a calendar month, add a manual window for an
+Publication: every calendar file is published automatically when the API
+starts (author `system:calendar`), so a new month goes live with the
+deploy that adds its file [decided]. Events already in the engine are
+skipped.
+
+Who may do what [decided: only an admin cancels]:
+- employees (staff) publish a calendar month again, add a manual window for an
   unscheduled event (with a reason), and mark a no-fixed-time event
   published: each only adds restrictions;
 - removing a window lifts a restriction, so only an admin may cancel one,
@@ -161,17 +166,31 @@ class NewsDesk:
     async def history(self, limit: int = 100) -> list[NewsAction]:
         return await self._log.history(limit)
 
-    async def publish(self, month: str, who: Author, now: int) -> list[NewsAction]:
+    async def publish(
+        self, month: str, who: Author, now: int, skip: frozenset[str] = frozenset()
+    ) -> list[NewsAction]:
         """Send every event of the month whose window has not started yet;
-        windows already started or over are left out (not sent)."""
+        windows already started or over, and ids in `skip` (already in the
+        engine), are left out (not sent)."""
         calendar = self._calendars.get(month)
         if calendar is None:
             raise NewsRefused("unknown_calendar", f"no calendar file for {month}")
         out = []
         for item in calendar.events:
-            if item.event.ts - item.event.before_ms <= now:
+            if item.event.ts - item.event.before_ms <= now or item.event.event_id in skip:
                 continue
             out.append(await self._send(item, calendar.version, who, now))
+        return out
+
+    async def publish_all(
+        self, who: Author, now: int, skip: frozenset[str] = frozenset()
+    ) -> list[NewsAction]:
+        """Every calendar file, as at start-up [decided 2026-10-31: months
+        publish automatically]. A cancelled event is not restored: the
+        engine refuses an id it has ever scheduled."""
+        out = []
+        for month in self._calendars:
+            out += await self.publish(month, who, now, skip)
         return out
 
     async def manual(
