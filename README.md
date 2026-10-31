@@ -177,6 +177,37 @@ The engine applies the change through its journal and refuses an edit that
 reuses a version number. A typo (unknown key, a number written as 6.0
 instead of "6") stops the start with a message naming the line.
 
+## Restricted news events (M13)
+
+No trade opens or closes on an affected symbol from 2 minutes before to
+2 minutes after a listed release, in every phase; crypto is exempt.
+
+- The list: one file per month in `config/news/` (`YYYY-MM.toml`), built
+  from the publishers' own schedules (BLS, Federal Reserve, ECB, Bank of
+  England, EIA); no paid calendar API. Each event has an id, a title, its
+  scope (a currency, or the weekly oil inventory report), the publisher's
+  local time and zone, and the source address. Times convert to UTC when
+  the file is read; a local time that a daylight-saving change skips or
+  repeats is refused. Every change is a new `version` in git.
+- Publication is automatic: when the API starts, every calendar file is
+  published (author `system:calendar`), so a new month goes live with the
+  deploy that adds its file. Events the engine already shows and windows
+  already started are skipped; anything else repeated is refused by the
+  engine, so a cancelled event never comes back. An employee can publish a
+  month again by hand (`POST /staff/news/calendars/{month}/publish`, with a
+  reason).
+- Unscheduled events: an employee adds a window with a reason
+  (`POST /staff/news/events`). Bank of Japan decisions have no fixed time:
+  when the statement is out, an employee marks it published
+  (`POST /staff/news/published`) and the window runs 2 minutes from then.
+- Cancelling lifts a restriction, so only an admin may
+  (`POST /admin/news/events/{id}/cancel`, with a reason), and only before
+  the window starts.
+- Every action is logged with who, why, the input sent and the engine's
+  answer (`GET /staff/news`, append-only `news_actions`). Traders see the
+  windows with their titles (`GET /news`, the portal's News page).
+- Until the back office (step 5) these are API calls.
+
 ## Run the tests without Docker
 
 Needs [uv](https://docs.astral.sh/uv/). Unit tests run anywhere; integration
@@ -421,6 +452,7 @@ or rules uses floating point.
   - [x] 4b: account dashboard, live prices, chart
   - [x] 4c: order ticket, positions, history, rulebook, news calendar
   - [x] Trailing orders (engine, API, portal)
+  - [x] News calendar input: monthly files, risk-desk publishing, manual and Bank of Japan windows
   - [ ] 4d: funded onboarding, wallet, payouts
 - [ ] Step 5: back office
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)
