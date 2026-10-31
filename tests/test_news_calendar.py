@@ -38,8 +38,8 @@ STAFF = Author("staff-1", "risk@example.com", "monthly list")
 
 def test_the_shipped_calendars_load_with_official_sources_and_utc_times() -> None:
     nov, dec = load_calendars(DEFAULT_NEWS_DIR)
-    assert (nov.version, nov.month, len(nov.events)) == ("news-2026-11-v1", "2026-11", 7)
-    assert (dec.version, len(dec.events), len(dec.unscheduled)) == ("news-2026-12-v1", 10, 1)
+    assert (nov.version, nov.month, len(nov.events)) == ("news-2026-11-v2", "2026-11", 15)
+    assert (dec.version, len(dec.events), len(dec.unscheduled)) == ("news-2026-12-v2", 21, 0)
     times = {e.event.event_id: e.event.ts for e in nov.events + dec.events}
     assert times["2026-11-06-us-employment"] == NOV_6_NFP
     assert times["2026-11-12-us-oil-inventory"] == NOV_6_NFP + 6 * 24 * H + 7 * H // 2
@@ -51,8 +51,10 @@ def test_the_shipped_calendars_load_with_official_sources_and_utc_times() -> Non
         assert (item.event.before_ms, item.event.after_ms) == (TWO_MINUTES_MS, TWO_MINUTES_MS)
     oil = [e for e in nov.events if e.event.scope is EventScope.OIL_INVENTORY]
     assert len(oil) == 4 and all(e.event.currency is None for e in oil)
-    (boj,) = dec.unscheduled
-    assert (boj.date, boj.currency) == ("2026-12-18", "JPY")
+    currencies = {e.event.currency for e in nov.events + dec.events}
+    assert currencies == {"USD", "EUR", "GBP", "CAD", "AUD", "NZD", "CHF", None}  # FTMO: no JPY
+    assert times["2026-11-04-nz-employment"] == utc_ms("2026-11-03T21:45", "UTC")  # NZDT
+    assert times["2026-11-03-rba-decision"] == utc_ms("2026-11-03T03:30", "UTC")  # AEDT
     assert [e.event.ts for e in nov.events] == sorted(e.event.ts for e in nov.events)
 
 
@@ -163,10 +165,13 @@ class MemoryLog:
     async def history(self, limit: int = 100) -> list[NewsAction]:
         return list(reversed(self.actions))[:limit]
 
+    async def known_ids(self) -> set[str]:
+        return {a.event_id for a in self.actions}
+
     async def titles(self) -> dict[str, str]:
         out: dict[str, str] = {}
         for a in self.actions:
-            if a.action in ("manual", "published") and a.result == "done" and a.title:
+            if a.action in ("manual", "published", "collector") and a.result == "done" and a.title:
                 out.setdefault(a.event_id, a.title)
         return out
 
@@ -180,14 +185,19 @@ def test_publishing_a_month_sends_only_windows_not_started_and_is_idempotent() -
     news, gateway, log = desk()
     now = NOV_6_NFP - TWO_MINUTES_MS  # the NFP window starts now: left out with earlier ones
     sent = asyncio.run(news.publish("2026-11", STAFF, now))
-    assert [a.event_id for a in sent] == [
+    assert [a.event_id for a in sent] == [  # the US and Canadian jobs reports start now: left out
         "2026-11-10-us-cpi",
         "2026-11-12-us-oil-inventory",
+        "2026-11-16-ca-cpi",
+        "2026-11-18-uk-cpi",
         "2026-11-18-us-oil-inventory",
+        "2026-11-18-fomc-minutes",
+        "2026-11-19-au-employment",
+        "2026-11-25-au-cpi",
         "2026-11-25-us-oil-inventory",
     ]
     assert {(a.action, a.result, a.calendar_version, a.author) for a in sent} == {
-        ("calendar", "done", "news-2026-11-v1", "staff-1")
+        ("calendar", "done", "news-2026-11-v2", "staff-1")
     }
     engine = gateway.machine.supervisor.engine
     cpi = engine.news_event("2026-11-10-us-cpi")
@@ -197,7 +207,7 @@ def test_publishing_a_month_sends_only_windows_not_started_and_is_idempotent() -
     assert oil is not None and oil.symbols == {"WTI", "Brent"}
     again = asyncio.run(news.publish("2026-11", STAFF, now + 1))
     assert {(a.result, a.detail) for a in again} == {("rejected", "duplicate_news_event")}
-    assert len(log.actions) == 8
+    assert len(log.actions) == 18
     with pytest.raises(NewsRefused, match="no calendar file"):
         asyncio.run(news.publish("2027-01", STAFF, now))
 
@@ -245,7 +255,9 @@ def test_manual_and_published_windows_and_admin_cancel() -> None:
     assert (late.result, late.detail) == ("rejected", "news_started")
     titles = asyncio.run(news.titles())
     assert titles["2026-12-18-boj-decision"] == "BoJ"
-    assert titles["2026-11-06-us-employment"] == "US employment situation (October)"
+    assert titles["2026-11-06-us-employment"] == (
+        "US Non-Farm Employment Change, Unemployment Rate & Wages"
+    )
 
 
 # --- API: roles, bodies and titles ------------------------------------------------------
@@ -306,7 +318,7 @@ def call(
 
 def test_traders_read_titled_windows_but_cannot_touch_the_calendar() -> None:
     response, _ = call("GET", "/news", roles=("trader",))
-    assert [e["title"] for e in response.json()] == ["US consumer price index (October)", None]
+    assert [e["title"] for e in response.json()] == ["US CPI y/y", None]
     assert call("GET", "/staff/news", roles=("trader",))[0].status_code == 403
     reason = {"reason": "monthly list"}
     assert call("POST", "/staff/news/calendars/2026-11/publish", reason, ("trader",))[
@@ -317,14 +329,15 @@ def test_traders_read_titled_windows_but_cannot_touch_the_calendar() -> None:
 def test_staff_publish_and_list_but_only_an_admin_cancels() -> None:
     response, gateway = call("POST", "/staff/news/calendars/2026-11/publish", {"reason": "nov"})
     assert response.status_code == 200
-    assert [a["event_id"] for a in response.json()][:2] == [
+    assert [a["event_id"] for a in response.json()][:3] == [
+        "2026-11-06-ca-employment",
         "2026-11-06-us-employment",
         "2026-11-10-us-cpi",
     ]
     assert gateway.machine.supervisor.engine.news_event("2026-11-06-us-employment") is not None
     listing = call("GET", "/staff/news")[0].json()
-    assert [c["version"] for c in listing["calendars"]] == ["news-2026-11-v1", "news-2026-12-v1"]
-    cpi = listing["calendars"][0]["events"][3]
+    assert [c["version"] for c in listing["calendars"]] == ["news-2026-11-v2", "news-2026-12-v2"]
+    cpi = listing["calendars"][0]["events"][6]
     assert (cpi["event_id"], cpi["in_engine"], cpi["local"]) == (
         "2026-11-10-us-cpi",
         True,  # the fake live view lists it
@@ -423,7 +436,7 @@ def test_start_up_publishes_every_month_skipping_what_the_engine_has() -> None:
     assert "2026-12-04-us-employment" not in sent  # the engine already shows it
     assert {"2026-11-06-us-employment", "2026-12-09-fomc-decision"} <= sent
     assert {(a.author, a.result) for a in log.actions} == {(SYSTEM_CALENDAR, "done")}
-    assert log.actions[0].reason.startswith("automatic at start-up (news-2026-11-v1")
+    assert log.actions[0].reason.startswith("automatic at start-up (news-2026-11-v2")
     engine = gateway.machine.supervisor.engine
     admin = Author("admin-1", None, "withdrawn")
     asyncio.run(news.cancel("2026-12-09-fomc-decision", admin, NOV_6_NFP))
@@ -431,3 +444,19 @@ def test_start_up_publishes_every_month_skipping_what_the_engine_has() -> None:
     fomc = [a for a in again if a.event_id == "2026-12-09-fomc-decision"]
     assert [(a.result, a.detail) for a in fomc] == [("rejected", "duplicate_news_event")]
     assert engine.news_event("2026-12-09-fomc-decision") is None  # a cancel is not undone
+
+
+def test_the_collector_settings() -> None:
+    from propfirm.service.config import ConfigError, ServiceConfig
+
+    env = {"DATABASE_URL": "postgresql://u:p@h/db", "VALKEY_URL": "redis://h:6379/0"}
+    config = ServiceConfig.from_env(env)
+    assert (config.news_collector, config.collect_hours) == (True, 6)
+    assert config.collector_agent == "propfirm-news-collector/1.0"
+    off = ServiceConfig.from_env(
+        {**env, "PROPFIRM_NEWS_COLLECTOR": "0", "PROPFIRM_COLLECT_HOURS": "12"}
+    )
+    assert (off.news_collector, off.collect_hours) == (False, 12)
+    for bad in ({"PROPFIRM_NEWS_COLLECTOR": "yes"}, {"PROPFIRM_COLLECT_HOURS": "0"}):
+        with pytest.raises(ConfigError):
+            ServiceConfig.from_env({**env, **bad})

@@ -116,10 +116,16 @@ class NewsStore:
         accepted action that named the id)."""
         rows = await self._pool.fetch(
             f"SELECT DISTINCT ON (event_id) event_id, title FROM {self._s}.news_actions "
-            f"WHERE action IN ('manual', 'published') AND result = 'done' "
+            f"WHERE action IN ('manual', 'published', 'collector') AND result = 'done' "
             f"AND title IS NOT NULL ORDER BY event_id, id"
         )
         return {r["event_id"]: r["title"] for r in rows}
+
+    async def known_ids(self) -> set[str]:
+        """Every event id the desk ever sent or cancelled: the collector
+        sends none of them again (a cancelled event stays cancelled)."""
+        rows = await self._pool.fetch(f"SELECT DISTINCT event_id FROM {self._s}.news_actions")
+        return {r["event_id"] for r in rows}
 
 
 class NewsLog(Protocol):
@@ -128,6 +134,8 @@ class NewsLog(Protocol):
     async def history(self, limit: int = 100) -> list[NewsAction]: ...
 
     async def titles(self) -> dict[str, str]: ...
+
+    async def known_ids(self) -> set[str]: ...
 
 
 def _result(outcome: Outcome) -> tuple[str, str | None]:
@@ -231,6 +239,15 @@ class NewsDesk:
 
     async def _send(self, item: CalendarEvent, version: str, who: Author, now: int) -> NewsAction:
         return await self._submit("calendar", item.event, item.title, version, who, now)
+
+    async def known_ids(self) -> set[str]:
+        return await self._log.known_ids()
+
+    async def collected(
+        self, event: RestrictedEvent, title: str, source: str, who: Author, now: int
+    ) -> NewsAction:
+        """An event the collector read from a publisher's own schedule."""
+        return await self._submit("collector", event, title, source, who, now)
 
     async def _submit(
         self,

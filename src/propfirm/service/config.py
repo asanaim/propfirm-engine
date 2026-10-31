@@ -33,6 +33,9 @@ class ServiceConfig:
     anchor_path: Path | None = None
     policy_path: Path = DEFAULT_POLICY
     news_dir: Path = DEFAULT_NEWS_DIR  # restricted-events calendar files (M13)
+    news_collector: bool = True  # read the publishers' schedules (needs internet access)
+    collect_hours: int = 6  # how often the collector runs
+    collector_agent: str = "propfirm-news-collector/1.0"  # User-Agent: name the firm
     customer_schema: str = "customers"  # CIF, orders, accounts (personal data)
     settings_schema: str = "settings"  # admin setting changes
     oidc_issuer: str = ""  # e.g. http://localhost:8080/realms/propfirm (API only)
@@ -81,7 +84,9 @@ class ServiceConfig:
             raise ConfigError("SMTP_TLS must be starttls or implicit")
         if bool(self.smtp_username) != bool(self.smtp_password):
             raise ConfigError("SMTP_USERNAME and SMTP_PASSWORD go together")
-        for name in ("batch", "block_ms", "publish_ms", "smtp_port"):
+        if not self.collector_agent.strip() or len(self.collector_agent) > 200:
+            raise ConfigError("PROPFIRM_COLLECTOR_AGENT must be 1 to 200 characters")
+        for name in ("batch", "block_ms", "publish_ms", "smtp_port", "collect_hours"):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ConfigError(f"{name} must be a positive integer")
@@ -109,6 +114,14 @@ class ServiceConfig:
                 raise ConfigError(f"{name} must be a whole number, got {raw!r}")
             return int(raw)
 
+        def flag(name: str, default: bool) -> bool:
+            raw = env.get(name)
+            if raw is None:
+                return default
+            if raw not in ("0", "1"):
+                raise ConfigError(f"{name} must be 0 or 1")
+            return raw == "1"
+
         anchor = env.get("PROPFIRM_ANCHOR_PATH")
         policy = env.get("PROPFIRM_POLICY")
         news = env.get("PROPFIRM_NEWS_DIR")
@@ -126,6 +139,9 @@ class ServiceConfig:
             anchor_path=Path(anchor) if anchor else None,
             policy_path=Path(policy) if policy else DEFAULT_POLICY,
             news_dir=Path(news) if news else DEFAULT_NEWS_DIR,
+            news_collector=flag("PROPFIRM_NEWS_COLLECTOR", True),
+            collect_hours=number("PROPFIRM_COLLECT_HOURS", 6),
+            collector_agent=text("PROPFIRM_COLLECTOR_AGENT", "propfirm-news-collector/1.0"),
             customer_schema=text("PROPFIRM_CUSTOMER_SCHEMA", "customers"),
             settings_schema=text("PROPFIRM_SETTINGS_SCHEMA", "settings"),
             oidc_issuer=text("OIDC_ISSUER", ""),

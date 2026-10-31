@@ -208,6 +208,34 @@ No trade opens or closes on an affected symbol from 2 minutes before to
   windows with their titles (`GET /news`, the portal's News page).
 - Until the back office (step 5) these are API calls.
 
+### The news collector (FTMO's list, read from the publishers)
+
+The restricted events follow FTMO's list (31 Oct 2026). The API reads the
+publishers' own schedules at start and every 6 hours
+(`propfirm.newsfeed`) and sends every upcoming event (45 days ahead) straight
+to the engine, logged as `collector` with its source:
+
+| Publisher | Events | Read from |
+|---|---|---|
+| Federal Reserve | rate decision and statement, FOMC minutes | monthly events pages |
+| Statistics Canada | CPI, Labour Force Survey | key-indicator schedule (JSON) |
+| Stats NZ | labour market, GDP, quarterly CPI | release calendar (iCalendar) |
+| ONS | UK CPI | release calendar API |
+| ABS | CPI, Labour Force, national accounts (GDP) | monthly release calendar |
+| Bank of Canada, RBA, SNB, Bank of England, ECB | rate decisions | their schedule pages |
+| BEA | advance GDP | release schedule |
+| EIA | crude oil inventories | weekly schedule and holiday exceptions |
+
+BLS (US jobs and CPI) and the Reserve Bank of New Zealand refused automated
+reads when checked, so the monthly files in `config/news/` carry them; the
+files hold the whole list too, with the same event ids, so a release in both
+is one event. No third-party calendar is read (Forex Factory and similar:
+their terms and the licence for showing their data; CC-5). A source that
+fails is logged and skipped. A release the publisher moves gets a second
+window at the new time (`<id>-at<HHMM>`); the old one stays until an admin
+cancels it. Settings: `PROPFIRM_NEWS_COLLECTOR` (1/0), `PROPFIRM_COLLECT_HOURS`,
+`PROPFIRM_COLLECTOR_AGENT` (the User-Agent naming the firm).
+
 ## Run the tests without Docker
 
 Needs [uv](https://docs.astral.sh/uv/). Unit tests run anywhere; integration

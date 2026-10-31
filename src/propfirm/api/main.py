@@ -68,6 +68,7 @@ from propfirm.customers.providers import (
 )
 from propfirm.customers.store import CustomerStore
 from propfirm.journal.stream import InputStreamWriter
+from propfirm.newsfeed.collector import Collector, collect_forever
 from propfirm.policy import load_policy
 from propfirm.rules.calendar import load_calendars
 from propfirm.service.config import ConfigError, ServiceConfig
@@ -253,6 +254,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
         tasks.append(asyncio.create_task(_publish_calendars(news, live)))
+        if config.news_collector:
+            agent = config.collector_agent
+
+            async def fetch(url: str) -> str:
+                response = await http.get(
+                    url, headers={"User-Agent": agent}, timeout=30.0, follow_redirects=True
+                )
+                response.raise_for_status()
+                return response.text
+
+            collector = Collector(news, live, fetch)
+            tasks.append(
+                asyncio.create_task(collect_forever(collector, config.collect_hours * 3600, now_ms))
+            )
         tasks.append(
             asyncio.create_task(
                 _lifecycle_forever(lifecycle, onboarding, cases, payouts, notifications)

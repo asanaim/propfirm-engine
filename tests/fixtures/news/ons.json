@@ -1,0 +1,130 @@
+{
+ "releases": [
+  {
+   "uri": "/releases/gdpmonthlyestimateukseptember2026",
+   "date_changes": null,
+   "description": {
+    "title": "GDP monthly estimate, UK: September 2026",
+    "summary": "Gross domestic product (GDP) measures the value of goods and services produced in the UK. It estimates the size of and growth in the economy.",
+    "release_date": "2026-11-12T07:00:00.000Z",
+    "published": false,
+    "cancelled": false,
+    "finalised": true,
+    "postponed": false,
+    "census": false
+   },
+   "highlight": {
+    "summary": "Gross domestic product (GDP) measures the value of goods and services produced in the UK. It estimates the size of and growth in the economy.",
+    "title": "GDP monthly estimate, UK: September 2026"
+   }
+  },
+  {
+   "uri": "/releases/gdpmonthlyestimateukseptember2026timeseries",
+   "date_changes": null,
+   "description": {
+    "title": "GDP monthly estimate, UK: September 2026 time series",
+    "summary": "Time series data as part of the monthly GDP publication.",
+    "release_date": "2026-11-12T07:00:00.000Z",
+    "published": false,
+    "cancelled": false,
+    "finalised": true,
+    "postponed": false,
+    "census": false
+   },
+   "highlight": {
+    "summary": "Time series data as part of the monthly GDP publication.",
+    "title": "GDP monthly estimate, UK: September 2026 time series"
+   }
+  },
+  {
+   "uri": "/releases/consumerpriceinflationukoctober2026timeseries",
+   "date_changes": null,
+   "description": {
+    "title": "Consumer price inflation, UK: October 2026 time series",
+    "summary": "Price indices percentage changes and weights for the different measures of consumer price inflation",
+    "release_date": "2026-11-18T07:00:00.000Z",
+    "published": false,
+    "cancelled": false,
+    "finalised": true,
+    "postponed": false,
+    "census": false
+   },
+   "highlight": {
+    "summary": "Price indices percentage changes and weights for the different measures of consumer price inflation",
+    "title": "Consumer price inflation, UK: October 2026 time series"
+   }
+  },
+  {
+   "uri": "/releases/consumerpriceinflationukoctober2026",
+   "date_changes": null,
+   "description": {
+    "title": "Consumer price inflation, UK: October 2026",
+    "summary": "Price indices percentage changes and weights for the different measures of consumer price inflation.",
+    "release_date": "2026-11-18T07:00:00.000Z",
+    "published": false,
+    "cancelled": false,
+    "finalised": true,
+    "postponed": false,
+    "census": false
+   },
+   "highlight": {
+    "summary": "Price indices percentage changes and weights for the different measures of consumer price inflation.",
+    "title": "Consumer price inflation, UK: October 2026"
+   }
+  },
+  {
+   "uri": "/releases/gdpmonthlyestimateukoctober2026timeseries",
+   "date_changes": null,
+   "description": {
+    "title": "GDP monthly estimate, UK: October 2026 time series",
+    "summary": "Time series data as part of the monthly GDP publication.",
+    "release_date": "2026-12-11T07:00:00.000Z",
+    "published": false,
+    "cancelled": false,
+    "finalised": true,
+    "postponed": false,
+    "census": false
+   },
+   "highlight": {
+    "summary": "Time series data as part of the monthly GDP publication.",
+    "title": "GDP monthly estimate, UK: October 2026 time series"
+   }
+  },
+  {
+   "uri": "/releases/gdpmonthlyestimateukoctober2026",
+   "date_changes": null,
+   "description": {
+    "title": "GDP monthly estimate, UK: October 2026",
+    "summary": "Gross domestic product (GDP) measures the value of goods and services produced in the UK. It estimates the size of and growth in the economy.",
+    "release_date": "2026-12-11T07:00:00.000Z",
+    "published": false,
+    "cancelled": false,
+    "finalised": true,
+    "postponed": false,
+    "census": false
+   },
+   "highlight": {
+    "summary": "Gross domestic product (GDP) measures the value of goods and services produced in the UK. It estimates the size of and growth in the economy.",
+    "title": "GDP monthly estimate, UK: October 2026"
+   }
+  },
+  {
+   "uri": "/releases/consumerpriceinflationuknovember2026",
+   "date_changes": null,
+   "description": {
+    "title": "Consumer price inflation, UK: November 2026",
+    "summary": "Price indices percentage changes and weights for the different measures of consumer price inflation.",
+    "release_date": "2026-12-16T07:00:00.000Z",
+    "published": false,
+    "cancelled": false,
+    "finalised": true,
+    "postponed": false,
+    "census": false
+   },
+   "highlight": {
+    "summary": "Price indices percentage changes and weights for the different measures of consumer price inflation.",
+    "title": "Consumer price inflation, UK: November 2026"
+   }
+  }
+ ]
+}
