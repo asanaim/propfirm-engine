@@ -81,4 +81,26 @@ class PayoutDebited:
     rsv_id: str
 
 
-type RuleEvent = DayStarted | AccountBreached | StagePassed | AccountVoided | PayoutDebited
+@dataclass(frozen=True, slots=True)
+class NewsViolation:
+    """A fill inside a restricted news window on a news-restricted account
+    (M13). The engine refuses every order and close there, so only a
+    stop-loss, take-profit or trailing stop can fill (breach and void
+    close-outs are exempt). As FTMO, it does not change the figures; it
+    raises an integrity case, which can end the account [decided 31 Oct
+    2026]."""
+
+    ts: int
+    account_id: str
+    position_id: str
+    close_id: str
+    symbol: str
+    reason: str  # the close reason: stop_loss, take_profit or trailing_stop
+    pnl_cents: int
+    event_ids: tuple[str, ...]  # the restricted events whose window covered it
+    rsv_id: str
+
+
+type RuleEvent = (
+    DayStarted | AccountBreached | StagePassed | AccountVoided | PayoutDebited | NewsViolation
+)

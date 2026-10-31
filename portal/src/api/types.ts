@@ -14,6 +14,7 @@ export interface Stage {
   target_basis: "closed_balance" | "equity";
   flat_to_pass: boolean; // no open position or pending order to pass
   tie_rule: "breach_wins" | "pass_wins";
+  news_restricted: boolean; // restricted news windows bind this stage (funded only, as FTMO)
 }
 
 export interface Product {

@@ -35,7 +35,7 @@ def test_every_step_of_an_order_is_on_record(
                 "payment_repeated",
             ]
             created, invoiced, *_, attempt, provisioned, _ = (e.detail for e in events)
-            assert (created["price_cents"], created["rsv_id"]) == (4_400, "lite-s1-v1")
+            assert (created["price_cents"], created["rsv_id"]) == (4_400, "lite-s1-v2")
             stored = await p.store.order(order["ord"])
             assert stored is not None and invoiced["provider_ref"] == stored.provider_ref
             assert re.fullmatch(r"[0-9]+-[0-9]+", attempt["entry_id"])
@@ -111,7 +111,7 @@ def test_orders_made_before_the_history_are_backfilled(database_url: str, pg_sch
                         f"list_price_cents, discount_kind, discount, discount_code, price_cents, "
                         f"rsv_id, status, provider, provider_ref, acc, failure, created_at, "
                         f"paid_at, provisioned_at) VALUES ($1, 'CIF00000001', 'lite', 1000000, "
-                        f"4400, 'none', '0', NULL, 4400, 'lite-s1-v1', $2, 'sandbox', $3, $4, "
+                        f"4400, 'none', '0', NULL, 4400, 'lite-s1-v2', $2, 'sandbox', $3, $4, "
                         f"$5, 10, $6, $7)",
                         ord_id,
                         status,
@@ -123,7 +123,7 @@ def test_orders_made_before_the_history_are_backfilled(database_url: str, pg_sch
                     )
                 await conn.execute(
                     f"INSERT INTO {schema}.accounts VALUES ('ACC00000002', 'CIF00000001', "
-                    f"'ORD00000004', 'lite', 'lite-s1-v1', 1000000, 41)"
+                    f"'ORD00000004', 'lite', 'lite-s1-v2', 1000000, 41)"
                 )
             store = await CustomerStore.open(pool, schema)  # applies migrations 2 and 3
             assert await store.rebuild_status() == []  # backfilled history matches every row

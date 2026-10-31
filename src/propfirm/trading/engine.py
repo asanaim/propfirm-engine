@@ -23,8 +23,10 @@ held, because frozen prices are never applied. Cancelling a pending order is
 always allowed. On the first fresh update the symbol resumes and anything that
 update crosses fills at its price.
 
-News trade blocks (Confirmed Configuration CC-3): inside a block on an
-affected symbol no trade is opened or closed: market orders, new pending
+News trade blocks (Confirmed Configuration CC-3): they bind only accounts
+whose rule set is news-restricted (funded, as FTMO; the supervisor tells the
+engine per account). Inside a block on an affected symbol no trade is
+opened or closed on such an account: market orders, new pending
 orders and manual closes are rejected, and pending orders do not trigger
 (they are held until the block ends) [DEFAULT]. Stop-losses and take-profits
 still execute [DEFAULT]. Changing stops is allowed.
@@ -208,6 +210,9 @@ class TradingEngine:
         self._locked: set[str] = set()
         self._calendar: dict[str, NewsWindow] = {}  # event id -> window, both uses
         self._calendar_ids: set[str] = set()
+        # accounts whose rule set is not news-restricted (evaluations): set by
+        # the rules supervisor from each account's rule set, so not engine state
+        self._news_exempt: set[str] = set()
         self._now = 0
 
     # --- inputs -------------------------------------------------------------
@@ -437,7 +442,7 @@ class TradingEngine:
         if self._guards.is_frozen(position.symbol):
             events.append(self._reject(position_id, account_id, RejectReason.SYMBOL_FROZEN))
             return events
-        if self.is_blocked(position.symbol):
+        if self.is_blocked_for(account_id, position.symbol):
             events.append(self._reject(position_id, account_id, RejectReason.NEWS_WINDOW))
             return events
         amount = position.volume if volume is None else volume
@@ -711,6 +716,26 @@ class TradingEngine:
     def is_frozen(self, symbol: str) -> bool:
         return self._guards.is_frozen(symbol)
 
+    def set_news_restricted(self, account_id: str, restricted: bool) -> None:
+        """Whether news trade blocks bind this account (from its rule set)."""
+        self._account(account_id)
+        if restricted:
+            self._news_exempt.discard(account_id)
+        else:
+            self._news_exempt.add(account_id)
+
+    def is_blocked_for(self, account_id: str, symbol: str) -> bool:
+        """Whether a news trade block binds this account on `symbol` now."""
+        return account_id not in self._news_exempt and self.is_blocked(symbol)
+
+    def news_events_at(self, symbol: str) -> tuple[str, ...]:
+        """Ids of the scheduled events whose block covers `symbol` now,
+        sorted ("setup" for a block of the engine's own configuration)."""
+        ids = sorted(e for e, w in self._calendar.items() if in_news((w,), symbol, self._now))
+        if in_news(self._blocks, symbol, self._now):
+            ids.append("setup")
+        return tuple(ids)
+
     def is_blocked(self, symbol: str) -> bool:
         """Whether a news trade block covers `symbol` at engine time."""
         return in_news(self._blocks, symbol, self._now) or in_news(
@@ -830,7 +855,7 @@ class TradingEngine:
             return RejectReason.UNKNOWN_SYMBOL
         if self._guards.is_frozen(request.symbol):
             return RejectReason.SYMBOL_FROZEN
-        if self.is_blocked(request.symbol):
+        if self.is_blocked_for(request.account_id, request.symbol):
             return RejectReason.NEWS_WINDOW
         if request.volume < 1:
             return RejectReason.INVALID_VOLUME
@@ -1004,11 +1029,12 @@ class TradingEngine:
         order. Inside a news block nothing opens (held), but trailing levels
         still move."""
         events: list[EngineEvent] = []
-        blocked = self.is_blocked(quote.symbol)
+        in_window = self.is_blocked(quote.symbol)
         for order_id, pending in list(self._orders.items()):
             request = pending.request
             if request.symbol != quote.symbol:
                 continue
+            blocked = in_window and request.account_id not in self._news_exempt
             if isinstance(request, TrailingOrder):
                 if request.kind is not TrailingKind.ENTRY:
                     continue  # stops: `_trigger_stops`

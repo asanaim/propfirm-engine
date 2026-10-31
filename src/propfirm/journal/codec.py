@@ -13,7 +13,10 @@ stable across processes and machines:
 - Fraction as {"_t": "Fraction", "n": <numerator>, "d": <denominator>};
 - frozenset as {"_t": "frozenset", "v": [<items sorted by their encoding>]};
 - mapping with str keys as {"_t": "dict", "v": {...}} (decoded to a dict);
-- registered dataclass as {"_t": <class name>, <every field>: <value>}.
+- registered dataclass as {"_t": <class name>, <every field>: <value>},
+  except a field added after records were written (`added_field`): it is
+  left out while it holds its default, so every record written before it
+  existed keeps its exact text and hash, and decodes with the default.
 
 Decoding is strict: unknown tags, missing or extra fields, floats, NaN,
 duplicate keys and any text that is not the canonical encoding of its own
@@ -37,6 +40,21 @@ _BUILTIN_TAGS = frozenset({"Fraction", "frozenset", "dict"})
 
 class CodecError(ValueError):
     """A value that cannot be encoded, or text that is not a canonical encoding."""
+
+
+_ADDED = "propfirm.codec.added"
+
+
+def added_field(default: Any) -> Any:
+    """A dataclass field added to a journaled type after records exist: it
+    must have a default, which is what records written before it mean. The
+    encoding leaves it out while it holds that default (one encoding per
+    value: writing the default explicitly is not canonical)."""
+    return dataclasses.field(default=default, metadata={_ADDED: True})
+
+
+def _is_added(f: dataclasses.Field[Any]) -> bool:
+    return bool(f.metadata.get(_ADDED))
 
 
 def digest(text: str) -> str:
@@ -95,6 +113,8 @@ class Codec:
                 for f in dataclasses.fields(cls):
                     if f.name == _TAG or not f.init:
                         raise TypeError(f"{name}.{f.name}: unsupported field")
+                    if _is_added(f) and f.default is dataclasses.MISSING:
+                        raise TypeError(f"{name}.{f.name}: an added field needs a default")
             else:
                 raise TypeError(f"{name} is neither a dataclass nor an enum")
             self._types[name] = cls
@@ -155,7 +175,10 @@ class Codec:
         if dataclasses.is_dataclass(value) and not isinstance(value, type):
             encoded: dict[str, object] = {_TAG: self._registered(type(value))}
             for f in dataclasses.fields(value):
-                encoded[f.name] = self._to_json(getattr(value, f.name))
+                item = getattr(value, f.name)
+                if _is_added(f) and item == f.default and type(item) is type(f.default):
+                    continue  # as records written before the field existed
+                encoded[f.name] = self._to_json(item)
             return encoded
         raise CodecError(f"cannot encode {type(value).__name__}")
 
@@ -210,9 +233,11 @@ class Codec:
             _keys(data, {"v"})
             return cls(data["v"])
         assert dataclasses.is_dataclass(cls)
-        names = [f.name for f in dataclasses.fields(cls)]
-        _keys(data, set(names))
-        return cls(**{name: self._from_json(data[name]) for name in names})
+        fields = dataclasses.fields(cls)
+        required = {f.name for f in fields if not _is_added(f)}
+        present = set(data) - {_TAG}
+        _keys(data, required | (present & {f.name for f in fields if _is_added(f)}))
+        return cls(**{name: self._from_json(data[name]) for name in present})
 
 
 def _keys(data: dict[str, object], expected: set[str]) -> None:

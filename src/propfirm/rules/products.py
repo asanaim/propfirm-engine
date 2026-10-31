@@ -27,6 +27,7 @@ from enum import StrEnum
 from fractions import Fraction
 
 from propfirm._checks import require_int, require_text
+from propfirm.journal.codec import added_field
 
 
 class Stage(StrEnum):
@@ -70,6 +71,10 @@ class RuleSet:
     target_basis: TargetBasis = TargetBasis.CLOSED_BALANCE
     flat_to_pass: bool = True
     tie_rule: TieRule = TieRule.BREACH_WINS
+    # Restricted news windows bind accounts on this rule set (M13, D15). As
+    # FTMO: funded accounts only; evaluations are exempt [decided 2026-10-31].
+    # Added after records existed: True (every phase) for older rule sets.
+    news_restricted: bool = added_field(True)
 
     def __post_init__(self) -> None:
         require_text("rsv_id", self.rsv_id)
@@ -89,6 +94,8 @@ class RuleSet:
             raise ValueError("only funded stages have no profit target")
         if self.consistency_at_pass and self.consistency is None:
             raise ValueError("consistency_at_pass needs a consistency share")
+        if not isinstance(self.news_restricted, bool):
+            raise TypeError("news_restricted must be a bool")
         if not self.sizes_cents:
             raise ValueError("sizes_cents must not be empty")
         for size in self.sizes_cents:
@@ -113,7 +120,7 @@ _INSTANT_SIZES = tuple(_usd(k * 1_000) for k in (5, 10, 25))
 
 def _lite(stage: Stage, target: Fraction | None) -> RuleSet:
     return RuleSet(
-        rsv_id=f"lite-{stage}-v1",
+        rsv_id=f"lite-{stage}-v{1 if stage is Stage.FUNDED else 2}",
         product="lite",
         stage=stage,
         profit_target=target,
@@ -124,12 +131,13 @@ def _lite(stage: Stage, target: Fraction | None) -> RuleSet:
         consistency=None,
         consistency_at_pass=False,
         sizes_cents=_LITE_SIZES,
+        news_restricted=stage is Stage.FUNDED,
     )
 
 
 def _classic(stage: Stage, target: Fraction | None) -> RuleSet:
     return RuleSet(
-        rsv_id=f"classic-{stage}-v1",
+        rsv_id=f"classic-{stage}-v{1 if stage is Stage.FUNDED else 2}",
         product="classic",
         stage=stage,
         profit_target=target,
@@ -140,12 +148,13 @@ def _classic(stage: Stage, target: Fraction | None) -> RuleSet:
         consistency=None,
         consistency_at_pass=False,
         sizes_cents=_CLASSIC_SIZES,
+        news_restricted=stage is Stage.FUNDED,
     )
 
 
 def _one_step(stage: Stage, target: Fraction | None) -> RuleSet:
     return RuleSet(
-        rsv_id=f"one-step-{stage}-v1",
+        rsv_id=f"one-step-{stage}-v{1 if stage is Stage.FUNDED else 2}",
         product="one-step",
         stage=stage,
         profit_target=target,
@@ -156,6 +165,7 @@ def _one_step(stage: Stage, target: Fraction | None) -> RuleSet:
         consistency=_P(1, 2),
         consistency_at_pass=stage is not Stage.FUNDED,
         sizes_cents=_LITE_SIZES,
+        news_restricted=stage is Stage.FUNDED,
     )
 
 

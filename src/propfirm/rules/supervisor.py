@@ -41,6 +41,7 @@ from propfirm.rules.events import (
     AccountVoided,
     BreachReason,
     DayStarted,
+    NewsViolation,
     PayoutDebited,
     RuleEvent,
     StagePassed,
@@ -58,6 +59,10 @@ from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest, Side
 
 type Event = EngineEvent | RuleEvent
+
+_WINDOW_FILLS = frozenset(
+    {CloseReason.STOP_LOSS, CloseReason.TAKE_PROFIT, CloseReason.TRAILING_STOP}
+)
 
 
 @dataclass(slots=True)
@@ -107,6 +112,7 @@ class RuleSupervisor:
             raise ValueError(f"{initial_balance_cents} cents is not a {rules.product} size")
         events = self._roll(ts)
         events += self._engine.open_account(account_id, initial_balance_cents, ts)
+        self._engine.set_news_restricted(account_id, rules.news_restricted)
         self._accounts[account_id] = _State(
             account_id=account_id,
             rules=rules,
@@ -238,6 +244,8 @@ class RuleSupervisor:
             raise ValueError("duplicate account in state")
         self._accounts = accounts
         self._day = state.day
+        for a in accounts.values():  # derived from the rule sets, not engine state
+            self._engine.set_news_restricted(a.account_id, a.rules.news_restricted)
 
     # --- queries ------------------------------------------------------------
 
@@ -384,6 +392,7 @@ class RuleSupervisor:
         engine_events = action()
         events += engine_events
         self._record(engine_events)
+        events += self._news_violations(engine_events)
         for state in self._active():
             events += self._check(state)
         return events
@@ -428,6 +437,31 @@ class RuleSupervisor:
                 state.day_pnl[self._day] = state.day_pnl.get(self._day, 0) + event.pnl_cents
             elif isinstance(event, CommissionCharged):  # the day's P&L is net of commission
                 state.day_pnl[self._day] = state.day_pnl.get(self._day, 0) - event.commission_cents
+
+    def _news_violations(self, events: list[EngineEvent]) -> list[Event]:
+        """Stop-loss, take-profit and trailing-stop fills inside a window that
+        binds the account (the only fills the engine lets through there)."""
+        out: list[Event] = []
+        for e in events:
+            if not isinstance(e, PositionClosed) or e.reason not in _WINDOW_FILLS:
+                continue
+            state = self._accounts.get(e.account_id)
+            if state is None or not self._engine.is_blocked_for(e.account_id, e.symbol):
+                continue
+            out.append(
+                NewsViolation(
+                    e.ts,
+                    e.account_id,
+                    e.position_id,
+                    e.close_id,
+                    e.symbol,
+                    e.reason.value,
+                    e.pnl_cents,
+                    self._engine.news_events_at(e.symbol),
+                    state.rules.rsv_id,
+                )
+            )
+        return out
 
     def _check(self, state: _State) -> list[Event]:
         equity = self._engine.equity(state.account_id)

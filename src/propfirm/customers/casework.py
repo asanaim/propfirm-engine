@@ -59,6 +59,14 @@ class Casework:
         due = (await self._policy.current()).cases.due(severity, ts)
         return await self._store.raise_alert(cif, acc, source, kind, severity, detail, due, ts)
 
+    async def news_violations(self, ts: int) -> list[str]:
+        """Integrity alerts for news violations the engine journaled (M13):
+        a fill inside a restricted window on a funded account. As FTMO, it
+        can end the account: staff decide on the case (a void needs a
+        second employee), nothing happens automatically."""
+        policy = (await self._policy.current()).cases
+        return await self._store.alert_news_violations(policy.due, ts)
+
     async def has_open_case(self, cif: str) -> bool:
         return await self._store.open_case(cif) is not None
 

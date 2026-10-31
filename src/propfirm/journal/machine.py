@@ -85,6 +85,7 @@ from propfirm.rules.events import (
     AccountVoided,
     BreachReason,
     DayStarted,
+    NewsViolation,
     PayoutDebited,
     StagePassed,
 )
@@ -262,6 +263,7 @@ CODEC = Codec(
         AssetClass,
         EventScope,
         TrailingKind,
+        NewsViolation,
         # inputs added later (registration order does not affect encodings)
         PlaceTrailingEntry,
         SetTrailingStop,

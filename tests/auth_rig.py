@@ -93,7 +93,7 @@ class FakeCustomers:
 
     async def accounts_for(self, cif: str) -> list[AccountRecord]:
         return [
-            AccountRecord(acc, cif, f"ORD-{acc}", "lite", "lite-s1-v1", 1_000_000, 0, "s1")
+            AccountRecord(acc, cif, f"ORD-{acc}", "lite", "lite-s1-v2", 1_000_000, 0, "s1")
             for acc, owner in self.owners.items()
             if owner == cif
         ]
@@ -108,7 +108,7 @@ class FakeCustomers:
         owner = self.owners.get(acc)
         if owner is None:
             return None
-        return AccountRecord(acc, owner, f"ORD-{acc}", "lite", "lite-s1-v1", 1_000_000, 0, "s1")
+        return AccountRecord(acc, owner, f"ORD-{acc}", "lite", "lite-s1-v2", 1_000_000, 0, "s1")
 
     async def cif(self, cif: str) -> CifRecord | None:
         for subject, number in self.cifs.items():

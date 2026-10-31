@@ -17,9 +17,15 @@ import pytest
 from propfirm.market.spread import NewsWindow
 from propfirm.market.symbols import LAUNCH_SYMBOLS
 from propfirm.rules.clock import NEW_YORK_17
-from propfirm.rules.events import AccountBreached, AccountStatus, BreachReason, DayStarted
-from propfirm.rules.news import EventScope, RestrictedEvent, affected_symbols
-from propfirm.rules.products import PRODUCTS
+from propfirm.rules.events import (
+    AccountBreached,
+    AccountStatus,
+    BreachReason,
+    DayStarted,
+    NewsViolation,
+)
+from propfirm.rules.news import CURRENT_MAP, EventScope, RestrictedEvent, affected_symbols
+from propfirm.rules.products import PRODUCTS, RuleSet
 from propfirm.trading.events import (
     CloseReason,
     OrderCancelled,
@@ -54,7 +60,7 @@ def test_gap_through_the_daily_floor_breaches_and_closes_at_the_actual_price() -
     breach = one(events, AccountBreached)
     assert breach.reasons == (BreachReason.DAILY_LOSS,)
     assert breach.equity_cents == 9_590_000  # below the $97,000 floor: not capped
-    assert breach.rsv_id == "lite-s1-v1"
+    assert breach.rsv_id == "lite-s1-v2"
     closed = one(events, PositionClosed)
     assert (closed.reason, closed.close_price) == (CloseReason.BREACH, 109_595)
     assert one(events, OrderCancelled).reason is RejectReason.ACCOUNT_LOCKED
@@ -165,15 +171,25 @@ def test_floating_loss_carried_across_the_reset_breaches_at_the_reset() -> None:
 # --- news windows on each affected symbol --------------------------------------------
 
 
+USD_PAIRS = {"EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD", "NZD/USD"}
+
+
+def test_the_original_map_still_blocks_silver_and_oil_on_usd_events() -> None:
+    """Map "v1": events recorded before the FTMO map replay as they were."""
+    event = RestrictedEvent("e", DAY, EventScope.CURRENCY, "USD")
+    assert event.instrument_map == "v1"
+    assert affected_symbols(event, LAUNCH_SYMBOLS) == USD_PAIRS | {
+        "XAU/USD",
+        "XAG/USD",
+        "WTI",
+        "Brent",
+    }
+
+
 @pytest.mark.parametrize(
     ("scope", "currency", "expected"),
     [
-        (
-            EventScope.CURRENCY,
-            "USD",
-            {"EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD", "NZD/USD"}
-            | {"XAU/USD", "XAG/USD", "WTI", "Brent"},
-        ),
+        (EventScope.CURRENCY, "USD", USD_PAIRS | {"XAU/USD"}),  # FTMO: gold, not silver or oil
         (
             EventScope.CURRENCY,
             "EUR",
@@ -189,13 +205,18 @@ def test_floating_loss_carried_across_the_reset_breaches_at_the_reset() -> None:
             "JPY",
             {"USD/JPY", "EUR/JPY", "GBP/JPY", "AUD/JPY", "CAD/JPY", "CHF/JPY"},
         ),
+        (
+            EventScope.CURRENCY,
+            "CAD",
+            {s.name for s in LAUNCH_SYMBOLS if "CAD" in s.name.split("/")},
+        ),
         (EventScope.OIL_INVENTORY, None, {"WTI", "Brent"}),
     ],
 )
 def test_affected_symbols_per_event(
     scope: EventScope, currency: str | None, expected: set[str]
 ) -> None:
-    event = RestrictedEvent("e", DAY, scope, currency)
+    event = RestrictedEvent("e", DAY, scope, currency, instrument_map=CURRENT_MAP)
     assert affected_symbols(event, LAUNCH_SYMBOLS) == expected
     assert not {"BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "LTC/USD"} & expected
 
@@ -212,10 +233,15 @@ PRICES = {
 }
 
 
-def nfp_rig(at: int) -> RulesRig:
+LITE_FUNDED = PRODUCTS["lite"][2]  # news windows bind funded accounts only (as FTMO)
+
+
+def nfp_rig(at: int, rules: RuleSet = LITE_FUNDED) -> RulesRig:
     """US jobs report at NFP; every test symbol freshly priced at `at`."""
-    event = RestrictedEvent("nfp-2026-11", NFP, EventScope.CURRENCY, "USD")
-    rig = RulesRig(LITE_S1, USD_100K, at, news=[event])
+    event = RestrictedEvent(
+        "nfp-2026-11", NFP, EventScope.CURRENCY, "USD", instrument_map=CURRENT_MAP
+    )
+    rig = RulesRig(rules, USD_100K, at, news=[event])
     for symbol, price in PRICES.items():
         rig.price(price, at, symbol)
     return rig
@@ -266,7 +292,15 @@ def test_in_window_no_close_no_pending_fill_but_stops_execute() -> None:
     assert not [e for e in events if isinstance(e, PositionOpened)]
     assert rejected(rig.sup.close_position("A", "o2", inside)) is RejectReason.NEWS_WINDOW
     events = rig.price(109_700, inside + 1_000)  # bid 1.09695 crosses the stop-loss
-    assert one(events, PositionClosed).reason is CloseReason.STOP_LOSS
+    closed = one(events, PositionClosed)
+    assert closed.reason is CloseReason.STOP_LOSS
+    violation = one(events, NewsViolation)  # it executes, and is a violation (as FTMO)
+    assert (violation.position_id, violation.reason, violation.event_ids) == (
+        "o1",
+        "stop_loss",
+        ("setup",),
+    )
+    assert (violation.pnl_cents, violation.rsv_id) == (closed.pnl_cents, "lite-funded-v1")
 
     after = NFP + 120_001
     events = rig.price(109_700, after)  # first price after the window: limit fills
@@ -277,7 +311,7 @@ def test_in_window_no_close_no_pending_fill_but_stops_execute() -> None:
 def test_bank_of_japan_window_opens_at_the_marked_publication() -> None:
     published = ny(2026, 10, 29, 23, 40)
     boj = RestrictedEvent("boj", published, EventScope.CURRENCY, "JPY", before_ms=0)
-    rig = RulesRig(LITE_S1, USD_100K, published - 60_000, news=[boj])
+    rig = RulesRig(LITE_FUNDED, USD_100K, published - 60_000, news=[boj])
     rig.price(150_000, published - 1, "USD/JPY")
     one(rig.order(Side.BUY, 10, published - 1, symbol="USD/JPY"), PositionOpened)
     rig.price(150_000, published, "USD/JPY")
@@ -286,3 +320,24 @@ def test_bank_of_japan_window_opens_at_the_marked_publication() -> None:
     )
     rig.price(150_000, published + 120_001, "USD/JPY")
     one(rig.order(Side.BUY, 10, published + 120_001, symbol="USD/JPY"), PositionOpened)
+
+
+def test_evaluation_accounts_are_not_bound_by_news_windows() -> None:
+    """As FTMO: Challenge and Verification are exempt [decided 31 Oct 2026]."""
+    assert not LITE_S1.news_restricted and LITE_FUNDED.news_restricted
+    rig = nfp_rig(NFP - 300_000, LITE_S1)
+    rig.order(Side.BUY, 100, NFP - 300_000, sl=109_800)
+    rig.price(110_000, NFP)
+    one(rig.order(Side.BUY, 10, NFP), PositionOpened)  # inside the window: allowed
+    one(rig.sup.close_position("A", "o2", NFP), PositionClosed)
+    events = rig.price(109_700, NFP + 1_000)
+    assert one(events, PositionClosed).reason is CloseReason.STOP_LOSS
+    assert not [e for e in events if isinstance(e, NewsViolation)]
+
+
+def test_a_breach_close_out_inside_a_window_is_not_a_violation() -> None:
+    rig = nfp_rig(NFP - 300_000)
+    rig.order(Side.BUY, 1_000, NFP - 300_000)  # 10 lots: $10 a point
+    events = rig.price(109_600, NFP)  # bid 1.09595: -$4,100, past the $3,000 daily limit
+    assert one(events, PositionClosed).reason is CloseReason.BREACH
+    assert not [e for e in events if isinstance(e, NewsViolation)]

@@ -23,7 +23,7 @@ def machine() -> Machine:
 def test_the_account_view_has_limits_the_next_reset_and_position_pnl() -> None:
     m = machine()
     inputs: list[Input] = [
-        OpenAccount("A", "lite-s1-v1", 1_000_000, T0),
+        OpenAccount("A", "lite-s1-v2", 1_000_000, T0),
         PriceUpdate("EUR/USD", 1, T0, T0, 110_000),
         PlaceOrder(OrderRequest("o1", "A", "EUR/USD", Side.BUY, OrderType.MARKET, 100), T0 + 1),
         PriceUpdate("EUR/USD", 2, T0 + 2, T0 + 2, 110_100),
@@ -66,7 +66,7 @@ def test_the_account_view_lists_trailing_orders_with_their_last_move() -> None:
 
     m = machine()
     inputs: list[Input] = [
-        OpenAccount("A", "lite-s1-v1", 1_000_000, T0),
+        OpenAccount("A", "lite-s1-v2", 1_000_000, T0),
         PriceUpdate("EUR/USD", 1, T0, T0, 110_000),
         PlaceOrder(OrderRequest("o1", "A", "EUR/USD", Side.BUY, OrderType.MARKET, 10), T0 + 1),
         SetTrailingStop("t1", "A", "o1", 200, 10, T0 + 2),

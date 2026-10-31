@@ -112,6 +112,10 @@ async def _lifecycle_forever(
         except Exception:  # retried next round; passes wait in the journal
             log.exception("stage progression round failed")
         try:
+            await cases.news_violations(now_ms())  # restricted-window fills: integrity alerts
+        except Exception:  # retried next round; the cursor moves only with the alerts
+            log.exception("raising news-violation alerts failed")
+        try:
             await cases.advance(now_ms())  # confirmed decisions not yet carried out
         except Exception:  # retried next round
             log.exception("carrying out case decisions failed")
@@ -148,7 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         customers = await CustomerStore.open(pool, config.customer_schema)
         progressions = ProgressionStore(pool, config.customer_schema, config.schema)
         onboardings = OnboardingStore(pool, config.customer_schema)
-        case_store = CaseStore(pool, config.customer_schema)
+        case_store = CaseStore(pool, config.customer_schema, config.schema)
         payout_store = PayoutStore(pool, config.customer_schema)
         fixed = (
             await customers.rebuild_status()

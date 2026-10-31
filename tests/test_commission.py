@@ -80,7 +80,7 @@ def test_shipped_crypto_has_a_raw_spread_and_a_commission() -> None:
 
 
 def test_a_market_buy_pays_the_raw_spread_and_the_commission() -> None:
-    inputs = [OpenAccount("A", "lite-s1-v1", 10_000_000, T0), btc(1, 8_090_000, T0 + 1)]
+    inputs = [OpenAccount("A", "lite-s1-v2", 10_000_000, T0), btc(1, 8_090_000, T0 + 1)]
     machine, out = run(SHIPPED, [*inputs, order("o1", 100, T0 + 2)])
     opened, charged = out[-1]
     ask = 8_090_000 + HALF
@@ -101,7 +101,7 @@ def test_a_market_buy_pays_the_raw_spread_and_the_commission() -> None:
 
 def test_closing_charges_no_commission() -> None:
     inputs = [
-        OpenAccount("A", "lite-s1-v1", 10_000_000, T0),
+        OpenAccount("A", "lite-s1-v2", 10_000_000, T0),
         btc(1, 8_090_000, T0 + 1),
         order("o1", 100, T0 + 2),
         btc(2, 8_100_000, T0 + 3),
@@ -117,7 +117,7 @@ def test_closing_charges_no_commission() -> None:
 
 def test_a_pending_order_pays_the_commission_when_it_fills() -> None:
     inputs = [
-        OpenAccount("A", "lite-s1-v1", 10_000_000, T0),
+        OpenAccount("A", "lite-s1-v2", 10_000_000, T0),
         btc(1, 8_090_000, T0 + 1),
         order("o1", 50, T0 + 2, order_type=OrderType.LIMIT, level=8_080_000),
         btc(2, 8_079_000, T0 + 3),  # ask 8,079,545 <= level
@@ -135,7 +135,7 @@ def test_the_margin_check_includes_the_commission() -> None:
     notional = Fraction(ask * volume, 100 * 100)
     margin = notional / Fraction(333, 100)
     assert margin * 100 <= balance < margin * 100 + notional * RATE * 100  # fits without it
-    inputs = [OpenAccount("A", "lite-s1-v1", balance, T0), btc(1, price, T0 + 1)]
+    inputs = [OpenAccount("A", "lite-s1-v2", balance, T0), btc(1, price, T0 + 1)]
     machine, out = run(SHIPPED, [*inputs, order("o1", volume, T0 + 2)])
     (rejected,) = out[-1]
     assert isinstance(rejected, OrderRejected)
@@ -156,7 +156,7 @@ def test_the_margin_check_includes_the_commission() -> None:
 
 def test_the_days_pnl_is_net_of_commission() -> None:
     inputs = [
-        OpenAccount("A", "lite-s1-v1", 10_000_000, T0),
+        OpenAccount("A", "lite-s1-v2", 10_000_000, T0),
         btc(1, 8_090_000, T0 + 1),
         order("o1", 100, T0 + 2),
         ClosePosition("A", "o1", T0 + 3),  # same price: pays the spread
@@ -169,7 +169,7 @@ def test_the_days_pnl_is_net_of_commission() -> None:
 
 def test_commission_is_recorded_and_replays_exactly() -> None:
     inputs = [
-        OpenAccount("A", "lite-s1-v1", 10_000_000, T0),
+        OpenAccount("A", "lite-s1-v2", 10_000_000, T0),
         btc(1, 8_090_000, T0 + 1),
         order("o1", 100, T0 + 2),
     ]
@@ -196,7 +196,7 @@ def test_an_existing_journal_switches_to_commission_at_start() -> None:
             ),
         ),
     )
-    machine, _ = run(v2, [OpenAccount("A", "lite-s1-v1", 10_000_000, T0)])
+    machine, _ = run(v2, [OpenAccount("A", "lite-s1-v2", 10_000_000, T0)])
     (update,) = policy_changes(SHIPPED, machine, T0 + 1)
     assert isinstance(update, UpdateTrading) and update.config_version == "trading-v3"
     assert sorted(s.name for s in update.instruments) == [
@@ -233,7 +233,7 @@ def test_the_commission_needs_a_market_spread() -> None:
 
 
 def test_commission_and_notional_round_half_even_to_the_cent() -> None:
-    inputs = [OpenAccount("A", "lite-s1-v1", 10_000_000, T0), btc(1, 8_090_000, T0 + 1)]
+    inputs = [OpenAccount("A", "lite-s1-v2", 10_000_000, T0), btc(1, 8_090_000, T0 + 1)]
     _, out = run(SHIPPED, [*inputs, order("o1", 1, T0 + 2)])  # 0.01 BTC
     _, charged = out[-1]
     assert isinstance(charged, CommissionCharged)

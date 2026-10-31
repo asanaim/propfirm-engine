@@ -156,7 +156,7 @@ who, when and why: `GET /admin/settings/changes`):
   "max_loss_percent": "5", "max_loss_kind": "static", "reason": "..."}`
   (`null` target for a funded stage; the daily limit may not exceed the
   drawdown limit). The change becomes a new rule-set version
-  (`one-step-s1-v1-a1`): accounts already open keep theirs.
+  (`one-step-s1-v2-a1`): accounts already open keep theirs.
 
 The policy file holds the starting values of these settings; once an
 admin has changed one, the admin value wins.
@@ -390,6 +390,27 @@ a case's severity is its highest alert's, and its due time comes from
   funded contract is issued, no payout is eligible.
 - Customers never see cases (no tipping off). `case_events` and `alerts`
   are append-only.
+
+## News rule (as FTMO, decided 31 Oct 2026)
+
+- Who: restricted news windows bind funded accounts only; evaluation stages
+  (Lite, Classic and 1-Step s1/s2) are exempt. Each rule set says so
+  (`news_restricted`), so the rulebook, the portal and the engine read one
+  value; the evaluation stages are version 2 for this change.
+- Which symbols: FTMO's affected instruments, as the versioned instrument
+  map `ftmo-1`: a currency event blocks the forex pairs with that currency,
+  plus gold for USD events; the weekly oil inventory report blocks WTI and
+  Brent; crypto is exempt. Events recorded under the original map (`v1`,
+  which also blocked silver and oil on USD events) replay unchanged.
+- What happens inside a window on a funded account: orders and closes are
+  refused; pending orders wait; a stop-loss, take-profit or trailing stop
+  still fills, and that fill is a `NewsViolation`. The API turns each one,
+  once, into a high-severity integrity alert on the customer's case; as
+  FTMO, a violation can end the account, and staff decide (a void needs a
+  second employee). Breach and void close-outs are never violations.
+- Journal compatibility: `added_field` lets a journaled type gain a field
+  with a default; it is left out of the encoding while it holds that
+  default, so earlier records keep their exact text and hash.
 
 ## Conventions
 

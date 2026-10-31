@@ -343,3 +343,57 @@ def test_overdue_cases_and_the_record(database_url: str, valkey_url: str, pg_sch
             assert (await p.cases.store.case("CAS00000001")).status == "open"  # type: ignore[union-attr]
 
     asyncio.run(scenario())
+
+
+def test_a_stop_loss_inside_a_news_window_raises_an_integrity_alert(
+    database_url: str, valkey_url: str, pg_schema: str
+) -> None:
+    """As FTMO: a fill inside a restricted window on a funded account can end
+    the account. The engine lets the stop-loss execute and records a
+    NewsViolation; the sweep turns it into a high-severity integrity alert
+    once, and staff decide."""
+    from propfirm.journal.inputs import ScheduleNews
+    from propfirm.market.types import PriceUpdate
+    from propfirm.rules.news import CURRENT_MAP, EventScope, RestrictedEvent
+
+    async def scenario() -> None:
+        async with platform(database_url, valkey_url, pg_schema, funded=True) as p:
+            assert p.cases is not None
+            acc = await funded_instant(p)
+            trade = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 10}
+            account = await p.live.account(acc)
+            assert account is not None
+            opened = (await p.call("POST", f"/accounts/{acc}/orders", body=trade)).json()
+            fill = next(e for e in opened["events"] if e["type"] == "PositionOpened")
+            stops = {"stop_loss": fill["price"] - 100, "take_profit": None}
+            put = await p.call(
+                "PUT", f"/accounts/{acc}/positions/{fill['position_id']}/stops", body=stops
+            )
+            assert put.json()["status"] == "done", put.text
+            now = now_ms()
+            nfp = RestrictedEvent(
+                "t-nfp", now + 60_000, EventScope.CURRENCY, "USD", instrument_map=CURRENT_MAP
+            )
+            await p.writer.publish(ScheduleNews(nfp, now))
+            t = now_ms()
+            await p.writer.publish(PriceUpdate("EUR/USD", 10_000, t, t, fill["price"] - 400))
+
+            async def violated() -> list[str]:
+                assert p.cases is not None
+                return await p.cases.news_violations(now_ms())
+
+            (alr,) = await eventually(violated)
+            assert await p.cases.news_violations(now_ms()) == []  # never twice
+            listed = (await staff(p, "GET", "/staff/cases")).json()
+            (case,) = [c for c in listed if c["cif"] == "CIF00000001"]
+            detail = (await staff(p, "GET", f"/staff/cases/{case['cas']}")).json()
+            (news,) = [a for a in detail["alerts"] if a["alr"] == alr]
+            assert (news["source"], news["kind"], news["severity"], news["acc"]) == (
+                "news_rule",
+                "integrity",
+                "high",
+                acc,
+            )
+            assert news["detail"]["fill"] == "stop_loss" and news["detail"]["events"] == ["t-nfp"]
+
+    asyncio.run(scenario())
