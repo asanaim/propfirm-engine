@@ -127,7 +127,9 @@ async def platform(
     records = await SettingsStore.open(pool, config.settings_schema)
     settings = Settings(policy, records, gateway, wait_s)
     onboardings = OnboardingStore(pool, config.customer_schema)
-    cases = Casework(CaseStore(pool, config.customer_schema), store, settings, gateway, wait_s)
+    cases = Casework(
+        CaseStore(pool, config.customer_schema, config.schema), store, settings, gateway, wait_s
+    )
     checkout = Checkout(
         store,
         settings,
@@ -290,7 +292,7 @@ def test_register_buy_pay_and_trade(database_url: str, valkey_url: str, pg_schem
 
             me = (await p.call("GET", "/me")).json()
             assert [a["acc"] for a in me["accounts"]] == [acc]
-            assert me["accounts"][0]["rsv_id"] == "lite-s1-v1"
+            assert me["accounts"][0]["rsv_id"] == "lite-s1-v2"
 
             t = now_ms()
             await p.writer.publish(PriceUpdate("EUR/USD", 1, t, t, 110_000))
@@ -409,7 +411,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7]
+            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

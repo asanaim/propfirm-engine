@@ -31,7 +31,7 @@ import asyncpg
 from propfirm.journal.inputs import CancelNews, Input, ScheduleNews
 from propfirm.pgschema import check_schema
 from propfirm.rules.calendar import EVENT_ID, Calendar, CalendarEvent
-from propfirm.rules.news import TWO_MINUTES_MS, EventScope, RestrictedEvent
+from propfirm.rules.news import CURRENT_MAP, TWO_MINUTES_MS, EventScope, RestrictedEvent
 from propfirm.service.gateway import Outcome
 
 
@@ -209,7 +209,7 @@ class NewsDesk:
         if ts + TWO_MINUTES_MS < now:
             raise NewsRefused("window_over", "that window is already over")
         try:
-            event = RestrictedEvent(event_id, ts, scope, currency)
+            event = RestrictedEvent(event_id, ts, scope, currency, instrument_map=CURRENT_MAP)
         except (TypeError, ValueError) as exc:
             raise NewsRefused("invalid_event", str(exc)) from exc
         return await self._submit("manual", event, title, None, who, now)
@@ -220,7 +220,9 @@ class NewsDesk:
         """An event with no fixed time was just published (Bank of Japan):
         no trades on its symbols for the next 2 minutes."""
         _check_id(event_id)
-        event = RestrictedEvent(event_id, now, EventScope.CURRENCY, currency, before_ms=0)
+        event = RestrictedEvent(
+            event_id, now, EventScope.CURRENCY, currency, before_ms=0, instrument_map=CURRENT_MAP
+        )
         return await self._submit("published", event, title, None, who, now)
 
     async def cancel(self, event_id: str, who: Author, now: int) -> NewsAction:

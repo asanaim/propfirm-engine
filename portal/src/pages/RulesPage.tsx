@@ -81,10 +81,18 @@ export function RulesPage({ acc }: { acc: string }) {
               .
             </li>
           )}
-          <li>
-            No trade opens or closes on the affected symbols around listed news events: see the{" "}
-            <Link href="/news">news calendar</Link>.
-          </li>
+          {r.news_restricted ? (
+            <li>
+              No trade opens or closes on the affected symbols from 2 minutes before to 2 minutes after a listed news
+              event: see the <Link href="/news">news calendar</Link>. A stop loss, take profit or trailing stop that
+              fills inside a window is a violation, and a violation can end the account.
+            </li>
+          ) : (
+            <li>
+              News events do not restrict this stage; they restrict funded accounts (see the{" "}
+              <Link href="/news">news calendar</Link>).
+            </li>
+          )}
           <li>
             When a breach and a pass happen on the same price, the {r.tie_rule === "pass_wins" ? "pass" : "breach"}{" "}
             counts.

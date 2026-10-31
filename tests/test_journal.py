@@ -48,9 +48,9 @@ def machine() -> Machine:
 @pytest.mark.parametrize(
     ("item", "ref", "reason"),
     [
-        (OpenAccount("A", "lite-s1-v1", 500_000, T0 + 9), "A", InputRejectReason.DUPLICATE_ACCOUNT),
+        (OpenAccount("A", "lite-s1-v2", 500_000, T0 + 9), "A", InputRejectReason.DUPLICATE_ACCOUNT),
         (OpenAccount("B", "nope-v1", 500_000, T0 + 9), "B", InputRejectReason.UNKNOWN_RULE_SET),
-        (OpenAccount("B", "classic-s1-v1", 500_000, T0 + 9), "B", InputRejectReason.INVALID_SIZE),
+        (OpenAccount("B", "classic-s1-v2", 500_000, T0 + 9), "B", InputRejectReason.INVALID_SIZE),
         (PriceUpdate("GBP/USD", 1, T0 + 9, T0 + 9, 1), "GBP/USD", InputRejectReason.UNKNOWN_SYMBOL),
         (Malformed("{}", "empty"), "", InputRejectReason.MALFORMED),
     ],
@@ -61,7 +61,7 @@ def test_refused_inputs_leave_state_unchanged(
     setup = engine_setup()
     sup, ledger = build(setup)
     rules = setup.rule_set_map()
-    apply(sup, rules, OpenAccount("A", "lite-s1-v1", 500_000, T0))
+    apply(sup, rules, OpenAccount("A", "lite-s1-v2", 500_000, T0))
     apply(sup, rules, U)
 
     def state() -> object:
@@ -77,8 +77,8 @@ def test_refused_inputs_leave_state_unchanged(
 @pytest.mark.parametrize(
     "build_bad",
     [
-        lambda: OpenAccount("A", "lite-s1-v1", 0, T0),
-        lambda: OpenAccount(" A", "lite-s1-v1", 500_000, T0),
+        lambda: OpenAccount("A", "lite-s1-v2", 0, T0),
+        lambda: OpenAccount(" A", "lite-s1-v2", 500_000, T0),
         lambda: Advance(-1),
         lambda: ModifyStops("A", "p", 0, None, T0),
         lambda: ClosePosition("A", "p", T0, True),
@@ -93,7 +93,7 @@ def test_inputs_validate_themselves(build_bad: object) -> None:
 
 
 def test_input_round_trips_through_message_fields() -> None:
-    item = OpenAccount("A", "lite-s1-v1", 500_000, T0)
+    item = OpenAccount("A", "lite-s1-v2", 500_000, T0)
     fields = encode_input(item)
     assert decode_input(fields) == item
     assert decode_input({k.encode(): v.encode() for k, v in fields.items()}) == item

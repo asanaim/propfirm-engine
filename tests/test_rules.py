@@ -29,9 +29,9 @@ def passed(events: Sequence[object]) -> bool:
 @pytest.mark.parametrize(
     ("rsv", "size", "floors"),
     [
-        ("lite-s1-v1", USD_100K, (9_700_000, 9_400_000)),
-        ("classic-s1-v1", USD_100K, (9_600_000, 9_200_000)),
-        ("one-step-s1-v1", USD_100K, (9_700_000, 9_400_000)),
+        ("lite-s1-v2", USD_100K, (9_700_000, 9_400_000)),
+        ("classic-s1-v2", USD_100K, (9_600_000, 9_200_000)),
+        ("one-step-s1-v2", USD_100K, (9_700_000, 9_400_000)),
         ("instant-funded-v1", 2_500_000, (2_425_000, 2_375_000)),
     ],
 )
@@ -42,9 +42,9 @@ def test_opening_floors_per_product(rsv: str, size: int, floors: tuple[int, int]
 @pytest.mark.parametrize(
     ("rsv", "size", "target"),
     [
-        ("lite-s1-v1", USD_100K, 10_600_000),  # +6 %
-        ("classic-s2-v1", USD_100K, 10_500_000),  # +5 %
-        ("one-step-s1-v1", 2_500_000, 2_750_000),  # +10 %
+        ("lite-s1-v2", USD_100K, 10_600_000),  # +6 %
+        ("classic-s2-v2", USD_100K, 10_500_000),  # +5 %
+        ("one-step-s1-v2", 2_500_000, 2_750_000),  # +10 %
         ("instant-funded-v1", 2_500_000, None),  # funded: no target
     ],
 )
@@ -55,13 +55,13 @@ def test_target_level_per_product(rsv: str, size: int, target: int | None) -> No
 def test_catalogue_matches_confirmed_configuration() -> None:
     targets = {r.rsv_id: r.profit_target for r in RULESETS.values()}
     assert targets == {
-        "lite-s1-v1": Fraction(6, 100),
-        "lite-s2-v1": Fraction(6, 100),
+        "lite-s1-v2": Fraction(6, 100),
+        "lite-s2-v2": Fraction(6, 100),
         "lite-funded-v1": None,
-        "classic-s1-v1": Fraction(10, 100),
-        "classic-s2-v1": Fraction(5, 100),
+        "classic-s1-v2": Fraction(10, 100),
+        "classic-s2-v2": Fraction(5, 100),
         "classic-funded-v1": None,
-        "one-step-s1-v1": Fraction(10, 100),
+        "one-step-s1-v2": Fraction(10, 100),
         "one-step-funded-v1": None,
         "instant-funded-v1": None,
     }
@@ -70,7 +70,7 @@ def test_catalogue_matches_confirmed_configuration() -> None:
     assert all(r.min_trading_days == 4 for r in RULESETS.values() if r.profit_target)
     assert all(r.tie_rule is TieRule.BREACH_WINS for r in RULESETS.values())  # D11
     assert {r.rsv_id for r in RULESETS.values() if r.consistency} == {
-        "one-step-s1-v1",
+        "one-step-s1-v2",
         "one-step-funded-v1",
         "instant-funded-v1",
     }
@@ -111,7 +111,7 @@ def test_lite_passes_on_closed_balance_after_four_trading_days() -> None:
     assert (stage.balance_cents, stage.trading_days, stage.rsv_id) == (
         10_703_000,
         4,
-        "lite-s1-v1",
+        "lite-s1-v2",
     )
     assert rig.sup.status("A") is AccountStatus.PASSED
     assert rejected(rig.order(Side.BUY, 100, WEEK[3] + 5_000)) is RejectReason.ACCOUNT_LOCKED

@@ -217,7 +217,7 @@ _RSV_STAGE = re.compile(r"-(s1|s2|funded)-v[0-9]+(?:-a[0-9]+)?$")
 
 def stage_of(rsv_id: str) -> Stage:
     """The stage a rule-set id names: every id is `<product>-<stage>-v<n>`,
-    with `-a<change>` for an admin change (`one-step-s1-v1-a7` -> s1)."""
+    with `-a<change>` for an admin change (`one-step-s1-v2-a7` -> s1)."""
     found = _RSV_STAGE.search(rsv_id)
     if found is None:
         raise ValueError(f"{rsv_id!r} is not a rule-set id")
@@ -239,6 +239,7 @@ def rule_set_view(r: RuleSet) -> dict[str, Any]:
         "target_basis": r.target_basis.value,  # "closed_balance" or "equity"
         "flat_to_pass": r.flat_to_pass,  # no open position or pending order to pass
         "tie_rule": r.tie_rule.value,  # a breach and a pass on the same check
+        "news_restricted": r.news_restricted,  # restricted news windows bind this stage
     }
 
 
@@ -639,4 +640,5 @@ def _rule_set(
         consistency=t.percent("consistency_percent", optional=True),
         consistency_at_pass=t.boolean("consistency_at_pass"),
         sizes_cents=sizes,
+        news_restricted=t.boolean("news_restricted"),
     )

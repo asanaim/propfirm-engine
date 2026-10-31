@@ -66,12 +66,12 @@ from tests.rules_rig import ny
 T0 = ny(2026, 10, 28, 16, 58)  # two minutes before the reset
 SYMS = ("EUR/USD", "USD/JPY", "XAU/USD", "BTC/USD")
 NEWS = (RestrictedEvent("usd", T0 + 200_000, EventScope.CURRENCY, "USD"),)  # blocks T0+80s..
-LITE_V2 = replace(RULESETS["lite-s1-v1"], rsv_id="lite-s1-v2", daily_loss=Fraction(4, 100))
+LITE_V2 = replace(RULESETS["lite-s1-v2"], rsv_id="lite-s1-v3", daily_loss=Fraction(4, 100))
 ACCOUNTS = {
-    "A": ("lite-s1-v1", 500_000),
+    "A": ("lite-s1-v2", 500_000),
     "B": ("instant-funded-v1", 500_000),
-    "C": ("classic-s1-v1", 1_000_000),
-    "F": ("lite-s1-v2", 500_000),  # opened on a version published by input
+    "C": ("classic-s1-v2", 1_000_000),
+    "F": ("lite-s1-v3", 500_000),  # opened on a version published by input
 }
 CONSUMER = "engine-1"
 TEST_KEY = bytes(range(32))
@@ -122,9 +122,9 @@ def session(seed: int, seconds: int = 240) -> list[Item]:
     feed(ScheduleNews(RestrictedEvent("ecb", T0 + 1, EventScope.CURRENCY, "EUR"), T0))  # dup id
     for account, (rsv, size) in ACCOUNTS.items():
         feed(OpenAccount(account, rsv, size, T0))
-    feed(OpenAccount("A", "lite-s1-v1", 500_000, T0))  # duplicate account
+    feed(OpenAccount("A", "lite-s1-v2", 500_000, T0))  # duplicate account
     feed(OpenAccount("D", "no-such-rule-set", 500_000, T0))
-    feed(OpenAccount("E", "classic-s1-v1", 500_000, T0))  # Classic has no $5K size
+    feed(OpenAccount("E", "classic-s1-v2", 500_000, T0))  # Classic has no $5K size
     feed(Raw({"input": "{not json"}))
     feed(Raw({"symbol": "EUR/USD", "price": "110000"}))  # price-stream format: wrong field set
     config = SyntheticConfig(

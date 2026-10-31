@@ -515,6 +515,17 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        8,
+        """
+        -- how far the news-violation sweep has read the engine journal
+        CREATE TABLE {s}.news_cursor (
+            id int PRIMARY KEY CHECK (id = 1),
+            seq bigint NOT NULL
+        );
+        INSERT INTO {s}.news_cursor (id, seq) VALUES (1, 0);
+        """,
+    ),
 )
 
 

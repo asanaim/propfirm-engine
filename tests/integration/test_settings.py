@@ -54,7 +54,7 @@ def test_store_is_append_only_and_gives_the_policy_in_force(
             assert (earlier.change, earlier.applied_at) == (first, 10)
             in_force = await policy_in_force(database_url, schema, BASE)
             rule_set = in_force.product("one-step").rule_sets[0]
-            assert rule_set.rsv_id == "one-step-s1-v1-a2"
+            assert rule_set.rsv_id == "one-step-s1-v2-a2"
             for sql in (
                 f"UPDATE {schema}.changes SET reason = 'edited'",
                 f"DELETE FROM {schema}.changes",
@@ -91,7 +91,7 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             assert refused.status_code == 403
             changed = await p.call("PUT", LIMITS_URL, "admin-1", NEW_LIMITS, ADMIN)
             assert changed.status_code == 200, changed.text
-            assert changed.json()["rsv_id"] == "one-step-s1-v1-a1"
+            assert changed.json()["rsv_id"] == "one-step-s1-v2-a1"
             after = await buy()
 
             t = now_ms()
@@ -102,13 +102,13 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             # then 8 %, 4 % and 5 %
             floors = ("rsv_id", "target_balance_cents", "daily_floor_cents", "max_floor_cents")
             assert tuple(old[k] for k in floors) == (
-                "one-step-s1-v1",
+                "one-step-s1-v2",
                 2_750_000,
                 2_425_000,
                 2_350_000,
             )
             assert tuple(new[k] for k in floors) == (
-                "one-step-s1-v1-a1",
+                "one-step-s1-v2-a1",
                 2_700_000,
                 2_400_000,
                 2_375_000,
@@ -150,7 +150,7 @@ def test_limits_changed_while_the_engine_is_down_apply_once_it_has_them(
             assert pending.status_code == 202 and pending.json()["status"] == "pending"
             await p.call("POST", "/me", body=ADULT)
             order = (await p.call("POST", "/orders", body=ONE_STEP_25K)).json()
-            assert order["rsv_id"] == "one-step-s1-v1"  # the previous limits stay in force
+            assert order["rsv_id"] == "one-step-s1-v2"  # the previous limits stay in force
             await p.engine()  # journals the waiting AddRuleSet from the stream
 
             async def published() -> bool:
@@ -159,9 +159,9 @@ def test_limits_changed_while_the_engine_is_down_apply_once_it_has_them(
             await eventually(published)  # a retry finds it journaled: duplicate = done
             catalogue = (await p.call("GET", "/catalogue")).json()
             one_step = next(x for x in catalogue if x["id"] == "one-step")
-            assert one_step["stages"][0]["rsv_id"] == "one-step-s1-v1-a1"
+            assert one_step["stages"][0]["rsv_id"] == "one-step-s1-v2-a1"
             second = (await p.call("POST", "/orders", body=ONE_STEP_25K)).json()
-            assert second["rsv_id"] == "one-step-s1-v1-a1"
+            assert second["rsv_id"] == "one-step-s1-v2-a1"
 
     asyncio.run(scenario())
 

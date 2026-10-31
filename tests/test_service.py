@@ -74,7 +74,7 @@ def test_bad_settings_are_refused(env: dict[str, str]) -> None:
 def test_development_setup_has_every_symbol_and_product() -> None:
     setup = development_setup()
     assert len(setup.instruments) == 30
-    assert {r.rsv_id for r in setup.rule_sets} >= {"lite-s1-v1", "instant-funded-v1"}
+    assert {r.rsv_id for r in setup.rule_sets} >= {"lite-s1-v2", "instant-funded-v1"}
     assert setup.trade_blocks == () and setup.news_windows == ()
 
 
@@ -364,7 +364,7 @@ def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
     assert lite["sizes"][1] == {"size_cents": 1_000_000, "price_cents": 4_400}
     assert lite["stages"][0] == {
         "stage": "s1",
-        "rsv_id": "lite-s1-v1",
+        "rsv_id": "lite-s1-v2",
         "profit_target_percent": "6",
         "max_loss_percent": "6",
         "max_loss_kind": "static",
@@ -375,6 +375,7 @@ def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
         "target_basis": "closed_balance",
         "flat_to_pass": True,
         "tie_rule": "breach_wins",
+        "news_restricted": False,  # evaluations: news windows do not bind (as FTMO)
     }
     instant = products[-1]["stages"][0]
     assert (instant["max_loss_kind"], instant["consistency_percent"]) == ("trailing", "50")

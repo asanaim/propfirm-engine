@@ -30,7 +30,10 @@ min_age = 18                   # years, from the date of birth given at registra
 
 [news]
 # Default window around a restricted event: no trade opens or closes from
-# `before_minutes` before to `after_minutes` after it.
+# `before_minutes` before to `after_minutes` after it. Which stages it binds
+# is each stage's `news_restricted` (as FTMO: funded only; decided 31 Oct
+# 2026). Breaking it on a funded account raises an integrity case, which
+# can end the account (as FTMO: "may lead to termination").
 before_minutes = 2
 after_minutes = 2
 
@@ -195,7 +198,7 @@ fee_refund_with_payout = 0     # 0: no fee refund
 
   [[products.stages]]
   stage = "s1"
-  version = 1
+  version = 2              # 2: news windows no longer bind evaluations
   profit_target_percent = "6"
   max_loss_percent = "6"
   max_loss_kind = "static"
@@ -203,10 +206,11 @@ fee_refund_with_payout = 0     # 0: no fee refund
   min_trading_days = 4
   consistency_percent = ""
   consistency_at_pass = false
+  news_restricted = false
 
   [[products.stages]]
   stage = "s2"
-  version = 1
+  version = 2              # 2: news windows no longer bind evaluations
   profit_target_percent = "6"
   max_loss_percent = "6"
   max_loss_kind = "static"
@@ -214,6 +218,7 @@ fee_refund_with_payout = 0     # 0: no fee refund
   min_trading_days = 4
   consistency_percent = ""
   consistency_at_pass = false
+  news_restricted = false
 
   [[products.stages]]
   stage = "funded"
@@ -225,6 +230,7 @@ fee_refund_with_payout = 0     # 0: no fee refund
   min_trading_days = 0
   consistency_percent = ""
   consistency_at_pass = false
+  news_restricted = true
 
 [[products]]
 id = "classic"
@@ -238,7 +244,7 @@ fee_refund_with_payout = 0
 
   [[products.stages]]
   stage = "s1"
-  version = 1
+  version = 2              # 2: news windows no longer bind evaluations
   profit_target_percent = "10"
   max_loss_percent = "8"
   max_loss_kind = "static"
@@ -246,10 +252,11 @@ fee_refund_with_payout = 0
   min_trading_days = 4
   consistency_percent = ""
   consistency_at_pass = false
+  news_restricted = false
 
   [[products.stages]]
   stage = "s2"
-  version = 1
+  version = 2              # 2: news windows no longer bind evaluations
   profit_target_percent = "5"
   max_loss_percent = "8"
   max_loss_kind = "static"
@@ -257,6 +264,7 @@ fee_refund_with_payout = 0
   min_trading_days = 4
   consistency_percent = ""
   consistency_at_pass = false
+  news_restricted = false
 
   [[products.stages]]
   stage = "funded"
@@ -268,6 +276,7 @@ fee_refund_with_payout = 0
   min_trading_days = 0
   consistency_percent = ""
   consistency_at_pass = false
+  news_restricted = true
 
 [[products]]
 id = "one-step"
@@ -281,7 +290,7 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
 
   [[products.stages]]
   stage = "s1"
-  version = 1
+  version = 2              # 2: news windows no longer bind evaluations
   profit_target_percent = "10"
   max_loss_percent = "6"
   max_loss_kind = "static"
@@ -289,6 +298,7 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
   min_trading_days = 4
   consistency_percent = "50"
   consistency_at_pass = true
+  news_restricted = false
 
   [[products.stages]]
   stage = "funded"
@@ -300,6 +310,7 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
   min_trading_days = 0
   consistency_percent = "50"
   consistency_at_pass = false
+  news_restricted = true
 
 [[products]]
 id = "instant"
@@ -321,3 +332,4 @@ fee_refund_with_payout = 0
   min_trading_days = 0
   consistency_percent = "50"
   consistency_at_pass = false
+  news_restricted = true

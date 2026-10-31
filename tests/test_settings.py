@@ -64,7 +64,7 @@ def test_the_latest_change_of_each_setting_wins() -> None:
     assert policy.access.blocked_countries == {"IN"}
     assert policy.access.min_age == BASE.access.min_age  # not an admin setting
     s1 = policy.product("one-step").rule_set(Stage.S1)
-    assert s1 is not None and s1.rsv_id == "one-step-s1-v1-a3"
+    assert s1 is not None and s1.rsv_id == "one-step-s1-v2-a3"
     assert (s1.profit_target, s1.daily_loss, s1.max_loss) == (
         Fraction(9, 100),
         Fraction(4, 100),
@@ -80,17 +80,17 @@ def test_the_latest_change_of_each_setting_wins() -> None:
         base_s1.sizes_cents,
     )
     others = [r for p in policy.products for r in p.rule_sets if r.rsv_id != s1.rsv_id]
-    assert others == [r for r in BASE.rule_sets() if r.rsv_id != "one-step-s1-v1"]
+    assert others == [r for r in BASE.rule_sets() if r.rsv_id != "one-step-s1-v2"]
 
 
 def test_a_file_version_of_a_changed_stage_keeps_the_admin_limits() -> None:
     raw: dict[str, Any] = tomllib.loads(DEFAULT_POLICY.read_text("utf-8"))
     data = copy.deepcopy(raw)
     one_step = next(p for p in data["products"] if p["id"] == "one-step")
-    one_step["stages"][0].update(version=2, min_trading_days=5)
+    one_step["stages"][0].update(version=3, min_trading_days=5)
     policy = apply_changes(parse_policy(data), [change(7, ONE_STEP_S1)])
     s1 = policy.product("one-step").rule_set(Stage.S1)
-    assert s1 is not None and s1.rsv_id == "one-step-s1-v2-a7"
+    assert s1 is not None and s1.rsv_id == "one-step-s1-v3-a7"
     assert (s1.min_trading_days, s1.profit_target) == (5, Fraction(8, 100))
 
 
@@ -141,7 +141,7 @@ def test_an_engine_started_after_a_change_publishes_only_what_it_lacks() -> None
     machine = Machine(CODEC.encode(setup_from_policy(BASE)), {1: bytes(32)})
     in_force = apply_changes(BASE, [change(7, ONE_STEP_S1)])
     (item,) = policy_changes(in_force, machine, T0)
-    assert isinstance(item, AddRuleSet) and item.rule_set.rsv_id == "one-step-s1-v1-a7"
+    assert isinstance(item, AddRuleSet) and item.rule_set.rsv_id == "one-step-s1-v2-a7"
     machine.use_price_key(1)
     machine.apply("1-0", item)
     assert policy_changes(in_force, machine, T0) == []
@@ -226,7 +226,7 @@ def test_new_limits_are_in_force_once_the_engine_has_them() -> None:
         status, rule_set = await settings.set_stage_limits(
             "admin-1", None, ONE_STEP_S1, "launch offer", T0
         )
-        assert rule_set.rsv_id == "one-step-s1-v1-a1"
+        assert rule_set.rsv_id == "one-step-s1-v2-a1"
         assert (status.applied_at, status.journal_seq) == (T0, 101)
         s1 = (await settings.current()).product("one-step").rule_set(Stage.S1)
         assert s1 == rule_set
@@ -398,7 +398,7 @@ def test_admin_changes_stage_limits() -> None:
     changed = api("PUT", LIMITS_URL, LIMITS, records=records)
     assert changed.status_code == 200, changed.text
     body = changed.json()
-    assert (body["status"], body["rsv_id"]) == ("applied", "one-step-s1-v1-a1")
+    assert (body["status"], body["rsv_id"]) == ("applied", "one-step-s1-v2-a1")
     assert body["change"]["value"] == {
         "product_id": "one-step",
         "stage": "s1",
@@ -410,7 +410,7 @@ def test_admin_changes_stage_limits() -> None:
     assert body["change"]["journal_seq"] == 101
     public = api("GET", "/catalogue", records=records, signed_in=False).json()
     public_s1 = next(p for p in public if p["id"] == "one-step")["stages"][0]
-    assert public_s1["rsv_id"] == "one-step-s1-v1-a1"
+    assert public_s1["rsv_id"] == "one-step-s1-v2-a1"
     assert (public_s1["profit_target_percent"], public_s1["max_loss_percent"]) == ("8", "5")
 
 

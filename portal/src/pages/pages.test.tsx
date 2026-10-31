@@ -22,7 +22,7 @@ const LITE: Product = {
   stages: [
     {
       stage: "s1",
-      rsv_id: "lite-s1-v1",
+      rsv_id: "lite-s1-v2",
       profit_target_percent: "8",
       max_loss_percent: "6",
       max_loss_kind: "static",
@@ -33,6 +33,7 @@ const LITE: Product = {
       target_basis: "closed_balance",
       flat_to_pass: true,
       tie_rule: "breach_wins",
+      news_restricted: true,
     },
   ],
 };
@@ -109,7 +110,7 @@ it("places an order and completes a sandbox payment", async () => {
     discount_percent: null,
     discount_code: null,
     price_cents: 2_400,
-    rsv_id: "lite-s1-v1",
+    rsv_id: "lite-s1-v2",
     status: "pending",
     acc: null,
     failure: null,
@@ -140,7 +141,7 @@ it("lists accounts and orders", async () => {
         acc: "ACC00000001",
         ord: "ORD00000001",
         product_id: "lite",
-        rsv_id: "lite-s1-v1",
+        rsv_id: "lite-s1-v2",
         size_cents: 1_000_000,
         stage: "s1",
         progression: null,

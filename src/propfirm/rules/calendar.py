@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from propfirm.rules.news import EventScope, RestrictedEvent
+from propfirm.rules.news import CURRENT_MAP, EventScope, RestrictedEvent
 
 DEFAULT_NEWS_DIR = Path(__file__).resolve().parents[3] / "config" / "news"
 EVENT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
@@ -135,7 +135,9 @@ def _event(table: Mapping[str, Any], month: str, n: int) -> CalendarEvent:
     source = _text(table, "source", where)
     if not source.startswith("https://"):
         raise CalendarError(f"{where}: source must be an https:// address")
-    restricted = RestrictedEvent(event_id, utc_ms(local, zone), scope, currency)
+    restricted = RestrictedEvent(
+        event_id, utc_ms(local, zone), scope, currency, instrument_map=CURRENT_MAP
+    )
     return CalendarEvent(restricted, _text(table, "title", where), local, zone, source)
 
 

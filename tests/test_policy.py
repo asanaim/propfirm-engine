@@ -100,7 +100,7 @@ def test_shipped_policy_is_the_confirmed_configuration() -> None:
 def test_numbers_are_editable() -> None:
     def change(data: dict[str, Any]) -> None:
         stage = lite(data)["stages"][0]
-        stage.update(version=2, profit_target_percent="8", max_loss_percent="5.5")
+        stage.update(version=3, profit_target_percent="8", max_loss_percent="5.5")
         stage.update(daily_loss_percent="2.5", min_trading_days=3)
         lite(data)["prices_cents"][1] = 4_900
         data["trading"]["leverage"]["forex"] = "50"
@@ -108,7 +108,7 @@ def test_numbers_are_editable() -> None:
 
     policy = parse_policy(edited(change))
     s1 = policy.product("lite").rule_sets[0]
-    assert s1.rsv_id == "lite-s1-v2"
+    assert s1.rsv_id == "lite-s1-v3"
     assert (s1.profit_target, s1.max_loss, s1.daily_loss, s1.min_trading_days) == (
         Fraction(8, 100),
         Fraction(55, 1000),
@@ -231,11 +231,11 @@ def test_no_changes_for_the_policy_a_journal_started_with() -> None:
 
 def test_a_new_rule_set_version_is_published() -> None:
     def change(data: dict[str, Any]) -> None:
-        lite(data)["stages"][0].update(version=2, daily_loss_percent="4")
+        lite(data)["stages"][0].update(version=3, daily_loss_percent="4")
 
     policy = parse_policy(edited(change))
     (item,) = policy_changes(policy, machine(), T0)
-    assert isinstance(item, AddRuleSet) and item.rule_set.rsv_id == "lite-s1-v2"
+    assert isinstance(item, AddRuleSet) and item.rule_set.rsv_id == "lite-s1-v3"
 
 
 def test_changed_numbers_without_a_new_version_are_refused() -> None:
@@ -285,7 +285,7 @@ class Driver:
 
 def opened() -> Driver:
     d = Driver()
-    d.send(OpenAccount("A", "lite-s1-v1", 10_000_000, T0))
+    d.send(OpenAccount("A", "lite-s1-v2", 10_000_000, T0))
     d.send(PriceUpdate("XAU/USD", 1, T0, T0, 330_000))
     return d
 

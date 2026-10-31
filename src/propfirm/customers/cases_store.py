@@ -7,6 +7,8 @@ closed per customer, so concurrent alerts cannot open two.
 """
 
 import json
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,7 +20,9 @@ from propfirm.customers.cases import (
     CaseEvent,
     case_state,
 )
+from propfirm.journal.machine import CODEC
 from propfirm.pgschema import Conn, check_schema
+from propfirm.rules.events import NewsViolation
 
 OPEN = ("open", "decision_pending", "actioning")
 
@@ -62,11 +66,19 @@ def _record(row: asyncpg.Record) -> CaseRecord:
     return CaseRecord(**dict(row))
 
 
+log = logging.getLogger(__name__)
+
+NEWS_SOURCE = "news_rule"
+NEWS_SEVERITY = "high"  # [DEFAULT] as FTMO, a violation can end a funded account
+
+
 class CaseStore:
-    def __init__(self, pool: asyncpg.Pool, schema: str) -> None:
-        """The customers schema must be migrated (CustomerStore.open)."""
+    def __init__(self, pool: asyncpg.Pool, schema: str, journal_schema: str | None = None) -> None:
+        """The customers schema must be migrated (CustomerStore.open);
+        `journal_schema` is the engine's, read for news violations."""
         self._pool = pool
         self._s = check_schema(schema)
+        self._j = None if journal_schema is None else check_schema(journal_schema)
 
     # --- alerts -----------------------------------------------------------------------
 
@@ -83,51 +95,125 @@ class CaseStore:
     ) -> tuple[str, str]:
         """Record an alert on the customer's case not closed, or on a new
         case; return (CAS, ALR)."""
-        s = self._s
         async with self._pool.acquire() as conn, conn.transaction():
-            await conn.execute(f"SELECT 1 FROM {s}.cif WHERE cif = $1 FOR UPDATE", cif)
-            row = await conn.fetchrow(
-                f"SELECT * FROM {s}.cases WHERE cif = $1 AND status <> 'closed' FOR UPDATE", cif
+            return await self._raise(conn, cif, acc, source, kind, severity, detail, due_at, ts)
+
+    async def alert_news_violations(
+        self, due: Callable[[str, int], int], ts: int, limit: int = 500
+    ) -> list[str]:
+        """Raise a high-severity integrity alert for every NewsViolation the
+        engine journaled after the cursor, cursor moved in the same
+        transaction (never missed or doubled); return the ALR ids. None
+        while another caller holds the cursor."""
+        if self._j is None:
+            raise RuntimeError("no journal schema given")
+        s, j = self._s, self._j
+        raised: list[str] = []
+        async with self._pool.acquire() as conn, conn.transaction():
+            after = await conn.fetchval(
+                f"SELECT seq FROM {s}.news_cursor WHERE id = 1 FOR UPDATE SKIP LOCKED"
             )
-            alr = f"ALR{await conn.fetchval(f"SELECT nextval('{s}.alr_seq')"):08d}"
-            joined: dict[str, Any] = {
-                "alr": alr,
-                "source": source,
-                "kind": kind,
-                "severity": severity,
-                "acc": acc,
-                "due_at": due_at,
-            }
-            if row is not None and row["status"] == "actioning":
-                cas = row["cas"]  # a decision is being carried out: the alert waits on record
-                await self._insert_alert(
-                    conn, alr, cas, cif, acc, source, kind, severity, ts, detail
-                )
-                await self._append(conn, cas, "note", ts, {"by": source, "alert": joined})
-                return cas, alr
-            if row is None:
-                cas = f"CAS{await conn.fetchval(f"SELECT nextval('{s}.cas_seq')"):08d}"
+            if after is None:
+                return raised
+            if await conn.fetchval("SELECT to_regclass($1)", f"{j}.journal") is None:
+                return raised
+            rows = await conn.fetch(
+                f"SELECT seq, events FROM {j}.journal WHERE seq > $1 ORDER BY seq LIMIT $2",
+                after,
+                limit,
+            )
+            for row in rows:
+                events = CODEC.decode(row["events"])
+                assert isinstance(events, tuple)
+                for e in events:
+                    if not isinstance(e, NewsViolation):
+                        continue
+                    cif = await conn.fetchval(
+                        f"SELECT cif FROM {s}.accounts WHERE acc = $1", e.account_id
+                    )
+                    if cif is None:
+                        log.warning("news violation on %s, no customer record", e.account_id)
+                        continue
+                    detail = {
+                        "rule": "restricted news window",
+                        "journal_seq": row["seq"],
+                        "position_id": e.position_id,
+                        "close_id": e.close_id,
+                        "symbol": e.symbol,
+                        "fill": e.reason,
+                        "pnl_cents": e.pnl_cents,
+                        "events": list(e.event_ids),
+                        "rsv_id": e.rsv_id,
+                        "at": e.ts,
+                    }
+                    _, alr = await self._raise(
+                        conn,
+                        cif,
+                        e.account_id,
+                        NEWS_SOURCE,
+                        "integrity",
+                        NEWS_SEVERITY,
+                        detail,
+                        due(NEWS_SEVERITY, ts),
+                        ts,
+                    )
+                    raised.append(alr)
+            if rows:
                 await conn.execute(
-                    f"INSERT INTO {s}.cases (cas, cif, opened_at, status, severity, due_at) "
-                    f"VALUES ($1, $2, $3, 'open', $4, $5)",
-                    cas,
-                    cif,
-                    ts,
-                    severity,
-                    due_at,
+                    f"UPDATE {s}.news_cursor SET seq = $1 WHERE id = 1", rows[-1]["seq"]
                 )
-                await self._insert_alert(
-                    conn, alr, cas, cif, acc, source, kind, severity, ts, detail
-                )
-                opened = {"cif": cif, "kind": kind, "severity": severity, "due_at": due_at}
-                await self._append(conn, cas, "opened", ts, opened)
-            else:
-                cas = row["cas"]
-                await self._insert_alert(
-                    conn, alr, cas, cif, acc, source, kind, severity, ts, detail
-                )
-            await self._append(conn, cas, "alert", ts, joined)
+        return raised
+
+    async def _raise(
+        self,
+        conn: Conn,
+        cif: str,
+        acc: str | None,
+        source: str,
+        kind: str,
+        severity: str,
+        detail: dict[str, Any],
+        due_at: int,
+        ts: int,
+    ) -> tuple[str, str]:
+        s = self._s
+        await conn.execute(f"SELECT 1 FROM {s}.cif WHERE cif = $1 FOR UPDATE", cif)
+        row = await conn.fetchrow(
+            f"SELECT * FROM {s}.cases WHERE cif = $1 AND status <> 'closed' FOR UPDATE", cif
+        )
+        alr = f"ALR{await conn.fetchval(f"SELECT nextval('{s}.alr_seq')"):08d}"
+        joined: dict[str, Any] = {
+            "alr": alr,
+            "source": source,
+            "kind": kind,
+            "severity": severity,
+            "acc": acc,
+            "due_at": due_at,
+        }
+        if row is not None and row["status"] == "actioning":
+            cas = row["cas"]  # a decision is being carried out: the alert waits on record
+            await self._insert_alert(conn, alr, cas, cif, acc, source, kind, severity, ts, detail)
+            await self._append(conn, cas, "note", ts, {"by": source, "alert": joined})
             return cas, alr
+        if row is None:
+            cas = f"CAS{await conn.fetchval(f"SELECT nextval('{s}.cas_seq')"):08d}"
+            await conn.execute(
+                f"INSERT INTO {s}.cases (cas, cif, opened_at, status, severity, due_at) "
+                f"VALUES ($1, $2, $3, 'open', $4, $5)",
+                cas,
+                cif,
+                ts,
+                severity,
+                due_at,
+            )
+            await self._insert_alert(conn, alr, cas, cif, acc, source, kind, severity, ts, detail)
+            opened = {"cif": cif, "kind": kind, "severity": severity, "due_at": due_at}
+            await self._append(conn, cas, "opened", ts, opened)
+        else:
+            cas = row["cas"]
+            await self._insert_alert(conn, alr, cas, cif, acc, source, kind, severity, ts, detail)
+        await self._append(conn, cas, "alert", ts, joined)
+        return cas, alr
 
     async def _insert_alert(
         self,

@@ -2,6 +2,7 @@ import { screen, within } from "@testing-library/react";
 import type { LiveAccount } from "../api/types";
 import { fakeAuth, renderWith } from "../test-utils";
 import { AccountPage, ResetCard } from "./AccountPage";
+import { RulesPage } from "./RulesPage";
 
 const chart = vi.hoisted(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn() }));
 vi.mock("lightweight-charts", () => ({
@@ -16,7 +17,7 @@ vi.mock("lightweight-charts", () => ({
 
 const ACCOUNT: LiveAccount = {
   account_id: "ACC00000001",
-  rsv_id: "lite-s1-v1",
+  rsv_id: "lite-s1-v2",
   status: "active",
   locked: false,
   balance_cents: 10_200_000,
@@ -34,7 +35,7 @@ const ACCOUNT: LiveAccount = {
   target_balance_cents: 10_600_000,
   rules: {
     stage: "s1",
-    rsv_id: "lite-s1-v1",
+    rsv_id: "lite-s1-v2",
     profit_target_percent: "6",
     max_loss_percent: "6",
     max_loss_kind: "static",
@@ -45,6 +46,7 @@ const ACCOUNT: LiveAccount = {
     target_basis: "closed_balance",
     flat_to_pass: true,
     tie_rule: "breach_wins",
+    news_restricted: false, // evaluations: not bound by news windows
   },
   trading_days: 1,
   positions: [
@@ -70,8 +72,8 @@ const QUOTES = {
   "EUR/USD": { symbol: "EUR/USD", bid: 109_655, ask: 109_665, mid: 109_660, source_ts: 1, digits: 5, frozen: false, blocked: false },
 };
 
-function server() {
-  const stream = `event: account\ndata: ${JSON.stringify(ACCOUNT)}\n\nevent: quotes\ndata: ${JSON.stringify(QUOTES)}\n\n`;
+function server(account: LiveAccount = ACCOUNT) {
+  const stream = `event: account\ndata: ${JSON.stringify(account)}\n\nevent: quotes\ndata: ${JSON.stringify(QUOTES)}\n\n`;
   return vi.fn<typeof fetch>((input) => {
     const url = input as string;
     if (url.endsWith("/stream")) return Promise.resolve(new Response(stream, { status: 200 }));
@@ -143,4 +145,15 @@ it("names a source without a link as plain text", async () => {
   renderWith(<Attribution source={{ text: "Synthetic prices (development)", link: null, url: null }} />, fakeAuth(), vi.fn());
   expect(screen.getByText("Synthetic prices (development)")).toBeInTheDocument();
   expect(screen.queryByRole("link")).toBeNull();
+});
+
+it("says whether news windows bind the account's stage", async () => {
+  renderWith(<RulesPage acc="ACC00000001" />, fakeAuth(), server());
+  expect(await screen.findByText(/News events do not restrict this stage/)).toBeInTheDocument();
+});
+
+it("warns a funded account that a fill inside a news window can end it", async () => {
+  const funded = { ...ACCOUNT, target_balance_cents: null, rules: { ...ACCOUNT.rules, stage: "funded" as const, news_restricted: true } };
+  renderWith(<RulesPage acc="ACC00000001" />, fakeAuth(), server(funded));
+  expect(await screen.findByText(/a violation can end the account/)).toBeInTheDocument();
 });

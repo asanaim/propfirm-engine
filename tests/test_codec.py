@@ -1,5 +1,6 @@
 """Canonical JSON: one encoding per value, strict decoding."""
 
+import json
 from fractions import Fraction
 
 import pytest
@@ -58,11 +59,11 @@ SAMPLES: list[object] = [
     FeedGap(1, "EUR/USD", 3, 4),
     DuplicateUpdate(1, "EUR/USD", 3),
     StaleUpdate(1, "EUR/USD", 3, 2_500),
-    DayStarted(1, "A", 2, 3, 4, "lite-s1-v1"),
+    DayStarted(1, "A", 2, 3, 4, "lite-s1-v2"),
     AccountBreached(
-        1, "A", (BreachReason.DAILY_LOSS, BreachReason.MAX_LOSS), -1, 2, 3, "lite-s1-v1"
+        1, "A", (BreachReason.DAILY_LOSS, BreachReason.MAX_LOSS), -1, 2, 3, "lite-s1-v2"
     ),
-    StagePassed(1, "A", 2, 4, "lite-s1-v1"),
+    StagePassed(1, "A", 2, 4, "lite-s1-v2"),
     Entry("e1", 1, "trade_pnl", (Posting("a", 5), Posting("b", -5)), "o1"),
     price_ref(U, 1, TEST_KEY),
     GuardConfig(gap_threshold_ms={"XAU/USD": 9_000, "EUR/USD": 7_000}),
@@ -199,3 +200,38 @@ def test_registration_rules() -> None:
         Codec([type("Fraction", (), {})])  # reserved tag
     with pytest.raises(TypeError):
         Codec([int])
+
+
+def test_a_field_added_later_keeps_old_records_byte_identical() -> None:
+    """`added_field`: left out while it holds its default, so records written
+    before the field existed keep their text and hash and decode with it."""
+    from propfirm.rules.news import CURRENT_MAP, EventScope, RestrictedEvent
+
+    old = RestrictedEvent("nfp", 1_000_000, EventScope.CURRENCY, "USD")  # default map v1
+    text = CODEC.encode(old)
+    assert "instrument_map" not in text
+    assert CODEC.decode(text) == old
+    new = RestrictedEvent("nfp", 1_000_000, EventScope.CURRENCY, "USD", instrument_map=CURRENT_MAP)
+    assert '"instrument_map":"ftmo-1"' in CODEC.encode(new)
+    assert CODEC.decode(CODEC.encode(new)) == new
+    data = json.loads(text)
+    data["instrument_map"] = "v1"  # the default written out, keys still sorted
+    explicit = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    with pytest.raises(CodecError, match="canonical"):
+        CODEC.decode(explicit)
+    with pytest.raises(CodecError):
+        CODEC.decode(text.replace('"scope"', '"unknown":1,"scope"'))
+
+
+def test_an_added_field_needs_a_default() -> None:
+    import dataclasses
+
+    from propfirm.journal.codec import Codec
+
+    @dataclasses.dataclass(frozen=True)
+    class Bad:
+        a: int
+        b: int = dataclasses.field(metadata={"propfirm.codec.added": True})
+
+    with pytest.raises(TypeError, match="needs a default"):
+        Codec([Bad])

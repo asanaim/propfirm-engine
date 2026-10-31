@@ -9,9 +9,9 @@ holds their starting values:
 
 Each change is a numbered, append-only record with its author and reason;
 the latest change of a setting wins. A stage-limits change makes a new
-rule-set version, `<file rsv_id>-a<change number>` (one-step-s1-v1-a7). The
+rule-set version, `<file rsv_id>-a<change number>` (one-step-s1-v2-a7). The
 stage's other numbers (trading days, consistency, sizes) still come from
-the file, so a later file version of that stage gives one-step-s1-v2-a7.
+the file, so a later file version of that stage gives one-step-s1-v3-a7.
 Published versions never change: open accounts keep theirs, and a new
 account gets the version in force when it is bought.
 

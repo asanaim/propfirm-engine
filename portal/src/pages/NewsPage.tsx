@@ -33,7 +33,7 @@ export function NewsPage() {
   return (
     <div className="page">
       <h1>News calendar</h1>
-      <p className="lead">No trade opens or closes on the listed symbols inside these windows.</p>
+      <p className="lead">On funded accounts, no trade opens or closes on the listed symbols inside these windows.</p>
       <p className="muted">
         Each window runs from 2 minutes before to 2 minutes after the release. The list comes from the publishers&apos;
         own schedules (BLS, Federal Reserve, ECB, Bank of England, EIA) and is updated monthly. Bank of Japan decisions
