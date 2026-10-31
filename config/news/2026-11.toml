@@ -1,21 +1,44 @@
 # Restricted news events for November 2026 (M13, CC-5).
 #
-# Built from the publishers' own schedules; no paid calendar API (its
-# display would need a separate licence). Times are the publisher's local
-# time; the engine stores UTC. Each window runs 2 minutes before to
-# 2 minutes after the release [CONFIRMED]. Recheck every date before the
-# event; a changed date is a new version of this file (and a cancel plus a
-# new event for anything already published).
+# The list is FTMO's restricted events (read 31 Oct 2026; decided the same
+# day); each date and time is the publisher's own, read 31 Oct 2026 (the
+# source line). Each window runs 2 minutes before to 2 minutes after the
+# release; they bind funded accounts only. Times are the publisher's local
+# time; the engine stores UTC.
 #
-# Not listed (no fixed time): none this month.
+# The news collector reads most of these schedules itself; this file is the
+# record for releases it cannot read (BLS: US jobs and CPI; the Reserve Bank
+# of New Zealand) and a fallback for the rest. Ids match the collector's, so
+# a release in both is one event. Recheck every date before the event; a
+# changed date is a new version of this file.
+#
+# v2: FTMO's list (Canada, Australia, New Zealand, UK CPI, FOMC minutes added).
 
-version = "news-2026-11-v1"
+version = "news-2026-11-v2"
 month = "2026-11"
 checked = "2026-10-31"
 
 [[event]]
+id = "2026-11-03-rba-decision"
+title = "RBA Cash Rate & Statement"
+scope = "currency"
+currency = "AUD"
+local = "2026-11-03T14:30"
+zone = "Australia/Sydney"
+source = "https://www.rba.gov.au/schedules-events/board-meeting-schedules.html"
+
+[[event]]
+id = "2026-11-04-nz-employment"
+title = "New Zealand Employment Change & Unemployment Rate"
+scope = "currency"
+currency = "NZD"
+local = "2026-11-04T10:45"
+zone = "Pacific/Auckland"
+source = "https://www.stats.govt.nz/release-calendar/"
+
+[[event]]
 id = "2026-11-04-us-oil-inventory"
-title = "US weekly petroleum status report (EIA)"
+title = "Crude Oil Inventories (EIA)"
 scope = "oil_inventory"
 local = "2026-11-04T10:30"
 zone = "America/New_York"
@@ -23,16 +46,16 @@ source = "https://www.eia.gov/petroleum/supply/weekly/schedule.php"
 
 [[event]]
 id = "2026-11-05-boe-decision"
-title = "Bank of England rate decision"
+title = "Bank of England Official Bank Rate & MPC Votes"
 scope = "currency"
 currency = "GBP"
 local = "2026-11-05T12:00"
 zone = "Europe/London"
-source = "https://www.bankofengland.co.uk/news/2024/december/mpc-dates-for-2026"
+source = "https://www.bankofengland.co.uk/monetary-policy/upcoming-mpc-dates"
 
 [[event]]
 id = "2026-11-06-us-employment"
-title = "US employment situation (October)"
+title = "US Non-Farm Employment Change, Unemployment Rate & Wages"
 scope = "currency"
 currency = "USD"
 local = "2026-11-06T08:30"
@@ -40,8 +63,17 @@ zone = "America/New_York"
 source = "https://www.bls.gov/schedule/2026/home.htm"
 
 [[event]]
+id = "2026-11-06-ca-employment"
+title = "Canada Employment Change & Unemployment Rate"
+scope = "currency"
+currency = "CAD"
+local = "2026-11-06T08:30"
+zone = "America/Toronto"
+source = "https://www150.statcan.gc.ca/n1/dai-quo/ssi/homepage/schedule-key_indicators-eng.json"
+
+[[event]]
 id = "2026-11-10-us-cpi"
-title = "US consumer price index (October)"
+title = "US CPI y/y"
 scope = "currency"
 currency = "USD"
 local = "2026-11-10T08:30"
@@ -50,23 +82,68 @@ source = "https://www.bls.gov/schedule/news_release/cpi.htm"
 
 [[event]]
 id = "2026-11-12-us-oil-inventory"
-title = "US weekly petroleum status report (EIA; Veterans Day: Thursday 12:00)"
+title = "Crude Oil Inventories (EIA) (Veterans Day: Thursday 12:00)"
 scope = "oil_inventory"
 local = "2026-11-12T12:00"
 zone = "America/New_York"
 source = "https://www.eia.gov/petroleum/supply/weekly/schedule.php"
 
 [[event]]
+id = "2026-11-16-ca-cpi"
+title = "Canada CPI m/m"
+scope = "currency"
+currency = "CAD"
+local = "2026-11-16T08:30"
+zone = "America/Toronto"
+source = "https://www150.statcan.gc.ca/n1/dai-quo/ssi/homepage/schedule-key_indicators-eng.json"
+
+[[event]]
+id = "2026-11-18-uk-cpi"
+title = "UK CPI y/y"
+scope = "currency"
+currency = "GBP"
+local = "2026-11-18T07:00"
+zone = "Europe/London"
+source = "https://www.ons.gov.uk/releasecalendar"
+
+[[event]]
 id = "2026-11-18-us-oil-inventory"
-title = "US weekly petroleum status report (EIA)"
+title = "Crude Oil Inventories (EIA)"
 scope = "oil_inventory"
 local = "2026-11-18T10:30"
 zone = "America/New_York"
 source = "https://www.eia.gov/petroleum/supply/weekly/schedule.php"
 
 [[event]]
+id = "2026-11-18-fomc-minutes"
+title = "FOMC Meeting Minutes"
+scope = "currency"
+currency = "USD"
+local = "2026-11-18T14:00"
+zone = "America/New_York"
+source = "https://www.federalreserve.gov/newsevents/2026-november.htm"
+
+[[event]]
+id = "2026-11-19-au-employment"
+title = "Australia Employment Change & Unemployment Rate"
+scope = "currency"
+currency = "AUD"
+local = "2026-11-19T11:30"
+zone = "Australia/Sydney"
+source = "https://www.abs.gov.au/release-calendar/future-releases/202611/rcc_labour"
+
+[[event]]
+id = "2026-11-25-au-cpi"
+title = "Australia CPI"
+scope = "currency"
+currency = "AUD"
+local = "2026-11-25T11:30"
+zone = "Australia/Sydney"
+source = "https://www.abs.gov.au/release-calendar/future-releases/202611/rcc_economy"
+
+[[event]]
 id = "2026-11-25-us-oil-inventory"
-title = "US weekly petroleum status report (EIA)"
+title = "Crude Oil Inventories (EIA)"
 scope = "oil_inventory"
 local = "2026-11-25T10:30"
 zone = "America/New_York"

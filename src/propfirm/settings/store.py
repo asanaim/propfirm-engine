@@ -75,6 +75,15 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        3,
+        """
+        -- events the collector read from the publishers' schedules
+        ALTER TABLE {s}.news_actions DROP CONSTRAINT news_actions_action_check;
+        ALTER TABLE {s}.news_actions ADD CONSTRAINT news_actions_action_check
+            CHECK (action IN ('calendar', 'manual', 'published', 'cancel', 'collector'));
+        """,
+    ),
 )
 
 

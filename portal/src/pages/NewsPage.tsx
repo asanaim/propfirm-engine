@@ -35,10 +35,11 @@ export function NewsPage() {
       <h1>News calendar</h1>
       <p className="lead">On funded accounts, no trade opens or closes on the listed symbols inside these windows.</p>
       <p className="muted">
-        Each window runs from 2 minutes before to 2 minutes after the release. The list comes from the publishers&apos;
-        own schedules (BLS, Federal Reserve, ECB, Bank of England, EIA) and is updated monthly. Bank of Japan decisions
-        have no fixed time: their window opens when the statement is published and runs 2 minutes. Crypto is not
-        restricted.
+        Each window runs from 2 minutes before to 2 minutes after the release. The restricted events are FTMO&apos;s list:
+        central bank rate decisions (Federal Reserve, ECB, Bank of England, Bank of Canada, RBA, RBNZ, SNB), FOMC
+        minutes, and jobs, inflation and GDP releases for the US, UK, Canada, Australia and New Zealand, plus the weekly
+        US crude oil inventories. Each date and time comes from the publisher&apos;s own schedule. Crypto is not
+        restricted, and evaluations are not bound.
       </p>
       {events.length === 0 ? (
         <Card>
