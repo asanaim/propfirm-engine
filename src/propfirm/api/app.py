@@ -1,7 +1,9 @@
 """The platform API: customers, checkout, trading and admin settings.
 
-Views, by Keycloak realm role (the portal's tokens carry `trader`, the back
-office's carry `staff` and `admin`):
+Views: traders by Keycloak realm role (`trader`); employees by permission,
+from the staff directory (`propfirm.staff`: tier, roles, grants), or, for a
+login with no directory record, from the Keycloak role (`staff` = T2 with
+every role, `admin` = T4). Below, "employee" is T1 to T3 and "admin" T4+:
 - public: /health; /catalogue (products, sizes, prices, split, discounts,
   and every stage's profit target, daily loss limit, drawdown limit,
   trading days and consistency rule); /access (the minimum age);
@@ -21,8 +23,11 @@ office's carry `staff` and `admin`):
   result differs from the customer record (approve or deny, never their
   own); integrity, fraud and compliance cases: raises alerts, takes, notes,
   decides; a decision with actions needs a second employee (never on their
-  own customer record); payouts: approves (as many employees as the policy
-  requires, never their own) or denies; trades none; no settings;
+  own customer record), and a void or profit removal is proposed by a T2+
+  and authorised by an admin; payouts: a T2+ passes, then an admin
+  authorises (never their own), or a T2+ denies; trades none; no settings;
+  every approval needs a recent second factor (step-up); the staff
+  directory: /staff/me, members and grants under four eyes;
   restricted news events (M13): publishes a month of the calendar files,
   adds a manual window with a reason, marks a no-fixed-time event
   (Bank of Japan) published; the risk desk's action log;
@@ -59,6 +64,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
+from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
@@ -104,14 +110,18 @@ from propfirm.settings.newsdesk import Author, NewsDesk, NewsRefused, action_vie
 from propfirm.settings.overlay import CountryGating, stage_limits, to_json
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.store import ChangeStatus
+from propfirm.staff.directory import Actor, Directory
+from propfirm.staff.model import PERMISSIONS, TITLES, Access, legacy_access
+from propfirm.staff.records import Grant, Member, StaffRefused
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
 ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 Ident = Annotated[str, Path(pattern=ID_PATTERN)]
 REJECTIONS = frozenset({"OrderRejected", "InputRejected"})
 TRADER_ROLES = frozenset({"trader"})
-STAFF_ROLES = frozenset({"staff", "admin"})  # staff: employees
-ADMIN_ROLES = frozenset({"admin"})
+# Employees: what each may do is a permission (`propfirm.staff.model`), from
+# the staff directory; without one, Keycloak's staff and admin roles map as
+# before (staff T2, admin T4).
 
 
 class LiveSource(Protocol):
@@ -176,6 +186,7 @@ class Deps:
     payouts: Payouts | None = None  # payout wallets, requests and approvals
     news: NewsDesk | None = None  # restricted-events calendar and the risk desk's actions
     source_alerts: SourceAlerts | None = None  # news sources the collector cannot read
+    staff: Directory | None = None  # the staff directory; None: Keycloak roles only
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -289,6 +300,58 @@ class DecisionBody(_Body):
     reason: Reason
 
 
+SidText = Annotated[str, StringConstraints(pattern=r"^(STF|APP)[0-9]{8}$")]
+Login = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]  # a Keycloak id
+Email = Annotated[str, StringConstraints(pattern=r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{1,63}$")]
+Team = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+Role = Literal["support", "kyc", "risk", "payouts", "integrity", "product", "marketing", "it"]
+Power = Literal["settings.view", "settings.change", "news.cancel"]  # = staff.model.POWERS
+
+
+class MemberBody(_Body):
+    """A joiner: `tier` and `roles` are requested for them at once (each
+    waits for its approver). An apprentice needs a T2 or T3 `mentor` and
+    `ends_at` 3 to 6 months ahead; a contractor a `lead` (sponsor) and
+    `ends_at`."""
+
+    subject: Login
+    name: Title
+    email: Email | None = None
+    kind: Literal["staff", "apprentice", "contractor"]
+    team: Team | None = None
+    lead: SidText | None = None
+    mentor: SidText | None = None
+    ends_at: StrictInt | None = None
+    tier: StrictInt | None = None
+    roles: list[Role] = []
+    reason: Reason
+
+
+class MoveBody(_Body):
+    team: Team | None = None
+    lead: SidText | None = None
+    reason: Reason
+
+
+class GrantBody(_Body):
+    """`value`: a tier 0 to 5 (tier, acting), a role, or an admin power."""
+
+    sid: SidText
+    grant: Literal["tier", "role", "power", "acting"]
+    value: StrictInt | Role | Power
+    starts_at: StrictInt | None = None
+    ends_at: StrictInt | None = None
+    reason: Reason
+
+
+class GraduateBody(_Body):
+    """The new staff login (its own Keycloak user) of the graduate."""
+
+    subject: Login
+    email: Email | None = None
+    reason: Reason
+
+
 class WalletBody(_Body):
     address: Annotated[str, StringConstraints(min_length=34, max_length=34)]
 
@@ -386,6 +449,77 @@ def calendar_view(calendar: Calendar, scheduled: set[str]) -> dict[str, Any]:
             for u in calendar.unscheduled
         ],
     }
+
+
+def access_view(a: Access) -> dict[str, Any]:
+    return {
+        "source": a.source,
+        "sid": a.sid,
+        "kind": a.kind,
+        "tier": None if a.tier is None else f"T{int(a.tier)}",
+        "title": None if a.tier is None else TITLES[a.tier],
+        "roles": sorted(a.roles),
+        "powers": sorted(a.powers),
+        "permissions": a.permissions(),
+        "grants": list(a.grants),
+    }
+
+
+def member_view(m: Member, now: int) -> dict[str, Any]:
+    return {
+        "sid": m.sid,
+        "subject": m.subject,
+        "name": m.name,
+        "email": m.email,
+        "kind": m.kind,
+        "team": m.team,
+        "lead": m.lead,
+        "mentor": m.mentor,
+        "starts_at": m.starts_at,
+        "ends_at": m.ends_at,
+        "status": m.status if m.active(now) or m.status != "active" else "ended",
+        "from_sid": m.from_sid,
+        "to_sid": m.to_sid,
+        "recommended_by": m.recommended_by,
+    }
+
+
+def grant_view(g: Grant, now: int) -> dict[str, Any]:
+    return {
+        "grt": g.grt,
+        "sid": g.sid,
+        "grant": g.grant,
+        "value": f"T{g.value}" if g.grant in ("tier", "acting") else g.value,
+        "starts_at": g.starts_at,
+        "ends_at": g.ends_at,
+        "status": g.state(now),
+        "in_force": g.in_force(now),
+        "requested_by": g.requested_by,
+        "requested_at": g.requested_at,
+        "reason": g.reason,
+        "approved_by": g.approved_by,
+        "approved_at": g.approved_at,
+        "ended_by": g.ended_by,
+        "ended_at": g.ended_at,
+    }
+
+
+STAFF_ERRORS = {
+    "unknown": 404,
+    "forbidden": 403,
+    "own_access": 403,
+    "four_eyes": 403,
+    "invalid": 422,
+    "exists": 409,
+    "pending": 409,
+    "not_allowed": 409,
+}
+
+
+def _staff_refused(exc: StaffRefused) -> HTTPException:
+    return HTTPException(
+        status_code=STAFF_ERRORS[exc.code], detail={"code": exc.code, "message": str(exc)}
+    )
 
 
 def change_view(status: ChangeStatus) -> dict[str, Any]:
@@ -647,19 +781,93 @@ async def _trader(me: Me) -> Principal:
     return me
 
 
-async def _admin(me: Me) -> Principal:
-    _role(me, ADMIN_ROLES)
-    return me
+def _actor(me: Principal) -> Actor:
+    return Actor(me.subject, me.roles)
 
 
-async def _staff(me: Me) -> Principal:
-    _role(me, STAFF_ROLES)
+async def _access(deps: Deps, me: Principal) -> Access:
+    if deps.staff is None:
+        return legacy_access(me.subject, me.roles)
+    return await deps.staff.access(_actor(me), deps.clock())
+
+
+async def _step_up(deps: Deps, me: Principal) -> None:
+    """Every approval: a second factor, entered at most `step_up_minutes`
+    ago (RFC 9470 challenge, as the trader's payout request)."""
+    staff = (await deps.policy.current()).staff if deps.policy is not None else None
+    if staff is not None and not staff.approvals_need_mfa:
+        return
+    minutes = staff.step_up_minutes if staff is not None else 5
+    challenge = 'Bearer error="insufficient_user_authentication"'
+    if not me.mfa:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "mfa_required", "message": "approvals need a second factor"},
+            headers={"WWW-Authenticate": challenge},
+        )
+    limit = minutes * 60_000
+    if limit and (me.auth_time is None or deps.clock() - me.auth_time > limit):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "reauth_required",
+                "message": f"confirm with your second factor (within {minutes} minutes)",
+            },
+            headers={"WWW-Authenticate": f"{challenge}, max_age={minutes * 60}"},
+        )
+
+
+def _forbidden(name: str) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": "forbidden",
+            "message": f"needs {name}: {PERMISSIONS[name].describes}",
+            "permission": name,
+        },
+    )
+
+
+async def _need(deps: Deps, me: Principal, name: str) -> Access:
+    """The login's access, if it has the permission (and, for an
+    approval, a recent second factor)."""
+    access = await _access(deps, me)
+    if not access.has(name):
+        raise _forbidden(name)
+    if PERMISSIONS[name].approval:
+        await _step_up(deps, me)
+    return access
+
+
+def _can(name: str) -> Callable[..., Awaitable[Principal]]:
+    async def check(deps: D, me: Me) -> Principal:
+        await _need(deps, me, name)
+        return me
+
+    check.__name__ = f"can_{name.replace('.', '_')}"
+    return check
+
+
+async def _employee(deps: D, me: Me) -> Principal:
+    """Anyone with staff access now (an apprentice too)."""
+    access = await _access(deps, me)
+    if access.tier is None:
+        raise HTTPException(status_code=403, detail="not in this login's view")
     return me
 
 
 Trader = Annotated[Principal, Depends(_trader)]
-Staff = Annotated[Principal, Depends(_staff)]
-Admin = Annotated[Principal, Depends(_admin)]
+Staff = Annotated[Principal, Depends(_can("staff.view"))]
+Employee = Annotated[Principal, Depends(_employee)]
+Approver = Annotated[Principal, Depends(_can("progression.decide"))]
+IdentityReviewer = Annotated[Principal, Depends(_can("onboarding.decide"))]
+CaseWorker = Annotated[Principal, Depends(_can("case.work"))]
+PayoutDenier = Annotated[Principal, Depends(_can("payout.deny"))]
+NewsDesker = Annotated[Principal, Depends(_can("news.desk"))]
+NewsCanceller = Annotated[Principal, Depends(_can("news.cancel"))]
+SettingsReader = Annotated[Principal, Depends(_can("settings.view"))]
+SettingsChanger = Annotated[Principal, Depends(_can("settings.change"))]
+DirectoryReader = Annotated[Principal, Depends(_can("staff.directory"))]
 PrgId = Annotated[str, Path(pattern=r"^PRG[0-9]{8}$")]
 STATUSES = Literal[
     "provisioning", "provisioned", "failed", "review", "approved", "denied", "blocked"
@@ -735,7 +943,7 @@ async def _cif(deps: Deps, me: Principal) -> CifRecord:
 
 
 async def _may_read(deps: Deps, me: Principal, account_id: str) -> None:
-    if me.roles & STAFF_ROLES:
+    if (await _access(deps, me)).has("staff.view"):
         return
     _role(me, TRADER_ROLES)
     await _owns(deps, me, account_id)
@@ -1160,7 +1368,7 @@ def create_app(
         result = await deps.gateway.outcome(entry_id, 0)
         accounts = {e.get("account_id") for e in result.events if isinstance(e, dict)}
         accounts.discard(None)
-        if not me.roles & STAFF_ROLES:
+        if not (await _access(deps, me)).has("staff.view"):
             _role(me, TRADER_ROLES)
             if not accounts:
                 raise HTTPException(status_code=404, detail="unknown input")
@@ -1303,13 +1511,13 @@ def create_app(
         return progression_view(record)
 
     @app.post("/staff/progressions/{prg}/approve")
-    async def approve(deps: D, me: Staff, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
+    async def approve(deps: D, me: Approver, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
         """Approve a funded review: funded onboarding follows (step 3b)."""
         result: dict[str, Any] = await decide(deps, me, prg, True, body.reason)
         return result
 
     @app.post("/staff/progressions/{prg}/deny")
-    async def deny(deps: D, me: Staff, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
+    async def deny(deps: D, me: Approver, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
         result: dict[str, Any] = await decide(deps, me, prg, False, body.reason)
         return result
 
@@ -1364,19 +1572,21 @@ def create_app(
 
     @app.post("/staff/onboardings/{onb}/approve")
     async def approve_onboarding(
-        deps: D, me: Staff, onb: OnbId, body: DecisionBody
+        deps: D, me: IdentityReviewer, onb: OnbId, body: DecisionBody
     ) -> dict[str, Any]:
         """Accept a verified identity that differs from the customer record."""
         return await decide_onboarding(deps, me, onb, True, body.reason)
 
     @app.post("/staff/onboardings/{onb}/deny")
-    async def deny_onboarding(deps: D, me: Staff, onb: OnbId, body: DecisionBody) -> dict[str, Any]:
+    async def deny_onboarding(
+        deps: D, me: IdentityReviewer, onb: OnbId, body: DecisionBody
+    ) -> dict[str, Any]:
         return await decide_onboarding(deps, me, onb, False, body.reason)
 
     # --- employees: integrity, fraud and compliance cases --------------------------
 
     @app.post("/staff/cases", status_code=201)
-    async def raise_alert(deps: D, me: Staff, body: AlertBody) -> dict[str, Any]:
+    async def raise_alert(deps: D, me: CaseWorker, body: AlertBody) -> dict[str, Any]:
         """An employee's alert: joins the customer's case not closed, or opens one."""
         cif = await deps.customers.cif(body.cif)
         if cif is None:
@@ -1446,7 +1656,7 @@ def create_app(
             raise _case_refused(exc) from exc
 
     @app.post("/staff/cases/{cas}/assign")
-    async def assign_case(deps: D, me: Staff, cas: CasId) -> dict[str, Any]:
+    async def assign_case(deps: D, me: CaseWorker, cas: CasId) -> dict[str, Any]:
         """Take the case."""
         result: dict[str, Any] = await case_step(
             deps, lambda c: c.assign(cas, me.subject, deps.clock())
@@ -1454,17 +1664,22 @@ def create_app(
         return result
 
     @app.post("/staff/cases/{cas}/notes")
-    async def note_case(deps: D, me: Staff, cas: CasId, body: NoteBody) -> dict[str, Any]:
+    async def note_case(deps: D, me: CaseWorker, cas: CasId, body: NoteBody) -> dict[str, Any]:
         result: dict[str, Any] = await case_step(
             deps, lambda c: c.note(cas, me.subject, body.text, deps.clock())
         )
         return result
 
     @app.post("/staff/cases/{cas}/decide")
-    async def decide_case(deps: D, me: Staff, cas: CasId, body: CaseDecisionBody) -> dict[str, Any]:
+    async def decide_case(
+        deps: D, me: CaseWorker, cas: CasId, body: CaseDecisionBody
+    ) -> dict[str, Any]:
         """cleared or warning closes the case; actioned proposes actions that
-        a second employee must confirm."""
+        a second employee must confirm. Proposing a void or a profit removal
+        is a pass: T2 or above."""
         actions = [a.model_dump(exclude_none=True) for a in body.actions]
+        if needs_authorisation(actions):
+            await _need(deps, me, "case.pass")
         result: dict[str, Any] = await case_step(
             deps,
             lambda c: c.decide(cas, me.subject, body.outcome, actions, body.reason, deps.clock()),
@@ -1472,15 +1687,26 @@ def create_app(
         return result
 
     @app.post("/staff/cases/{cas}/confirm")
-    async def confirm_case(deps: D, me: Staff, cas: CasId, body: DecisionBody) -> dict[str, Any]:
-        """The second employee confirms the proposed actions; they are carried out."""
+    async def confirm_case(deps: D, me: Me, cas: CasId, body: DecisionBody) -> dict[str, Any]:
+        """The second employee confirms the proposed actions; they are carried
+        out. A void or profit removal needs an admin (authorise); a customer
+        block alone a T2 or above (confirm)."""
+        try:
+            proposed = await _cases(deps).proposed(cas)
+        except CaseRefused as exc:
+            raise _case_refused(exc) from exc
+        step = "authorise" if needs_authorisation(proposed) else "confirm"
+        access = await _need(deps, me, f"case.{step}")
+        tier = None if access.tier is None else int(access.tier)
         result: dict[str, Any] = await case_step(
-            deps, lambda c: c.confirm(cas, me.subject, body.reason, deps.clock())
+            deps, lambda c: c.confirm(cas, me.subject, body.reason, deps.clock(), step, tier)
         )
         return result
 
     @app.post("/staff/cases/{cas}/reject")
-    async def reject_case(deps: D, me: Staff, cas: CasId, body: DecisionBody) -> dict[str, Any]:
+    async def reject_case(
+        deps: D, me: CaseWorker, cas: CasId, body: DecisionBody
+    ) -> dict[str, Any]:
         """The second employee sends the proposed actions back."""
         result: dict[str, Any] = await case_step(
             deps, lambda c: c.reject(cas, me.subject, body.reason, deps.clock())
@@ -1488,7 +1714,9 @@ def create_app(
         return result
 
     @app.post("/staff/cases/{cas}/reopen")
-    async def reopen_case(deps: D, me: Staff, cas: CasId, body: DecisionBody) -> dict[str, Any]:
+    async def reopen_case(
+        deps: D, me: CaseWorker, cas: CasId, body: DecisionBody
+    ) -> dict[str, Any]:
         """Reopen a closed case on new evidence (an appeal)."""
         result: dict[str, Any] = await case_step(
             deps, lambda c: c.reopen(cas, me.subject, body.reason, deps.clock())
@@ -1529,17 +1757,30 @@ def create_app(
             raise _payout_refused(exc) from exc
 
     @app.post("/staff/payouts/{po}/approve")
-    async def approve_payout(deps: D, me: Staff, po: PoId, body: DecisionBody) -> dict[str, Any]:
+    async def approve_payout(deps: D, me: Me, po: PoId, body: DecisionBody) -> dict[str, Any]:
+        """The step due [decided 31 Oct 2026]: a pass (T2 or above, payouts
+        role), then an authorisation (an admin, another person). Payouts
+        requested under the count rule take any employee who may pass."""
         payouts = _payouts(deps)
-        return await payout_step(lambda: payouts.approve(po, me.subject, body.reason, deps.clock()))
+        try:
+            step = await payouts.next_step(po)
+        except PayoutRefused as exc:
+            raise _payout_refused(exc) from exc
+        access = await _need(deps, me, f"payout.{step or 'pass'}")
+        tier = None if access.tier is None else int(access.tier)
+        return await payout_step(
+            lambda: payouts.approve(po, me.subject, body.reason, deps.clock(), step, tier)
+        )
 
     @app.post("/staff/payouts/{po}/deny")
-    async def deny_payout(deps: D, me: Staff, po: PoId, body: DecisionBody) -> dict[str, Any]:
+    async def deny_payout(
+        deps: D, me: PayoutDenier, po: PoId, body: DecisionBody
+    ) -> dict[str, Any]:
         payouts = _payouts(deps)
         return await payout_step(lambda: payouts.deny(po, me.subject, body.reason, deps.clock()))
 
     @app.get("/admin/access")
-    async def admin_access(deps: D, me: Admin) -> dict[str, Any]:
+    async def admin_access(deps: D, me: SettingsReader) -> dict[str, Any]:
         """The country-gating switch and list in force, and the minimum age."""
         gate = (await _policy(deps)).access
         return {
@@ -1549,7 +1790,9 @@ def create_app(
         }
 
     @app.put("/admin/access/country-gating")
-    async def set_country_gating(deps: D, me: Admin, body: CountryGatingBody) -> dict[str, Any]:
+    async def set_country_gating(
+        deps: D, me: SettingsChanger, body: CountryGatingBody
+    ) -> dict[str, Any]:
         settings = _settings(deps)
         try:
             countries = parse_countries(body.blocked_countries, "blocked_countries")
@@ -1564,7 +1807,7 @@ def create_app(
     @app.put("/admin/products/{product_id}/stages/{stage}/limits")
     async def set_stage_limits(
         deps: D,
-        me: Admin,
+        me: SettingsChanger,
         product_id: Annotated[str, Path(pattern=PRODUCT_PATTERN)],
         stage: Literal["s1", "s2", "funded"],
         body: StageLimitsBody,
@@ -1631,7 +1874,7 @@ def create_app(
     @app.post("/staff/news/calendars/{month}/publish")
     async def publish_news(
         deps: D,
-        me: Staff,
+        me: NewsDesker,
         month: Annotated[str, Path(pattern=r"^\d{4}-\d{2}$")],
         body: NewsReasonBody,
     ) -> list[dict[str, Any]]:
@@ -1646,7 +1889,7 @@ def create_app(
         return [action_view(a) for a in done]
 
     @app.post("/staff/news/events", status_code=201)
-    async def manual_news(deps: D, me: Staff, body: ManualNewsBody) -> dict[str, Any]:
+    async def manual_news(deps: D, me: NewsDesker, body: ManualNewsBody) -> dict[str, Any]:
         """A window for an event that is not in the calendar."""
         scope = EventScope(body.scope)
         try:
@@ -1664,7 +1907,7 @@ def create_app(
         return action_view(done)
 
     @app.post("/staff/news/published", status_code=201)
-    async def news_published(deps: D, me: Staff, body: PublishedNewsBody) -> dict[str, Any]:
+    async def news_published(deps: D, me: NewsDesker, body: PublishedNewsBody) -> dict[str, Any]:
         """An event with no fixed time was just published: no trades on its
         currency's symbols for the next 2 minutes."""
         try:
@@ -1682,7 +1925,7 @@ def create_app(
     @app.post("/admin/news/events/{event_id}/cancel")
     async def cancel_news(
         deps: D,
-        me: Admin,
+        me: NewsCanceller,
         event_id: Annotated[str, Path(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")],
         body: NewsReasonBody,
     ) -> dict[str, Any]:
@@ -1694,9 +1937,201 @@ def create_app(
 
     @app.get("/admin/settings/changes")
     async def setting_changes(
-        deps: D, me: Admin, limit: Annotated[int, Query(ge=1, le=1_000)] = 100
+        deps: D, me: SettingsReader, limit: Annotated[int, Query(ge=1, le=1_000)] = 100
     ) -> list[dict[str, Any]]:
         """Every admin change, latest first, with who, why and when it took effect."""
         return [change_view(s) for s in await _settings(deps).history(limit)]
+
+    # --- the staff directory (back office 5a) -----------------------------------------
+
+    def directory(deps: Deps) -> Directory:
+        if deps.staff is None:
+            raise HTTPException(status_code=503, detail="the staff directory is not available")
+        return deps.staff
+
+    async def staff_step(step: Callable[[], Awaitable[Any]]) -> Any:
+        try:
+            return await step()
+        except StaffRefused as exc:
+            raise _staff_refused(exc) from exc
+
+    @app.get("/staff/me")
+    async def staff_me(deps: D, me: Employee) -> dict[str, Any]:
+        """My staff page (5a part): who I am, my access and every grant, and
+        what waits for my approval."""
+        now = deps.clock()
+        access = await _access(deps, me)
+        out: dict[str, Any] = {"access": access_view(access), "member": None, "grants": []}
+        if deps.staff is None:
+            return {**out, "awaiting_approval": [], "graduations": []}
+        actor = _actor(me)
+        async with deps.staff.store.read() as ops:
+            member = await ops.member_by_subject(me.subject)
+            if member is not None:
+                out["member"] = member_view(member, now)
+                out["grants"] = [grant_view(g, now) for g in await ops.grants_of(member.sid)]
+        out["awaiting_approval"] = [
+            grant_view(g, now) for g in await deps.staff.awaiting(actor, now)
+        ]
+        out["graduations"] = [member_view(m, now) for m in await deps.staff.graduations(actor, now)]
+        return out
+
+    @app.get("/staff/members")
+    async def staff_members(
+        deps: D,
+        me: DirectoryReader,
+        status: Literal["active", "left", "graduated"] | None = None,
+    ) -> list[dict[str, Any]]:
+        now = deps.clock()
+        async with directory(deps).store.read() as ops:
+            return [member_view(m, now) for m in await ops.members(status)]
+
+    @app.get("/staff/members/{sid}")
+    async def staff_member(
+        deps: D, me: Employee, sid: Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")]
+    ) -> dict[str, Any]:
+        """One member with grants and history: the directory, or oneself."""
+        access = await _access(deps, me)
+        if access.sid != sid and not access.has("staff.directory"):
+            raise _forbidden("staff.directory")
+        now = deps.clock()
+        async with directory(deps).store.read() as ops:
+            member = await ops.member(sid)
+            if member is None:
+                raise HTTPException(status_code=404, detail="unknown member")
+            grants = await ops.grants_of(sid)
+            history = await ops.member_history(sid)
+        return {
+            **member_view(member, now),
+            "grants": [grant_view(g, now) for g in grants],
+            "history": [{"kind": e.kind, "ts": e.ts, "detail": dict(e.detail)} for e in history],
+        }
+
+    @app.post("/staff/members", status_code=201)
+    async def add_member(deps: D, me: Employee, body: MemberBody) -> dict[str, Any]:
+        """A joiner (T3 or above)."""
+        now = deps.clock()
+        staff = directory(deps)
+        member, grants = await staff_step(
+            lambda: staff.join(
+                _actor(me),
+                subject=body.subject,
+                name=body.name,
+                email=body.email,
+                kind=body.kind,
+                team=body.team,
+                lead=body.lead,
+                mentor=body.mentor,
+                ends_at=body.ends_at,
+                tier=body.tier,
+                roles=body.roles,
+                reason=body.reason,
+                now=now,
+            )
+        )
+        return {**member_view(member, now), "grants": [grant_view(g, now) for g in grants]}
+
+    SidPath = Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")]
+    GrtPath = Annotated[str, Path(pattern=r"^GRT[0-9]{8}$")]
+
+    @app.post("/staff/members/{sid}/move")
+    async def move_member(deps: D, me: Employee, sid: SidPath, body: MoveBody) -> dict[str, Any]:
+        now, staff = deps.clock(), directory(deps)
+        member = await staff_step(
+            lambda: staff.move(_actor(me), sid, body.team, body.lead, body.reason, now)
+        )
+        return member_view(member, now)
+
+    @app.post("/staff/members/{sid}/leave")
+    async def leave_member(
+        deps: D, me: Employee, sid: SidPath, body: DecisionBody
+    ) -> dict[str, Any]:
+        """A leaver: access ends now, and every grant with it. Disable the
+        Keycloak user too (sessions end there)."""
+        now, staff = deps.clock(), directory(deps)
+        member = await staff_step(lambda: staff.leave(_actor(me), sid, body.reason, now))
+        return member_view(member, now)
+
+    @app.post("/staff/members/{sid}/recommend")
+    async def recommend_member(
+        deps: D, me: Employee, sid: SidPath, body: DecisionBody
+    ) -> dict[str, Any]:
+        """The mentor recommends the apprentice for graduation."""
+        now, staff = deps.clock(), directory(deps)
+        member = await staff_step(lambda: staff.recommend(_actor(me), sid, body.reason, now))
+        return member_view(member, now)
+
+    @app.post("/staff/members/{sid}/graduate", status_code=201)
+    async def graduate_member(
+        deps: D, me: Employee, sid: SidPath, body: GraduateBody
+    ) -> dict[str, Any]:
+        """An admin approves a recommended apprentice: a new T1 staff member
+        on its own login (an approval: step-up)."""
+        await _step_up(deps, me)
+        now, staff = deps.clock(), directory(deps)
+        member = await staff_step(
+            lambda: staff.graduate(_actor(me), sid, body.subject, body.email, body.reason, now)
+        )
+        return member_view(member, now)
+
+    @app.get("/staff/grants")
+    async def staff_grants(
+        deps: D,
+        me: DirectoryReader,
+        status: Literal["requested", "approved", "denied", "cancelled", "revoked", "superseded"]
+        | None = "requested",
+    ) -> list[dict[str, Any]]:
+        now = deps.clock()
+        async with directory(deps).store.read() as ops:
+            return [grant_view(g, now) for g in await ops.grants(status)]
+
+    @app.post("/staff/grants", status_code=201)
+    async def request_grant(deps: D, me: Employee, body: GrantBody) -> dict[str, Any]:
+        """Ask for a tier, role, admin power or acting cover for someone else."""
+        now, staff = deps.clock(), directory(deps)
+        grant = await staff_step(
+            lambda: staff.request(
+                _actor(me),
+                body.sid,
+                body.grant,
+                body.value,
+                body.starts_at,
+                body.ends_at,
+                body.reason,
+                now,
+            )
+        )
+        return grant_view(grant, now)
+
+    @app.post("/staff/grants/{grt}/approve")
+    async def approve_grant(
+        deps: D, me: Employee, grt: GrtPath, body: DecisionBody
+    ) -> dict[str, Any]:
+        await _step_up(deps, me)
+        now, staff = deps.clock(), directory(deps)
+        grant = await staff_step(lambda: staff.approve(_actor(me), grt, body.reason, now))
+        return grant_view(grant, now)
+
+    @app.post("/staff/grants/{grt}/deny")
+    async def deny_grant(deps: D, me: Employee, grt: GrtPath, body: DecisionBody) -> dict[str, Any]:
+        now, staff = deps.clock(), directory(deps)
+        grant = await staff_step(lambda: staff.deny(_actor(me), grt, body.reason, now))
+        return grant_view(grant, now)
+
+    @app.post("/staff/grants/{grt}/cancel")
+    async def cancel_grant(
+        deps: D, me: Employee, grt: GrtPath, body: DecisionBody
+    ) -> dict[str, Any]:
+        now, staff = deps.clock(), directory(deps)
+        grant = await staff_step(lambda: staff.cancel(_actor(me), grt, body.reason, now))
+        return grant_view(grant, now)
+
+    @app.post("/staff/grants/{grt}/revoke")
+    async def revoke_grant(
+        deps: D, me: Employee, grt: GrtPath, body: DecisionBody
+    ) -> dict[str, Any]:
+        now, staff = deps.clock(), directory(deps)
+        grant = await staff_step(lambda: staff.revoke(_actor(me), grt, body.reason, now))
+        return grant_view(grant, now)
 
     return app

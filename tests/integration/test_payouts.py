@@ -162,7 +162,8 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             remove = {"action": "remove_profit", "acc": acc, "amount_cents": 1_000}
             decision = {"outcome": "actioned", "actions": [remove], "reason": "news"}
             await staff(p, "POST", f"{cas}/decide", "staff-1", decision)
-            closed = await staff(p, "POST", f"{cas}/confirm", "staff-2", {"reason": "ok"})
+            ok = {"reason": "ok"}
+            closed = await p.call("POST", f"{cas}/confirm", "admin-1", ok, ("admin",))
             assert closed.json()["status"] == "closed", closed.text
 
             # the wallet: MFA, a TRON address; usable at once
@@ -250,19 +251,29 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             denied = await staff(p, "POST", f"/staff/payouts/{second}/deny", "staff-1", reason)
             assert (denied.json()["status"], denied.json()["failure"]) == ("denied", "checked")
 
-            # two approvals, never the trader's own, never twice by one employee
+            # a senior passes, an admin authorises [decided 31 Oct 2026]; never
+            # the trader's own, never twice by one employee
             po = (await p.call("POST", url)).json()["po"]
             approve = f"/staff/payouts/{po}/approve"
             own = await p.call("POST", approve, "u1", reason, ("trader", "staff"))
             assert (own.status_code, own.json()["detail"]["code"]) == (403, "own_payout")
             assert (await p.call("POST", approve, "u1", reason)).status_code == 403  # a trader
+            early = await p.call("POST", approve, "admin-1", reason, ("admin",), mfa=False)
+            assert (early.status_code, early.json()["detail"]["code"]) == (401, "mfa_required")
             one = (await staff(p, "POST", approve, "staff-1", reason)).json()
             assert (one["status"], one["approvals"]) == ("requested", 1)
-            await p.payouts.advance(clock())  # nothing is taken on one approval
+            await p.payouts.advance(clock())  # nothing is taken on a pass
             assert (await p.payouts.store.payout(po)).status == "requested"  # type: ignore[union-attr]
-            twice = await staff(p, "POST", approve, "staff-1", reason)
+            senior = await staff(
+                p, "POST", approve, "staff-2", reason
+            )  # T2: passes, never authorises
+            assert (senior.status_code, senior.json()["detail"]["permission"]) == (
+                403,
+                "payout.authorise",
+            )
+            twice = await p.call("POST", approve, "staff-1", reason, ("admin",))
             assert (twice.status_code, twice.json()["detail"]["code"]) == (409, "not_allowed")
-            two = (await staff(p, "POST", approve, "staff-2", reason)).json()
+            two = (await p.call("POST", approve, "admin-1", reason, ("admin",))).json()
             assert (two["status"], two["approvals"]) == ("approved", 2)
             late = await p.call("POST", f"/me/payouts/{po}/cancel")  # approved: too late
             assert (late.status_code, late.json()["detail"]["code"]) == (409, "not_allowed")
@@ -292,6 +303,9 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
                 "paid",
             ]
             assert history["history"][0]["detail"]["rsv_id"] == "instant-funded-v1"
+            steps = [(e["detail"]["by"], e["detail"]["as"]) for e in history["history"][1:3]]
+            assert steps == [("staff-1", "pass"), ("admin-1", "authorise")]
+            assert history["history"][0]["detail"]["approval"] == "pass_authorise"
             assert history["history"][0]["detail"]["eligibility"]["debit_cents"] == profit
             assert history["wallet"]["address"] == USDT
             assert history["history"][-1]["detail"] == {"tx": f"sandbox-tx-sandbox-{po}"}
@@ -359,8 +373,8 @@ def test_the_pay_day_check_fails_a_payout_that_changed(
                 created = await p.call("POST", url)
                 assert created.status_code == 201, created.text
                 po: str = created.json()["po"]
-                for who in ("staff-1", "staff-2"):
-                    await staff(p, "POST", f"/staff/payouts/{po}/approve", who, reason)
+                for who, roles in (("staff-1", STAFF), ("admin-1", ("admin",))):
+                    await p.call("POST", f"/staff/payouts/{po}/approve", who, reason, roles)
                 record = await p.payouts.store.payout(po)  # type: ignore[union-attr]
                 assert record is not None and record.status == "approved"
                 return po, clock() + 1
@@ -468,8 +482,8 @@ async def ready_to_pay(p: Platform, offset: dict[str, int], clock: Any) -> tuple
     created = await p.call("POST", f"/accounts/{acc}/payouts")
     assert created.status_code == 201, created.text
     po: str = created.json()["po"]
-    for who in ("staff-1", "staff-2"):
-        await staff(p, "POST", f"/staff/payouts/{po}/approve", who, {"reason": "ok"})
+    for who, roles in (("staff-1", STAFF), ("admin-1", ("admin",))):
+        await p.call("POST", f"/staff/payouts/{po}/approve", who, {"reason": "ok"}, roles)
     assert p.payouts is not None
     record = await p.payouts.store.payout(po)
     assert record is not None and record.status == "approved"

@@ -293,7 +293,13 @@ class History:
 
 
 def call(
-    method: str, url: str, body: object = None, roles: tuple[str, ...] = ("staff",)
+    method: str,
+    url: str,
+    body: object = None,
+    roles: tuple[str, ...] = ("staff",),
+    *,
+    mfa: bool = True,
+    login_age_s: int = 0,
 ) -> tuple[httpx.Response, EngineGateway]:
     news, gateway, _ = desk()
     deps = Deps(
@@ -310,7 +316,8 @@ def call(
     async def go() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://api") as client:
-            headers = bearer("u", roles)
+            login = (NOV_6_NFP - 10 * H) // 1000 - login_age_s  # "now" on the API's clock
+            headers = bearer("u", roles, mfa=mfa, auth_time=login)
             return await client.request(method, url, json=body, headers=headers)
 
     return asyncio.run(go()), gateway
@@ -460,3 +467,24 @@ def test_the_collector_settings() -> None:
     for bad in ({"PROPFIRM_NEWS_COLLECTOR": "yes"}, {"PROPFIRM_COLLECT_HOURS": "0"}):
         with pytest.raises(ConfigError):
             ServiceConfig.from_env({**env, **bad})
+
+
+def test_cancelling_is_an_approval_it_needs_a_recent_second_factor() -> None:
+    """Step-up (staff spec 5a): an admin's approval needs a second factor
+    entered at most 5 minutes before (policy `staff.step_up_minutes`)."""
+    url, body = "/admin/news/events/2026-11-10-us-cpi/cancel", {"reason": "withdrawn"}
+    no_mfa = call("POST", url, body, ("admin",), mfa=False)[0]
+    assert (no_mfa.status_code, no_mfa.json()["detail"]["code"]) == (401, "mfa_required")
+    assert "insufficient_user_authentication" in no_mfa.headers["WWW-Authenticate"]
+    old = call("POST", url, body, ("admin",), login_age_s=301)[0]
+    assert (old.status_code, old.json()["detail"]["code"]) == (401, "reauth_required")
+    assert old.headers["WWW-Authenticate"].endswith("max_age=300")
+    assert call("POST", url, body, ("admin",), login_age_s=300)[0].status_code == 200
+    staff = call("POST", url, body, ("staff",))[0]
+    assert staff.status_code == 403 and staff.json()["detail"]["permission"] == "news.cancel"
+
+
+def test_desk_work_is_not_an_approval() -> None:
+    month = "/staff/news/calendars/2026-11/publish"
+    assert call("POST", month, {"reason": "nov"}, mfa=False)[0].status_code == 200
+    assert call("POST", month, {"reason": "nov"}, ("trader",))[0].status_code == 403

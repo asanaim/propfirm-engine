@@ -24,7 +24,7 @@ records the settings it was made under.
 import re
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Protocol
@@ -33,6 +33,7 @@ from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import MarketSpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
+from propfirm.staff.records import Limits
 from propfirm.trading.instruments import (
     InstrumentSpec,
     Pricing,
@@ -81,6 +82,22 @@ class PayoutPolicy:
     wallet_cooling_off_hours: int = 0  # a new payout wallet is used only after this
     require_mfa: bool = True  # M04: MFA for wallet changes and payout requests
     step_up_minutes: int = 5  # M06: that MFA no older than this (0: any MFA login)
+    # "pass_authorise": a T2 or above passes, then an admin authorises
+    # [decided 31 Oct 2026]; "count": `approvals_required` employees (before)
+    approval: str = "pass_authorise"
+
+
+PAYOUT_APPROVALS = ("pass_authorise", "count")
+
+
+@dataclass(frozen=True, slots=True)
+class StaffPolicy:
+    """The back office (staff spec, 5a): step-up sign-in on approvals and
+    the grant limits."""
+
+    approvals_need_mfa: bool = True  # every approval: a second factor
+    step_up_minutes: int = 5  # entered at most this long ago (0: any MFA login)
+    limits: Limits = field(default_factory=Limits)
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +174,7 @@ class Policy:
     products: tuple[ProductPolicy, ...]
     contract: ContractPolicy
     cases: CasePolicy
+    staff: StaffPolicy = field(default_factory=StaffPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         return tuple(r for p in self.products for r in p.rule_sets)
@@ -365,6 +383,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             products=tuple(_product(t) for t in root.tables("products")),
             contract=_contract(root.table("contract")),
             cases=_cases(root.table("cases")),
+            staff=_staff(root.table("staff")),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -434,14 +453,37 @@ def _payouts(t: _Table) -> PayoutPolicy:
         wallet_cooling_off_hours=t.integer("wallet_cooling_off_hours"),
         require_mfa=t.boolean("require_mfa"),
         step_up_minutes=t.integer("step_up_minutes"),
+        approval=t.text("approval"),
     )
     t.done()
+    if policy.approval not in PAYOUT_APPROVALS:
+        raise PolicyError(f"{t.name('approval')} must be one of {PAYOUT_APPROVALS}")
+    if policy.approval == "pass_authorise" and policy.approvals_required != 2:
+        raise PolicyError(f"{t.name('approvals_required')} is 2 with pass_authorise")
     if policy.basis not in PAYOUT_BASES:
         raise PolicyError(f"{t.name('basis')} must be one of {PAYOUT_BASES}")
     if policy.trading_during_payout not in ("paused", "allowed"):
         raise PolicyError(f"{t.name('trading_during_payout')} must be paused or allowed")
     if policy.maximum_cents and policy.maximum_cents < policy.minimum_cents:
         raise PolicyError(f"{t.name('maximum_cents')} must be 0 or >= minimum_cents")
+    return policy
+
+
+def _staff(t: _Table) -> StaffPolicy:
+    limits = Limits(
+        apprentice_min_months=t.integer("apprentice_min_months", 1),
+        apprentice_max_months=t.integer("apprentice_max_months", 1),
+        power_max_days=t.integer("power_max_days", 1),
+        acting_max_days=t.integer("acting_max_days", 1),
+    )
+    policy = StaffPolicy(
+        approvals_need_mfa=t.boolean("approvals_need_mfa"),
+        step_up_minutes=t.integer("step_up_minutes"),
+        limits=limits,
+    )
+    t.done()
+    if limits.apprentice_min_months > limits.apprentice_max_months:
+        raise PolicyError(f"{t.name('apprentice_min_months')} must not exceed the maximum")
     return policy
 
 

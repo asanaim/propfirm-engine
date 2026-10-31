@@ -12,9 +12,15 @@ A payout (PO00000001), from request to money sent:
    FundedNext), with the eligibility snapshot: the trader's amount and what
    leaves the account (P + V); the account takes no new orders until the
    debit when trading is paused (D23);
-2. approved by `approvals_required` different employees (never their own),
-   or denied by one (until the debit is attempted); the trader may cancel
-   before approval is complete;
+2. approved, or denied by one employee (until the debit is attempted); the
+   trader may cancel before approval is complete. Approval, as the request
+   recorded it (`approval`):
+   - pass_authorise [decided 31 Oct 2026]: a pass (`"as": "pass"`, a T2 or
+     above), then an authorisation (`"as": "authorise"`, an admin) by a
+     different employee; who may do each step is checked by the API;
+   - count (requests recorded before): `approvals_required` different
+     employees;
+   never on the employee's own customer record;
 3. once approved, eligibility is computed again: anything changed and the
    payout fails (the trader may ask again);
 4. the engine takes the amount out of the account (DebitPayout; one per
@@ -92,6 +98,10 @@ class PayoutEvent:
     detail: Mapping[str, Any]
 
 
+APPROVALS = ("count", "pass_authorise")
+STEPS = ("pass", "authorise")
+
+
 @dataclass(frozen=True, slots=True)
 class PayoutState:
     status: str
@@ -100,11 +110,20 @@ class PayoutState:
     paid_at: int | None
     provider_ref: str | None
     failure: str | None
+    approval: str = "count"
+
+    @property
+    def next_step(self) -> str | None:
+        """With pass_authorise and approval not complete: the step due."""
+        if self.approval != "pass_authorise" or self.status != "requested":
+            return None
+        return STEPS[len(self.approvals)]
 
 
 def payout_state(po: str, events: Iterable[PayoutEvent]) -> PayoutState:
     status: str | None = None
     required = 0
+    approval = "count"
     approvals: list[str] = []
     debited_at: int | None = None
     paid_at: int | None = None
@@ -128,12 +147,19 @@ def payout_state(po: str, events: Iterable[PayoutEvent]) -> PayoutState:
                 if status is not None:
                     raise refuse(event)
                 status, required = "requested", int(d["approvals_required"])
-                if required < 1:
+                approval = str(d.get("approval", "count"))
+                if required < 1 or approval not in APPROVALS:
+                    raise refuse(event)
+                if approval == "pass_authorise" and required != len(STEPS):
                     raise refuse(event)
             case "approved":
                 need(event, "requested")
                 if d["by"] in approvals:
                     raise refuse(event)  # one approval per employee
+                step = d.get("as")
+                due = STEPS[len(approvals)] if approval == "pass_authorise" else None
+                if step != due:
+                    raise refuse(event)  # a pass first, then the authorisation
                 approvals.append(str(d["by"]))
                 if len(approvals) == required:
                     status = "approved"
@@ -166,4 +192,4 @@ def payout_state(po: str, events: Iterable[PayoutEvent]) -> PayoutState:
                 status, paid_at = "paid", event.ts
     if status is None:
         raise PayoutError(f"{po}: no requested event")
-    return PayoutState(status, tuple(approvals), debited_at, paid_at, ref, failure)
+    return PayoutState(status, tuple(approvals), debited_at, paid_at, ref, failure, approval)

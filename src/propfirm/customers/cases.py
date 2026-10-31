@@ -31,7 +31,9 @@ Events, in the order they can happen:
 - closed: cleared or warning (who, why);
 - proposed: actioned, with its actions (who, why);
 - rejected: the second employee sends it back (who, why);
-- confirmed: the second employee confirms (who, why);
+- confirmed: the second employee confirms (who, why, and `as`: confirm,
+  or authorise, which a void or profit removal needs: an admin's step
+  [decided 31 Oct 2026]; confirmations recorded before carry no `as`);
 - applied: one action carried out (and its result);
 - reopened (who, why).
 The `cases` status columns are a cache of `case_state`.
@@ -58,6 +60,14 @@ ALERT_KINDS = ("integrity", "fraud", "aml")
 SEVERITIES = ("low", "medium", "high")
 OUTCOMES = ("cleared", "warning", "actioned")
 ACTIONS = ("remove_profit", "void_account", "block_customer")
+# actions on an account's money: a T2 or above proposes (passes), an admin
+# authorises [decided 31 Oct 2026]
+AUTHORISED = ("remove_profit", "void_account")
+CONFIRM_STEPS = ("confirm", "authorise")
+
+
+def needs_authorisation(actions: Iterable[Mapping[str, Any]]) -> bool:
+    return any(a.get("action") in AUTHORISED for a in actions)
 
 
 class CaseError(ValueError):
@@ -179,6 +189,11 @@ def case_state(cas: str, events: Iterable[CaseEvent]) -> CaseState:
             case "confirmed":
                 if status != "decision_pending" or d["by"] == proposed_by:
                     raise refuse(event)
+                step = d.get("as")
+                if step is not None and step not in CONFIRM_STEPS:
+                    raise refuse(event)
+                if step == "confirm" and needs_authorisation(actions):
+                    raise refuse(event)  # an admin authorises a void or profit removal
                 status, pending = "actioning", list(range(len(actions)))
             case "applied":
                 index = d["index"]
@@ -196,6 +211,18 @@ def case_state(cas: str, events: Iterable[CaseEvent]) -> CaseState:
     return CaseState(
         status, severity, due_at, assignee, outcome, proposed_by, tuple(pending), closed_at
     )
+
+
+def proposed_actions(events: Iterable[CaseEvent]) -> list[dict[str, Any]]:
+    """The actions waiting for the second employee (none when no decision is
+    pending)."""
+    proposed: list[dict[str, Any]] = []
+    for event in events:
+        if event.kind == "proposed":
+            proposed = validate_actions(event.detail["actions"])
+        elif event.kind in ("rejected", "reopened", "confirmed", "alert"):
+            proposed = []
+    return proposed
 
 
 def confirmed_actions(events: Iterable[CaseEvent]) -> list[dict[str, Any]]:

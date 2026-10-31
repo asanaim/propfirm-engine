@@ -8,7 +8,13 @@ waits for the engine's answer and is retried by `advance` if none came).
 import logging
 from typing import Any, Protocol
 
-from propfirm.customers.cases import OUTCOMES, CaseError, confirmed_actions, validate_actions
+from propfirm.customers.cases import (
+    OUTCOMES,
+    CaseError,
+    confirmed_actions,
+    proposed_actions,
+    validate_actions,
+)
 from propfirm.customers.cases_store import CaseRecord, CaseRefused, CaseStore
 from propfirm.customers.store import CustomerStore
 from propfirm.journal.inputs import Input, VoidAccount
@@ -62,8 +68,8 @@ class Casework:
     async def news_violations(self, ts: int) -> list[str]:
         """Integrity alerts for news violations the engine journaled (M13):
         a fill inside a restricted window on a funded account. As FTMO, it
-        can end the account: staff decide on the case (a void needs a
-        second employee), nothing happens automatically."""
+        can end the account: staff decide on the case (an admin authorises a
+        void), nothing happens automatically."""
         policy = (await self._policy.current()).cases
         return await self._store.alert_news_violations(policy.due, ts)
 
@@ -117,8 +123,28 @@ class Casework:
     async def reject(self, cas: str, staff: str, reason: str, ts: int) -> CaseRecord:
         return await self._store.act(cas, "rejected", staff, ts, {"reason": reason})
 
-    async def confirm(self, cas: str, staff: str, reason: str, ts: int) -> CaseRecord:
-        await self._store.act(cas, "confirmed", staff, ts, {"reason": reason})
+    async def proposed(self, cas: str) -> list[dict[str, Any]]:
+        """The actions waiting for confirmation."""
+        await self._get(cas)
+        return proposed_actions(await self._store.history(cas))
+
+    async def confirm(
+        self,
+        cas: str,
+        staff: str,
+        reason: str,
+        ts: int,
+        step: str | None = None,
+        tier: int | None = None,
+    ) -> CaseRecord:
+        """`step`: confirm, or authorise (a void or profit removal needs it;
+        the history refuses a plain confirmation of one)."""
+        detail: dict[str, Any] = {"reason": reason}
+        if step is not None:
+            detail["as"] = step
+        if tier is not None:
+            detail["tier"] = tier
+        await self._store.act(cas, "confirmed", staff, ts, detail)
         return await self.carry_out(cas, ts)
 
     async def reopen(self, cas: str, staff: str, reason: str, ts: int) -> CaseRecord:
