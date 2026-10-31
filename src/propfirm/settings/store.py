@@ -84,6 +84,25 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             CHECK (action IN ('calendar', 'manual', 'published', 'cancel', 'collector'));
         """,
     ),
+    (
+        4,
+        """
+        -- the collector's sources: when one cannot be read, staff and admins
+        -- are alerted to add its events by hand
+        CREATE TABLE {s}.news_source_events (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            source text NOT NULL,
+            kind text NOT NULL CHECK (kind IN ('failed', 'reminded', 'recovered')),
+            error text,
+            notified int NOT NULL,  -- emails sent for this event
+            ts bigint NOT NULL
+        );
+        CREATE INDEX news_source_events_source ON {s}.news_source_events (source, id);
+        CREATE TRIGGER news_source_events_append_only
+            BEFORE UPDATE OR DELETE ON {s}.news_source_events
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

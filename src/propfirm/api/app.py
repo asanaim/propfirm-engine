@@ -85,6 +85,7 @@ from propfirm.journal.inputs import (
     PlaceTrailingEntry,
     SetTrailingStop,
 )
+from propfirm.newsfeed.alerts import SourceAlerts, alert_view
 from propfirm.policy import (
     Policy,
     PolicyError,
@@ -174,6 +175,7 @@ class Deps:
     cases: Casework | None = None  # integrity, fraud and compliance cases
     payouts: Payouts | None = None  # payout wallets, requests and approvals
     news: NewsDesk | None = None  # restricted-events calendar and the risk desk's actions
+    source_alerts: SourceAlerts | None = None  # news sources the collector cannot read
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -1619,6 +1621,11 @@ def create_app(
         return {
             "calendars": [calendar_view(c, live) for c in desk.calendars],
             "actions": [action_view(a) for a in await desk.history(100)],
+            # sources the collector cannot read: add their events by hand
+            "source_alerts": [
+                alert_view(a)
+                for a in (await deps.source_alerts.open_alerts() if deps.source_alerts else [])
+            ],
         }
 
     @app.post("/staff/news/calendars/{month}/publish")

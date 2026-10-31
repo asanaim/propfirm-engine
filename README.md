@@ -227,9 +227,17 @@ to the engine, logged as `collector` with its source:
 | EIA | crude oil inventories | weekly schedule and holiday exceptions |
 
 BLS (US jobs and CPI) and the Reserve Bank of New Zealand refused automated
-reads when checked, so the monthly files in `config/news/` carry them; the
-files hold the whole list too, with the same event ids, so a release in both
-is one event. No third-party calendar is read (Forex Factory and similar:
+reads when checked; the collector still tries them every run, and the
+monthly files in `config/news/` carry them meanwhile. The files hold the
+whole list too, with the same event ids, so a release in both is one event.
+
+When a source cannot be read (refused, down, or its page changed), staff
+and admins are emailed (`NEWS_ALERT_EMAILS`, comma-separated) which events
+are no longer collected, with the publisher's page, so they add them by hand
+(`POST /staff/news/events`); a reminder follows every 24 hours while it still
+fails (`NEWS_ALERT_REMIND_HOURS`), and a note when it is read again. Open
+alerts show in `GET /staff/news` (`source_alerts`); every alert is kept
+(append-only `settings.news_source_events`). No third-party calendar is read (Forex Factory and similar:
 their terms and the licence for showing their data; CC-5). A source that
 fails is logged and skipped. A release the publisher moves gets a second
 window at the new time (`<id>-at<HHMM>`); the old one stays until an admin

@@ -9,7 +9,9 @@ Each run (at API start, then every `PROPFIRM_COLLECT_HOURS`, default 6):
 3. send each event the desk has never handled (any action, any result:
    so a cancelled event is never restored) to the engine, logged as action
    `collector` with its source;
-4. when the engine already holds an event under the same id at another
+4. alert staff and admins about every source that could not be read
+   (`propfirm.newsfeed.alerts`), so they add its events by hand;
+5. when the engine already holds an event under the same id at another
    time (the publisher moved it), add a window at the new time as
    `<id>-at<HHMM>`, keep the old one (more restriction, never less) and log
    a warning: an admin decides whether to cancel the old one.
@@ -27,6 +29,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 
 from propfirm.newsfeed import sources as src
+from propfirm.newsfeed.alerts import SourceAlerts
 from propfirm.newsfeed.sources import Collected, SourceError
 from propfirm.settings.newsdesk import Author, NewsAction, NewsDesk
 
@@ -106,6 +109,8 @@ SOURCES: dict[str, Callable[[Fetch, date], Awaitable[list[Collected]]]] = {
     "ecb": _single(src.ECB, src.parse_ecb),
     "bea": _single(src.BEA, src.parse_bea),
     "eia": _eia,
+    "bls": _single(src.BLS, src.parse_bls),
+    "rbnz": _single(src.RBNZ, src.parse_rbnz),
 }
 
 
@@ -133,14 +138,20 @@ class Collector:
         fetch: Fetch,
         horizon_days: int = 45,
         names: Sequence[str] | None = None,
+        alerts: SourceAlerts | None = None,
     ) -> None:
         self.desk, self._live, self._fetch = desk, live, fetch
         self._horizon_ms = horizon_days * 86_400_000
         self._names = names
+        self._alerts = alerts
 
     async def run(self, now: int) -> RunReport:
         today = datetime.fromtimestamp(now / 1000, UTC).date()
         found, failures = await collect(self._fetch, today, self._names)
+        if self._alerts is not None:
+            failed = {name for name, _ in failures}
+            succeeded = [n for n in (self._names or list(SOURCES)) if n not in failed]
+            await self._alerts.update(failures, succeeded, now)
         engine = {str(e["event_id"]): e.get("start_ts") for e in await self._live.news()}
         handled = await self.desk.known_ids()
         sent: list[NewsAction] = []

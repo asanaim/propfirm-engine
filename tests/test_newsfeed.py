@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from propfirm.newsfeed import sources as src
+from propfirm.newsfeed.alerts import SourceAlerts, SourceEvent
 from propfirm.newsfeed.collector import SOURCES, SYSTEM_COLLECTOR, Collector, Fetch, collect
 from propfirm.newsfeed.sources import SourceError
 from propfirm.rules.calendar import DEFAULT_NEWS_DIR, load_calendars, utc_ms
@@ -200,6 +201,8 @@ def fixture_fetch(fail: frozenset[str] = frozenset()) -> Fetch:
             if "202612" in url:
                 return page("abs-202612-rcc_economy.html")
             return page("abs-202611-rcc_economy.html")
+        if url in (src.BLS, src.RBNZ):
+            raise OSError("403 Forbidden")  # as when checked from the build host
         return page(by_url[url])
 
     return fetch
@@ -224,7 +227,11 @@ def collector(
 def test_a_run_sends_upcoming_events_once_and_survives_a_failing_source() -> None:
     run, gateway, log = collector(Live(), fail=frozenset({"snb.ch"}))
     report = asyncio.run(run.run(NOW))
-    assert report.failures == (("snb", "OSError: connection refused"),)
+    assert report.failures == (
+        ("snb", "OSError: connection refused"),
+        ("bls", "OSError: 403 Forbidden"),
+        ("rbnz", "OSError: 403 Forbidden"),
+    )
     sent = {a.event_id for a in report.sent}
     assert {"2026-11-03-rba-decision", "2026-11-16-ca-cpi", "2026-12-09-fomc-decision"} <= sent
     assert "2026-12-10-snb-decision" not in sent  # its source failed
@@ -258,7 +265,7 @@ def test_a_cancelled_event_is_not_restored_and_a_moved_one_gets_a_new_window() -
 
 def test_every_source_has_a_parser_run() -> None:
     found, failures = asyncio.run(collect(fixture_fetch(), date(2026, 10, 31)))
-    assert failures == []
+    assert [name for name, _ in failures] == ["bls", "rbnz"]
     keys = {c.event.event_id.split("-", 3)[3] for c in found}
     assert keys >= {
         "fomc-minutes",
@@ -291,4 +298,173 @@ def test_every_source_has_a_parser_run() -> None:
         "ecb",
         "bea",
         "eia",
+        "bls",
+        "rbnz",
     }
+
+
+# --- BLS, RBNZ and alerts when a source cannot be read ------------------------------------
+
+BLS_ICS = "\r\n".join(
+    [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "BEGIN:VEVENT",
+        "SUMMARY:Employment Situation for October 2026",
+        "DTSTART;TZID=America/New_York:20261106T083000",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "SUMMARY:Consumer Price Index for October 2026",
+        "DTSTART:20261110T133000Z",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "SUMMARY:Real Earnings for October 2026",
+        "DTSTART:20261110T083000",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "SUMMARY:Consumer Price Index for November 2026",
+        "DTSTART:20261210T083000",
+        "END:VEVENT",
+        "END:VCALENDAR",
+    ]
+)
+
+
+def test_bls_jobs_and_cpi_from_a_standard_icalendar() -> None:
+    """The live feed refused the build host; this is the standard layout
+    (TZID, UTC and floating times). A different layout raises, and the
+    collector alerts staff."""
+    assert ids(src.parse_bls(BLS_ICS)) == [
+        ("2026-11-06-us-employment", "2026-11-06T08:30"),
+        ("2026-11-10-us-cpi", "2026-11-10T08:30"),  # 13:30 UTC is 08:30 EST
+        ("2026-12-10-us-cpi", "2026-12-10T08:30"),  # floating: New York
+    ]
+    files = {
+        e.event.event_id: e.event.ts for c in load_calendars(DEFAULT_NEWS_DIR) for e in c.events
+    }
+    for item in src.parse_bls(BLS_ICS):
+        assert files[item.event.event_id] == item.event.ts
+    with pytest.raises(SourceError):
+        src.parse_bls("BEGIN:VCALENDAR\r\nEND:VCALENDAR")
+    with pytest.raises(SourceError, match="by hand"):
+        src.parse_rbnz("<html>any</html>")
+
+
+class MemorySources:
+    def __init__(self) -> None:
+        self.events: list[SourceEvent] = []
+
+    async def record(self, event: SourceEvent) -> None:
+        self.events.append(event)
+
+    async def latest(self) -> dict[str, list[SourceEvent]]:
+        out: dict[str, list[SourceEvent]] = {}
+        for e in self.events:
+            if e.kind in ("failed", "recovered"):
+                out[e.source] = [e]
+            else:
+                out.setdefault(e.source, []).append(e)
+        return out
+
+
+class FlakyMailer:
+    name = "test"
+
+    def __init__(self, fail_to: str = "") -> None:
+        self.sent: list[tuple[str, str, str]] = []
+        self.fail_to = fail_to
+
+    async def send(self, recipient: str, subject: str, body: str) -> str:
+        if recipient == self.fail_to:
+            raise OSError("smtp down")
+        self.sent.append((recipient, subject, body))
+        return "<id>"
+
+
+H = 3_600_000
+
+
+def test_staff_and_admins_are_alerted_reminded_and_told_of_recovery() -> None:
+    store, mailer = MemorySources(), FlakyMailer(fail_to="admin@firm.example")
+    alerts = SourceAlerts(store, mailer, ("risk@firm.example", "admin@firm.example"))
+    first = asyncio.run(alerts.update([("bls", "OSError: 403 Forbidden")], ["ecb"], NOW))
+    assert [(e.source, e.kind, e.notified) for e in first] == [("bls", "failed", 1)]
+    to, subject, body = mailer.sent[0]
+    assert (to, subject) == ("risk@firm.example", "News source not read: bls")
+    assert "US Non-Farm Employment Change" in body and "US CPI y/y" in body
+    assert "POST /staff/news/events" in body and "https://www.bls.gov/schedule/" in body
+    assert asyncio.run(alerts.update([("bls", "403")], [], NOW + 23 * H)) == []  # no repeat yet
+    again = asyncio.run(alerts.update([("bls", "403")], [], NOW + 24 * H))
+    assert [e.kind for e in again] == ["reminded"]
+    assert mailer.sent[-1][1].startswith("Reminder:")
+    (alert,) = asyncio.run(alerts.open_alerts())
+    assert (alert.source, alert.since, alert.last_notice) == ("bls", NOW, NOW + 24 * H)
+    assert alert.events == (
+        "US Non-Farm Employment Change, Unemployment Rate & Wages",
+        "US CPI y/y",
+    )
+    back = asyncio.run(alerts.update([], ["bls", "ecb"], NOW + 30 * H))
+    assert [(e.source, e.kind) for e in back] == [("bls", "recovered")]
+    assert asyncio.run(alerts.open_alerts()) == []
+    assert asyncio.run(alerts.update([("bls", "x")], [], NOW + 31 * H))[0].kind == "failed"
+
+
+def test_a_collector_run_raises_alerts_for_unreadable_sources() -> None:
+    gateway, log = EngineGateway(), MemoryLog()
+    desk = NewsDesk(load_calendars(DEFAULT_NEWS_DIR), log, gateway)
+    store, mailer = MemorySources(), FlakyMailer()
+    alerts = SourceAlerts(store, mailer, ("risk@firm.example",))
+    run = Collector(desk, Live(), fixture_fetch(), alerts=alerts)
+    asyncio.run(run.run(NOW))
+    assert sorted(e.source for e in store.events) == ["bls", "rbnz"]
+    assert {m[1] for m in mailer.sent} == {
+        "News source not read: bls",
+        "News source not read: rbnz",
+    }
+    asyncio.run(run.run(NOW + 6 * H))
+    assert len(store.events) == 2  # still failing, not yet a day: no new alert
+
+
+def test_staff_see_open_source_alerts_and_the_alert_settings() -> None:
+    import httpx
+
+    from propfirm.api.app import Deps, create_app
+    from propfirm.service.config import ConfigError, ServiceConfig
+    from tests.auth_rig import FakeCustomers, bearer, verifier
+    from tests.test_news_calendar import History
+    from tests.test_news_calendar import Live as ApiLive
+
+    store = MemorySources()
+    alerts = SourceAlerts(store, None, ())
+    asyncio.run(alerts.update([("rbnz", "OSError: 403 Forbidden")], [], NOW))
+    gateway, log = EngineGateway(), MemoryLog()
+    desk = NewsDesk(load_calendars(DEFAULT_NEWS_DIR), log, gateway)
+    deps = Deps(
+        ApiLive(), History(), gateway, verifier(), FakeCustomers(), news=desk, source_alerts=alerts
+    )
+
+    async def get(roles: tuple[str, ...]) -> httpx.Response:
+        transport = httpx.ASGITransport(app=create_app(deps))
+        async with httpx.AsyncClient(transport=transport, base_url="http://api") as client:
+            return await client.get("/staff/news", headers=bearer("u", roles))
+
+    (alert,) = asyncio.run(get(("staff",))).json()["source_alerts"]
+    assert (alert["source"], alert["last_error"], alert["since"]) == (
+        "rbnz",
+        "OSError: 403 Forbidden",
+        NOW,
+    )
+    assert alert["events"] == ["RBNZ Official Cash Rate & Rate Statement"]
+    assert asyncio.run(get(("trader",))).status_code == 403
+
+    env = {"DATABASE_URL": "postgresql://u:p@h/db", "VALKEY_URL": "redis://h:6379/0"}
+    config = ServiceConfig.from_env(
+        {**env, "NEWS_ALERT_EMAILS": "risk@firm.example, admin@firm.example"}
+    )
+    assert config.news_alert_emails == ("risk@firm.example", "admin@firm.example")
+    assert (ServiceConfig.from_env(env).news_alert_emails, config.news_alert_remind_hours) == (
+        (),
+        24,
+    )
+    with pytest.raises(ConfigError):
+        ServiceConfig.from_env({**env, "NEWS_ALERT_EMAILS": "risk desk"})

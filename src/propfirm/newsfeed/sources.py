@@ -19,9 +19,12 @@ publisher's fixed release time is a constant here, with where it is stated:
 - Bank of England: 12:00 London; ECB: 14:15 Frankfurt (decision days; the
   project outline, CC-5).
 
-Not collected (pages refused automated reads when checked from the build
-host, so the monthly files carry them): BLS (US jobs and CPI) and the
-Reserve Bank of New Zealand.
+Refused automated reads when checked from the build host (31 Oct 2026):
+BLS (US jobs and CPI) and the Reserve Bank of New Zealand. The collector
+still tries them on every run; while they cannot be read, it alerts staff
+and admins to fill those events by hand (the monthly files carry them too).
+The BLS parser reads the standard iCalendar layout and was not seen against
+the live feed; the RBNZ page has no parser, so it always alerts.
 """
 
 import html
@@ -458,6 +461,53 @@ def parse_eia(page: str, start: date, end: date, source: str = EIA) -> list[Coll
             out.append(collected("us-oil-inventory", day, hhmm, NEW_YORK, source))
         friday += timedelta(days=7)
     return out
+
+
+# --- US Bureau of Labor Statistics: release calendar (iCalendar) ---------------------------
+
+BLS = "https://www.bls.gov/schedule/news_release/bls.ics"
+
+
+def parse_bls(text: str, source: str = BLS) -> list[Collected]:
+    """ "Employment Situation" (jobs, unemployment rate and earnings in one
+    release) and "Consumer Price Index" events. DTSTART with a TZID, in UTC
+    (Z) or floating (read as New York time)."""
+    unfolded = text.replace("\r\n", "\n").replace("\n ", "")
+    if "BEGIN:VCALENDAR" not in unfolded:
+        raise SourceError("not an iCalendar file")
+    out = []
+    for block in unfolded.split("BEGIN:VEVENT")[1:]:
+        summary = re.search(r"^SUMMARY[^:\n]*:(.*)$", block, re.M)
+        start = re.search(
+            r"^DTSTART(?:;TZID=([^:;\n]+))?[^:\n]*:(\d{8})T(\d{4})\d{0,2}(Z?)", block, re.M
+        )
+        if summary is None or start is None:
+            continue
+        title = summary[1].strip()
+        if title.startswith("Employment Situation"):
+            key = "us-employment"
+        elif re.match(r"Consumer Price Index\b", title):
+            key = "us-cpi"
+        else:
+            continue
+        zone = "UTC" if start[4] else (start[1] or NEW_YORK)
+        at = datetime.strptime(start[2] + start[3], "%Y%m%d%H%M").replace(tzinfo=ZoneInfo(zone))
+        local = at.astimezone(ZoneInfo(NEW_YORK))
+        out.append(collected(key, local.date(), local.strftime("%H:%M"), NEW_YORK, source))
+    if not out:
+        raise SourceError("no Employment Situation or CPI release found")
+    return out
+
+
+# --- Reserve Bank of New Zealand -----------------------------------------------------------
+
+RBNZ = "https://www.rbnz.govt.nz/news-and-events/how-we-release-information/ocr-decision-dates"
+
+
+def parse_rbnz(page: str, source: str = RBNZ) -> list[Collected]:
+    """No parser: the page refused automated reads when checked, so its
+    layout is unknown. Staff add RBNZ decisions by hand (alerted)."""
+    raise SourceError("the RBNZ page is not read automatically: add its decisions by hand")
 
 
 def unique(events: Iterable[Collected]) -> list[Collected]:
