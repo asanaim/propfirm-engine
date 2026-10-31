@@ -1,11 +1,13 @@
 """Admin setting changes in PostgreSQL (schema `settings` by default).
 
-Two append-only tables (updates and deletes are refused by a trigger):
+Append-only tables (updates and deletes are refused by a trigger):
 - `changes`: every change, numbered, with its author and reason;
 - `applied`: when a change took effect. A country-gating change takes
   effect when it is recorded; a stage-limits change when the engine has
   journaled its new rule set (`journal_seq`). Only applied changes are in
   force, so checkout never sells a rule set the engine does not know yet.
+- `news_actions`: every restricted-event action of the risk desk (M13):
+  who, why, the input it sent and what the engine answered.
 """
 
 import json
@@ -47,6 +49,29 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE TRIGGER changes_append_only BEFORE UPDATE OR DELETE ON {s}.changes
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         CREATE TRIGGER applied_append_only BEFORE UPDATE OR DELETE ON {s}.applied
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
+    (
+        2,
+        """
+        CREATE TABLE {s}.news_actions (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            action text NOT NULL
+                CHECK (action IN ('calendar', 'manual', 'published', 'cancel')),
+            event_id text NOT NULL,
+            title text,
+            calendar_version text,
+            author text NOT NULL,
+            author_email text,
+            reason text NOT NULL CHECK (length(reason) BETWEEN 1 AND 500),
+            entry_id text NOT NULL,
+            result text NOT NULL CHECK (result IN ('done', 'rejected', 'pending')),
+            detail text,
+            created_at bigint NOT NULL
+        );
+        CREATE INDEX news_actions_event ON {s}.news_actions (event_id);
+        CREATE TRIGGER news_actions_append_only BEFORE UPDATE OR DELETE ON {s}.news_actions
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),

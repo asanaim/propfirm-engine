@@ -38,3 +38,14 @@ export function Loading({ label = "Loading" }: { label?: string }) {
     </p>
   );
 }
+
+/** A table that may scroll sideways on narrow screens: keyboard users can
+focus the region to scroll it (WCAG 2.1.1; axe scrollable-region-focusable).
+For tables without their own buttons or links. */
+export function ScrollRegion({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="table-wrap" tabIndex={0} role="region" aria-label={label}>
+      {children}
+    </div>
+  );
+}

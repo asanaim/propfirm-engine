@@ -9,7 +9,7 @@ import { OrderTicket } from "../components/OrderTicket";
 import { PendingRow, PositionRow, TrailingRow } from "../components/PositionRow";
 import { PriceChart } from "../components/PriceChart";
 import { Problem } from "../components/Problem";
-import { Button, Card, Loading, Notice } from "../components/ui";
+import { Button, Card, Loading, Notice, ScrollRegion } from "../components/ui";
 import { formatCents, formatDuration, formatPrice } from "../lib/money";
 import { Link } from "../router";
 
@@ -120,7 +120,7 @@ function Quotes({ quotes, attribution }: { quotes: Record<string, Quote>; attrib
   const list = Object.values(quotes).sort((a, b) => a.symbol.localeCompare(b.symbol));
   return (
     <>
-      <div className="table-wrap">
+      <ScrollRegion label="Prices">
         <table>
           <caption className="visually-hidden">Prices</caption>
           <thead>
@@ -142,7 +142,7 @@ function Quotes({ quotes, attribution }: { quotes: Record<string, Quote>; attrib
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
       <Attribution source={attribution} />
     </>
   );

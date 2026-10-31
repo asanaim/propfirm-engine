@@ -188,3 +188,42 @@ def test_an_admin_switches_country_gating(
             assert access == {"country_gating": False, "blocked_countries": ["BD"], "min_age": 18}
 
     asyncio.run(scenario())
+
+
+def test_the_news_action_log_is_append_only_and_names_manual_events(
+    database_url: str, pg_schema: str
+) -> None:
+    from propfirm.settings.newsdesk import NewsAction, NewsStore
+
+    schema = f"{pg_schema}_news"
+
+    def action(event_id: str, kind: str, title: str | None, result: str, ts: int) -> NewsAction:
+        return NewsAction(
+            0, kind, event_id, title, None, "s-1", None, "why", f"{ts}-0", result, None, ts
+        )
+
+    async def scenario() -> None:
+        pool = await asyncpg.create_pool(database_url, min_size=1, max_size=2)
+        try:
+            await SettingsStore.open(pool, schema)  # runs the settings migrations
+            store = NewsStore(pool, schema)
+            first = await store.record(action("boj", "published", "BoJ", "done", 1))
+            await store.record(action("boj", "published", "BoJ again", "rejected", 2))
+            await store.record(action("snb", "manual", "SNB", "rejected", 3))
+            await store.record(action("cpi", "calendar", "CPI", "done", 4))
+            assert first.id == 1 and first.title == "BoJ"
+            assert await store.titles() == {"boj": "BoJ"}  # accepted manual or published only
+            assert [a.event_id for a in await store.history(2)] == ["cpi", "snb"]
+            for sql in (
+                f"UPDATE {schema}.news_actions SET reason = 'edited'",
+                f"DELETE FROM {schema}.news_actions",
+            ):
+                with pytest.raises(asyncpg.RaiseError, match="append-only"):
+                    await pool.execute(sql)
+            with pytest.raises(asyncpg.CheckViolationError):
+                await store.record(action("x", "delete", None, "done", 5))
+        finally:
+            await pool.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+            await pool.close()
+
+    asyncio.run(scenario())

@@ -69,11 +69,13 @@ from propfirm.customers.providers import (
 from propfirm.customers.store import CustomerStore
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.policy import load_policy
+from propfirm.rules.calendar import load_calendars
 from propfirm.service.config import ConfigError, ServiceConfig
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
+from propfirm.settings.newsdesk import Author, NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
 
@@ -95,6 +97,22 @@ async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> N
             await checkout.reconcile(now_ms())
         except Exception:  # retried next round; the order stays paid
             log.exception("provisioning retry failed")
+
+
+SYSTEM_CALENDAR = "system:calendar"
+
+
+async def _publish_calendars(news: NewsDesk, live: LiveReader) -> None:
+    """Publish the calendar files at start-up; events the engine already
+    shows are skipped, and any other repeat is refused by the engine."""
+    try:
+        known = frozenset(e["event_id"] for e in await live.news())
+        versions = ", ".join(c.version for c in news.calendars) or "none"
+        who = Author(SYSTEM_CALENDAR, None, f"automatic at start-up ({versions})")
+        done = await news.publish_all(who, now_ms(), known)
+        log.info("news calendar: %d events sent at start-up", len(done))
+    except Exception:
+        log.exception("news calendar publication at start-up failed")
 
 
 async def _lifecycle_forever(
@@ -164,6 +182,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if fixed:
             log.warning("cached status differed from the history and was rebuilt: %s", fixed)
         settings = Settings(policy, await SettingsStore.open(pool, config.settings_schema), gateway)
+        news = NewsDesk(
+            load_calendars(config.news_dir), NewsStore(pool, config.settings_schema), gateway
+        )
         cases = Casework(case_store, customers, settings, gateway)
         checkout = None
         if config.sandbox:
@@ -231,6 +252,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 cases=cases,
             )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
+        tasks.append(asyncio.create_task(_publish_calendars(news, live)))
         tasks.append(
             asyncio.create_task(
                 _lifecycle_forever(lifecycle, onboarding, cases, payouts, notifications)
@@ -251,6 +273,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             onboarding=onboarding,
             cases=cases,
             payouts=payouts,
+            news=news,
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,
             country_header=config.country_header,
