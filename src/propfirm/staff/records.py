@@ -84,6 +84,14 @@ class Limits:
     apprentice_max_months: int = 6
     power_max_days: int = 90
     acting_max_days: int = 30
+    # who assigns a section level (a "charge"): "owner" = an admin proposes
+    # and an owner approves, and for an admin or owner one owner proposes and
+    # another approves [decided 6 Nov 2026]; "admin" = the section's lead (or
+    # an admin) asks and an admin approves (the rule of 5 Nov)
+    sections_approval: str = "owner"
+
+
+SECTIONS_APPROVALS = ("owner", "admin")
 
 
 # --- members --------------------------------------------------------------------------
@@ -416,6 +424,8 @@ def check_request(
             )
         case "role":
             _need(value in ROLES, "invalid", f"role must be one of {ROLES}")
+            if limits.sections_approval == "owner":  # a role is a section too
+                _assigner(actor_tier, member_access)
         case "level":
             section, level = parse_level(value)
             allowed = {"apprentice": (0, 0), "contractor": (1, 2), "staff": (1, 3)}[member.kind]
@@ -424,13 +434,15 @@ def check_request(
                 "invalid",
                 f"a {member.kind} has a section level T{allowed[0]} to T{allowed[1]}",
             )
-            # the section's lead asks (or an admin); an admin approves
-            mine = actor.level(section)
-            _need(
-                mine is not None and mine >= Tier.LEAD,
-                "forbidden",
-                f"a {section} level is asked for by that section's lead or an admin",
-            )
+            if limits.sections_approval == "owner":
+                _assigner(actor_tier, member_access)
+            else:  # "admin": the section's lead asks (or an admin); an admin approves
+                mine = actor.level(section)
+                _need(
+                    mine is not None and mine >= Tier.LEAD,
+                    "forbidden",
+                    f"a {section} level is asked for by that section's lead or an admin",
+                )
             _need(ends_at is None, "invalid", "a level lasts until another is approved or revoked")
         case "power":
             _need(value in POWERS, "invalid", f"power must be one of {sorted(POWERS)}")
@@ -457,10 +469,33 @@ def check_request(
             )
 
 
+def _admin_or_owner(a: Access) -> bool:
+    return a.tier is not None and a.tier >= Tier.ADMIN
+
+
+def _assigner(actor_tier: int, member_access: Access) -> None:
+    """Who proposes a section (a level or a role) under `"owner"`."""
+    if _admin_or_owner(member_access):
+        _need(
+            actor_tier == Tier.OWNER,
+            "forbidden",
+            "an owner proposes a section for an admin; another owner approves",
+        )
+    else:
+        _need(
+            actor_tier >= Tier.ADMIN, "forbidden", "an admin proposes a section; an owner approves"
+        )
+
+
 def check_approval(
-    actor: Access, member: Member, member_access: Access, grant: Grant, now: int
+    actor: Access,
+    member: Member,
+    member_access: Access,
+    grant: Grant,
+    now: int,
+    limits: Limits,
 ) -> None:
-    """Approve or deny: the same authority."""
+    """Approve or deny: the same authority. Never the requester (four eyes)."""
     _need(grant.status == "requested", "not_allowed", f"{grant.grt} is {grant.status}")
     _need(actor.subject != member.subject, "own_access", "nobody approves their own access")
     _need(actor.subject != grant.requested_by, "four_eyes", "the requester does not approve")
@@ -471,6 +506,8 @@ def check_approval(
             member_access.tier is not None and member_access.tier >= Tier.ADMIN
         ):
             _need(tier == Tier.OWNER, "forbidden", "an admin's or owner's tier needs two owners")
+        case "level" | "role" if limits.sections_approval == "owner":
+            _need(tier == Tier.OWNER, "forbidden", "an owner approves a section assignment")
         case "power" if (grant.requester_tier or 0) < Tier.ADMIN:
             _need(tier == Tier.OWNER, "forbidden", "an admin power needs two admins or an owner")
         case _:

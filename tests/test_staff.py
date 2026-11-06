@@ -44,6 +44,7 @@ def ms(year: int, month: int, day: int, hour: int = 0) -> int:
 
 NOW = ms(2026, 11, 2, 10)
 LIMITS = Limits()
+LEAD_ASKS = Limits(sections_approval="admin")  # the rule before 6 Nov 2026
 
 
 def access(tier: int | None, *roles: str, subject: str = "actor", sid: str | None = None,
@@ -364,8 +365,9 @@ def test_a_request_ends_in_the_future() -> None:
 # --- approvals --------------------------------------------------------------------------
 
 
-def approve(actor: Access, g: Grant, m: Member | None = None, m_tier: int | None = 1) -> None:
-    check_approval(actor, m or member(), access(m_tier, subject="member"), g, NOW)
+def approve(actor: Access, g: Grant, m: Member | None = None, m_tier: int | None = 1,
+            limits: Limits = LIMITS) -> None:  # fmt: skip
+    check_approval(actor, m or member(), access(m_tier, subject="member"), g, NOW, limits)
 
 
 def test_the_requester_and_the_grantee_never_approve() -> None:
@@ -523,11 +525,43 @@ def test_section_levels_come_from_level_grants_the_latest_winning() -> None:
     assert access_of(m, [*grants, admin], NOW).tier == Tier.ADMIN
 
 
-def test_a_section_level_is_asked_by_that_sections_lead_and_approved_by_an_admin() -> None:
+def test_a_section_is_assigned_by_an_admin_and_approved_by_an_owner() -> None:
+    """[decided 6 Nov 2026] An admin proposes a section (any level up to the
+    section's charge, Lead) and an owner approves; for an admin, one owner
+    proposes and another approves. One person may hold several sections."""
+
+    def ask(actor: Access, value: str, m_tier: int = 1) -> None:
+        check_request(actor, member(), access(m_tier, subject="member"), "level", value,
+                      NOW, None, NOW, LIMITS)  # fmt: skip
+
+    ask(access(4), "kyc:3")
+    ask(access(4), "payouts:2")  # a second section for the same person
+    ask(access(5), "risk:1")
+    refused("forbidden", ask, leveled(kyc=3), "kyc:2")  # a section's lead no longer asks
+    refused("forbidden", ask, access(3), "kyc:1")
+    ask(access(5), "risk:3", 4)  # an admin's charge: an owner proposes
+    refused("forbidden", ask, access(4), "risk:3", 4)  # not another admin
+    # a role is a section too
+    req(access(4), member(), "role", "kyc")
+    refused("forbidden", req, access(3), member(), "role", "kyc")
+    refused("forbidden", approve, access(4), grant("role", "kyc", tier=4))
+    approve(access(5), grant("role", "kyc", tier=4))
+
+    level = grant("level", "kyc:3", tier=4)
+    approve(access(5), level)
+    refused("forbidden", approve, access(4), level)  # an admin does not approve
+    refused("forbidden", approve, leveled(kyc=3), level)
+    refused("four_eyes", approve, access(5, subject="requester"), level)  # the other owner
+    for_admin = grant("level", "risk:3", tier=5)
+    approve(access(5), for_admin, m_tier=4)
+    refused("four_eyes", approve, access(5, subject="requester"), for_admin, m_tier=4)
+
+
+def test_under_the_lead_rule_a_sections_lead_asks_and_an_admin_approves() -> None:
     def ask(actor: Access, value: str, kind: str = "staff", ends: int | None = None) -> None:
         check_request(actor, member(kind=kind, ends_at=NOW + 99 * DAY_MS if kind != "staff"
                                     else None), access(1, subject="member"), "level", value,
-                      NOW, ends, NOW, LIMITS)  # fmt: skip
+                      NOW, ends, NOW, LEAD_ASKS)  # fmt: skip
 
     ask(leveled(kyc=3), "kyc:2")
     refused("forbidden", ask, leveled(support=3), "kyc:2")  # not the KYC lead
@@ -540,8 +574,8 @@ def test_a_section_level_is_asked_by_that_sections_lead_and_approved_by_an_admin
     refused("invalid", ask, access(4), "kyc:4")
     refused("invalid", ask, access(4), "sales:1")
     level = grant("level", "kyc:3", tier=3)
-    refused("forbidden", approve, leveled(kyc=3), level)  # a lead never approves
-    approve(access(4), level)
+    refused("forbidden", approve, leveled(kyc=3), level, limits=LEAD_ASKS)  # never a lead
+    approve(access(4), level, limits=LEAD_ASKS)
 
 
 def test_a_section_lead_revokes_a_level_in_their_section_only() -> None:

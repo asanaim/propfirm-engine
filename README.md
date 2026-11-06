@@ -481,18 +481,24 @@ Sections [decided 6 Nov 2026]: each role is a section with its own ladder,
 Apprentice (T0), Associate (T1), Specialist (T2), Team lead (T3): one person
 may be Lead in KYC, Specialist in Payouts and Apprentice in Risk at once.
 Admin (T4) and Owner (T5) are firm-wide. A section level is a grant
-(`"grant": "level", "value": "kyc:2"`): asked for by that section's lead or
-an admin, approved by an admin (never the asker), replacing the previous
-level of that section; a section lead may revoke a level in their section.
-`GET /staff/me` shows `access.sections`. Joiners: `"sections": {"kyc": 1}`.
-A graduate starts as Associate (T1) in each section learnt as an
-apprentice. The full path: Apprentice (APP login) → graduation → Associate
+(`"grant": "level", "value": "kyc:2"`) replacing the previous level of that
+section. Assignment [decided 6 Nov 2026, `staff.sections_approval =
+"owner"`]: an admin proposes and an owner approves; for an admin (a section's
+charge) one owner proposes and the other approves; never the proposer. Staff
+and admins may hold several sections. (`"admin"` restores the earlier rule:
+the section's lead or an admin asks, an admin approves.) A section lead may
+still revoke a level in their section (removing access needs no second
+person). `GET /staff/me` shows `access.sections`. Joiners: `"sections":
+{"kyc": 1}` (so only an admin or owner joins someone with sections). A
+graduate starts as Associate (T1) in each section learnt as an apprentice:
+proposed by the graduating admin, in force once an owner approves. The full path: Apprentice (APP login) → graduation → Associate
 → Specialist → Lead, per section → Admin (two owners) → Owner.
 
 | Change | Asked by | Approved by | Ends |
 |---|---|---|---|
 | tier (promotion) | T3+ | T4+; T4 or T5: two owners | when another tier is approved |
-| role | T3+ | T4+ | optional date |
+| section: level or role, for T3 or below | an admin (T4+) | an owner, not the proposer | level: until replaced; role: optional date |
+| section (a charge) for an admin | an owner | the other owner | as above |
 | admin power (`settings.view`, `settings.change`, `news.cancel`) for T3 or below | T3+ | a second admin, or an owner if asked below T4 | required, at most 90 days |
 | acting cover (up to the asker's tier, T3 at most) | T3+ | T4+ | required, at most 30 days |
 

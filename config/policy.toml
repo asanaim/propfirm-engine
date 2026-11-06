@@ -230,6 +230,12 @@ apprentice_min_months = 3
 apprentice_max_months = 6
 power_max_days = 90            # an admin power granted below T4 ends within this
 acting_max_days = 30           # acting cover ends within this
+# Section assignments [decided 6 Nov 2026]: one person may hold a level (up to
+# Lead, the section's charge) in several sections. "owner": an admin proposes
+# and an owner approves; for an admin (or owner) one owner proposes and the
+# other approves. "admin": the section's lead or an admin asks, an admin
+# approves (the rule before).
+sections_approval = "owner"
 
 [cases.sla_hours]
 # Integrity, fraud and compliance cases (M16, M17, M20): hours from an alert
