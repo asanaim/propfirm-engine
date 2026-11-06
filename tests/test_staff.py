@@ -70,9 +70,10 @@ def member(
     ends_at: int | None = None,
     status: str = "active",
     recommended_by: str | None = None,
+    team: str = "ops",
 ) -> Member:
     return Member(
-        sid, subject, "A Person", None, kind, "ops", lead, mentor, NOW - DAY_MS, ends_at,
+        sid, subject, "A Person", None, kind, team, lead, mentor, NOW - DAY_MS, ends_at,
         status, None, None, recommended_by,
     )  # fmt: skip
 
@@ -525,6 +526,62 @@ def test_section_levels_come_from_level_grants_the_latest_winning() -> None:
     assert access_of(m, [*grants, admin], NOW).tier == Tier.ADMIN
 
 
+def test_in_their_own_section_an_employee_proposes_and_an_admin_approves() -> None:
+    """[clarified 6 Nov 2026] Own section (their team): an employee of that
+    section proposes, an admin approves. Another section: an admin proposes,
+    an owner approves (an admin's power stops at the member's own section).
+    An admin's sections: two owners."""
+    kyc = member(team="kyc")
+
+    def ask(actor: Access, value: str, grant_kind: str = "level", m_tier: int = 1,
+            m: Member = kyc) -> None:  # fmt: skip
+        check_request(actor, m, access(m_tier, subject="member"), grant_kind, value,
+                      NOW, None, NOW, LIMITS)  # fmt: skip
+
+    def decide(actor: Access, g: Grant, m_tier: int = 1) -> None:
+        check_approval(actor, kyc, access(m_tier, subject="member"), g, NOW, LIMITS)
+
+    # own section: any employee of KYC (T1+ there) proposes, a lead too
+    ask(leveled(kyc=1), "kyc:2")
+    ask(leveled(kyc=3), "kyc:3")
+    ask(leveled(kyc=1), "kyc", "role")
+    refused("forbidden", ask, leveled(payouts=3), "kyc:2")  # not of KYC
+    refused("forbidden", ask, leveled(kyc=0), "kyc:1")  # an apprentice of KYC
+    ask(access(4), "kyc:2")  # an admin may propose too
+    home = grant("level", "kyc:2", tier=1)
+    decide(access(4), home)  # an admin approves
+    refused("forbidden", decide, leveled(kyc=3), home)  # never a lead
+    refused("four_eyes", decide, access(4, subject="requester"), home)
+
+    # another section: an admin proposes, an owner approves
+    refused("forbidden", ask, leveled(kyc=3, payouts=3), "payouts:1")
+    ask(access(4), "payouts:1")
+    ask(access(4), "payouts", "role")
+    away = grant("level", "payouts:1", tier=4)
+    refused("forbidden", decide, access(4), away)
+    decide(access(5), away)
+    decide(access(5), grant("role", "payouts", tier=4))
+
+    # an admin's sections: one owner proposes, the other approves
+    refused("forbidden", ask, access(4), "kyc:3", m_tier=4)
+    ask(access(5), "kyc:3", m_tier=4)
+    refused("forbidden", decide, access(4), grant("level", "kyc:3", tier=5), 4)
+    decide(access(5), grant("level", "kyc:3", tier=5), 4)
+
+    # no own section (team is not a section): every section is another one
+    ops = member(team="ops")
+    refused("forbidden", check_request, leveled(kyc=3), ops, access(1, subject="member"),
+            "level", "kyc:1", NOW, None, NOW, LIMITS)  # fmt: skip
+
+    # a higher bar for the proposer, by policy
+    strict = Limits(home_proposer_min_level=3)
+    refused("forbidden", check_request, leveled(kyc=2), kyc, access(1, subject="member"),
+            "level", "kyc:1", NOW, None, NOW, strict)  # fmt: skip
+
+
+OWNERS_ONLY = Limits(sections_approval="owner")
+
+
 def test_a_section_is_assigned_by_an_admin_and_approved_by_an_owner() -> None:
     """[decided 6 Nov 2026] An admin proposes a section (any level up to the
     section's charge, Lead) and an owner approves; for an admin, one owner
@@ -532,7 +589,7 @@ def test_a_section_is_assigned_by_an_admin_and_approved_by_an_owner() -> None:
 
     def ask(actor: Access, value: str, m_tier: int = 1) -> None:
         check_request(actor, member(), access(m_tier, subject="member"), "level", value,
-                      NOW, None, NOW, LIMITS)  # fmt: skip
+                      NOW, None, NOW, OWNERS_ONLY)  # fmt: skip
 
     ask(access(4), "kyc:3")
     ask(access(4), "payouts:2")  # a second section for the same person
@@ -544,17 +601,18 @@ def test_a_section_is_assigned_by_an_admin_and_approved_by_an_owner() -> None:
     # a role is a section too
     req(access(4), member(), "role", "kyc")
     refused("forbidden", req, access(3), member(), "role", "kyc")
-    refused("forbidden", approve, access(4), grant("role", "kyc", tier=4))
-    approve(access(5), grant("role", "kyc", tier=4))
+    refused("forbidden", approve, access(4), grant("role", "kyc", tier=4), limits=OWNERS_ONLY)
+    approve(access(5), grant("role", "kyc", tier=4), limits=OWNERS_ONLY)
 
     level = grant("level", "kyc:3", tier=4)
-    approve(access(5), level)
-    refused("forbidden", approve, access(4), level)  # an admin does not approve
-    refused("forbidden", approve, leveled(kyc=3), level)
-    refused("four_eyes", approve, access(5, subject="requester"), level)  # the other owner
+    approve(access(5), level, limits=OWNERS_ONLY)
+    refused("forbidden", approve, access(4), level, limits=OWNERS_ONLY)  # not an admin
+    refused("forbidden", approve, leveled(kyc=3), level, limits=OWNERS_ONLY)
+    refused("four_eyes", approve, access(5, subject="requester"), level, limits=OWNERS_ONLY)
     for_admin = grant("level", "risk:3", tier=5)
-    approve(access(5), for_admin, m_tier=4)
-    refused("four_eyes", approve, access(5, subject="requester"), for_admin, m_tier=4)
+    approve(access(5), for_admin, m_tier=4, limits=OWNERS_ONLY)
+    refused("four_eyes", approve, access(5, subject="requester"), for_admin, m_tier=4,
+            limits=OWNERS_ONLY)  # fmt: skip
 
 
 def test_under_the_lead_rule_a_sections_lead_asks_and_an_admin_approves() -> None:
