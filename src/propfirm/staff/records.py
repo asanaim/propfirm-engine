@@ -482,3 +482,43 @@ def check_graduate(actor: Access, member: Member, new_subject: str, now: int) ->
         "the approving admin is neither the apprentice nor the recommender",
     )
     _need(new_subject != member.subject, "invalid", "the staff login is not the apprentice login")
+
+
+# --- leavers' logins (5d) -------------------------------------------------------------
+
+CUTOFF_KINDS = ("requested", "done", "failed", "alerted", "overdue", "confirmed")
+
+
+@dataclass(frozen=True, slots=True)
+class Cutoff:
+    sid: str
+    subject: str
+    reason: str  # left, graduated, ended
+    requested_at: int
+    done_at: int | None
+    how: str | None  # the provider's name, or "by hand: <who>"
+    last_error: str | None
+    alerted: tuple[str, ...]  # alerted, overdue
+
+
+def fold_cutoffs(rows: Sequence[tuple[str, str, str, str | None, int]]) -> list[Cutoff]:
+    """(sid, subject, kind, detail, ts) in order -> one cut-off per member."""
+    out: dict[str, Cutoff] = {}
+    for sid, subject, kind, detail, ts in rows:
+        if kind not in CUTOFF_KINDS:
+            raise StaffError(f"cut-off event {kind!r}")
+        c = out.get(sid)
+        if kind == "requested":
+            if c is None:
+                out[sid] = Cutoff(sid, subject, detail or "", ts, None, None, None, ())
+            continue
+        if c is None:
+            raise StaffError(f"{sid}: {kind} before requested")
+        if kind in ("done", "confirmed"):
+            if c.done_at is None:
+                out[sid] = replace(c, done_at=ts, how=detail)
+        elif kind == "failed":
+            out[sid] = replace(c, last_error=detail)
+        else:
+            out[sid] = replace(c, alerted=(*c.alerted, kind))
+    return list(out.values())

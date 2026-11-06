@@ -188,6 +188,20 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       }
+    },
+    {
+      "clientId": "staff-cutoff",
+      "name": "Leavers' logins: disable users and end sessions (service account, manage-users only)",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-staff-cutoff-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocol": "openid-connect"
     }
   ],
   "users": [
@@ -282,6 +296,16 @@
       "realmRoles": [
         "default-roles-propfirm"
       ]
+    },
+    {
+      "username": "service-account-staff-cutoff",
+      "enabled": true,
+      "serviceAccountClientId": "staff-cutoff",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users"
+        ]
+      }
     }
   ],
   "scopeMappings": [
@@ -1239,5 +1263,15 @@
   ],
   "browserFlow": "browser-with-amr",
   "ssoSessionMaxLifespan": 36000,
-  "directGrantFlow": "direct-grant-with-amr"
+  "directGrantFlow": "direct-grant-with-amr",
+  "clientScopeMappings": {
+    "realm-management": [
+      {
+        "client": "staff-cutoff",
+        "roles": [
+          "manage-users"
+        ]
+      }
+    ]
+  }
 }

@@ -437,8 +437,18 @@ Associate, T2 Specialist, T3 Team lead, T4 Admin, T5 Owner. Roles:
 
 Nobody asks for, approves or revokes their own access, and the asker never
 approves. Grants end on their own. A leaver (`POST /staff/members/{sid}/leave`,
-by a higher tier) has no access at once and every grant ends; disable the
-Keycloak user too. Owners are recorded once at start-up from
+by a higher tier) has no access at once and every grant ends.
+
+Leavers' logins [decided 6 Nov 2026; 5d]: the login of every member who
+left, graduated or reached an end date is disabled at Keycloak and all its
+sessions ended, at once and then every minute until done (a Keycloak
+service account with `manage-users` only: `STAFF_IDP_URL`,
+`STAFF_IDP_CLIENT_ID`, `STAFF_IDP_CLIENT_SECRET`; the development realm's
+`staff-cutoff`). Not done within 60 minutes (`leaver_cutoff_alert_minutes`):
+an urgent notification to leads and admins to do it by hand and confirm it
+(`POST /staff/cutoffs/{sid}/done`); again at 24 hours, the hard limit.
+`GET /staff/cutoffs`: each one pending, late, overdue or done, and how. A
+leaver's open cases show on every case worker's to-do list to take over. Owners are recorded once at start-up from
 `STAFF_OWNERS="<keycloak id>=Owner A;<keycloak id>=Owner B"`; an owner's
 tier is never changed through the API.
 

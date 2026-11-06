@@ -103,6 +103,9 @@ class StaffPolicy:
     # maker-checker on admin settings: a second admin approves each change
     settings_need_second_admin: bool = True
     proposal_expiry_hours: int = 72
+    # a leaver's login disabled at the identity provider: alert after, hard limit
+    leaver_cutoff_alert_minutes: int = 60
+    leaver_cutoff_max_hours: int = 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -489,6 +492,8 @@ def _staff(t: _Table) -> StaffPolicy:
         staff_may_trade=t.boolean("staff_may_trade"),
         settings_need_second_admin=t.boolean("settings_need_second_admin"),
         proposal_expiry_hours=t.integer("proposal_expiry_hours", 1),
+        leaver_cutoff_alert_minutes=t.integer("leaver_cutoff_alert_minutes", 1),
+        leaver_cutoff_max_hours=t.integer("leaver_cutoff_max_hours", 1),
     )
     t.done()
     if limits.apprentice_min_months > limits.apprentice_max_months:
