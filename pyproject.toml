@@ -15,6 +15,7 @@ dependencies = [
     "tzdata==2026.6",
     "uvicorn==0.54.0",
     "valkey==6.2.0",
+    "websockets==17.3",
 ]
 
 [dependency-groups]

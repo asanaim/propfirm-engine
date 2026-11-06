@@ -333,6 +333,68 @@ window at the new time (`<id>-at<HHMM>`); the old one stays until an admin
 cancels it. Settings: `PROPFIRM_NEWS_COLLECTOR` (1/0), `PROPFIRM_COLLECT_HOURS`,
 `PROPFIRM_COLLECTOR_AGENT` (the User-Agent naming the firm).
 
+## Live prices: Twelve Data (P2 step 6)
+
+`propfirm.service.twelvedata` holds one WebSocket connection to
+`wss://ws.twelvedata.com/v1/quotes/price` (Twelve Data allows 3 per key),
+subscribes the launch symbols (`config/market/twelve_data.toml` maps each to
+Twelve Data's symbol), sends a heartbeat every 10 s, reconnects after 30 s
+of silence or a drop (5 to 60 s backoff), and publishes each price to the
+engine's input stream as a `PriceUpdate`.
+
+```sh
+# .env (never committed): TWELVE_DATA_API_KEY=...
+docker compose -f compose.yaml -f compose.live.yaml --profile platform up -d --build --wait
+```
+
+- Prices are read as decimals and become integer points exactly; a price
+  with more decimal places than the symbol's `digits` is refused and
+  counted, never rounded. Source time: Twelve Data's whole UNIX seconds
+  (so up to 1 s of each measured delay is truncation; the delay guard
+  freezes at 2 s). Receive time: this machine's clock.
+- Sequence numbers continue across restarts (kept in Valkey, written in
+  the same transaction as the update; a crash gives a gap, never a reuse).
+- `compose.live.yaml` sets `PROPFIRM_PRICE_SOURCE=twelve_data` everywhere
+  (attribution "Data provided by Twelve Data" beside prices) and leaves the
+  synthetic feeder out; the feeder refuses to run with a licensed source.
+- `PROPFIRM_FEED_SYMBOLS=EUR/USD,XAU/USD` limits the subscription (credits).
+- The API key is read from the environment only and never logged: errors
+  show the error's kind, not its message (which may carry the URL).
+
+**Trial (C10).** The connector counts per UTC day and symbol: prices,
+refusals, the most decimal places streamed, delay buckets (receive minus
+source: 1, 2, 5, 10, 30 s), the worst delay and the longest silence, plus
+connection events (connects, drops, failed subscriptions). No prices are
+kept in these counters. After the 12 days:
+
+```sh
+docker compose -f compose.yaml -f compose.live.yaml run --rm --no-deps twelvedata \
+  /opt/venv/bin/python -m propfirm.service.trial 2026-11-09 2026-11-20
+```
+
+The report gives per symbol the verdict on `digits` ("ok" or "raise to N")
+and the share of prices inside the delay guard. To settle in C10: `digits`
+per symbol, the WTI and Brent symbols (`WTI/USD`, `XBR/USD` until
+confirmed), the crypto exchange Twelve Data picks when none is named,
+whether the delay threshold (2 s) and gap thresholds fit the real feed.
+
+**Purge (licence).** Twelve Data prices are kept only while subscribed and
+purged within 30 days of cancelling (CLAUDE.md). Stop the engine, projector
+and connector, then:
+
+```sh
+docker compose -f compose.yaml -f compose.live.yaml run --rm --no-deps twelvedata \
+  /opt/venv/bin/python -m propfirm.service.purge --licensed --confirm "purge licensed prices"
+```
+
+It takes the journal's and the projector's writer locks first (a running
+one stops it before anything is deleted), refuses while the engine has
+unread or unacknowledged inputs, then empties the input stream, the
+journal's licensed tables (prices, price keys, snapshots: the chain still
+verifies, replay is no longer possible), the projections (bars, account
+histories; cursor moved to the head) and the live state. It prints the
+rows and keys deleted: keep that output as the record of the purge.
+
 ## Run the tests without Docker
 
 Needs [uv](https://docs.astral.sh/uv/). Unit tests run anywhere; integration
@@ -746,4 +808,7 @@ or rules uses floating point.
     anomaly report
   - [x] 5e: back-office screens (react-admin)
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)
+  - [x] 6a: connector, exact points, continuing sequence numbers, trial counters and
+    report, licensed-data purge
+  - [ ] 6b: the 12-day trial on a paid key (C10), then `digits` and thresholds settled
 - [ ] Step 7: staging, backups and restore drill, security scans

@@ -1,0 +1,41 @@
+# Twelve Data symbols for the 30 launch symbols (CC-5), read by the price
+# connector (P2 step 6). Each launch symbol maps to the symbol Twelve Data
+# streams. To confirm in the trial (C10): every subscription succeeds, and
+# the precision streamed fits `digits` (src/propfirm/market/symbols.py).
+#
+# [symbols] "<launch symbol>" = "<Twelve Data symbol>"
+# Not confirmed until the trial: WTI and Brent (Twelve Data lists crude oil
+# spot as WTI/USD and Brent as XBR/USD), and which crypto exchange is used
+# when none is named.
+
+[symbols]
+"EUR/USD" = "EUR/USD"
+"GBP/USD" = "GBP/USD"
+"USD/JPY" = "USD/JPY"
+"USD/CHF" = "USD/CHF"
+"AUD/USD" = "AUD/USD"
+"USD/CAD" = "USD/CAD"
+"NZD/USD" = "NZD/USD"
+"EUR/GBP" = "EUR/GBP"
+"EUR/JPY" = "EUR/JPY"
+"EUR/CHF" = "EUR/CHF"
+"EUR/AUD" = "EUR/AUD"
+"EUR/CAD" = "EUR/CAD"
+"EUR/NZD" = "EUR/NZD"
+"GBP/JPY" = "GBP/JPY"
+"GBP/CHF" = "GBP/CHF"
+"GBP/AUD" = "GBP/AUD"
+"GBP/CAD" = "GBP/CAD"
+"AUD/JPY" = "AUD/JPY"
+"AUD/CAD" = "AUD/CAD"
+"CAD/JPY" = "CAD/JPY"
+"CHF/JPY" = "CHF/JPY"
+"XAU/USD" = "XAU/USD"
+"XAG/USD" = "XAG/USD"
+"WTI" = "WTI/USD"
+"Brent" = "XBR/USD"
+"BTC/USD" = "BTC/USD"
+"ETH/USD" = "ETH/USD"
+"SOL/USD" = "SOL/USD"
+"XRP/USD" = "XRP/USD"
+"LTC/USD" = "LTC/USD"
