@@ -204,6 +204,11 @@ proposal_expiry_hours = 72
 # alerted to do it by hand; the hard limit is 24 hours.
 leaver_cutoff_alert_minutes = 60
 leaver_cutoff_max_hours = 24
+# The training gate [staff spec 5c]: a level of T1 or above in a section,
+# and an apprentice's graduation, need that section's course
+# (config/staff/courses.toml) passed within the last 12 months.
+training_gate = true
+training_valid_months = 12
 # Apprentices [decided 31 Oct 2026]: a term of 3 to 6 months, set for each.
 apprentice_min_months = 3
 apprentice_max_months = 6

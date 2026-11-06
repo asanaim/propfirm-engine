@@ -7,10 +7,10 @@ is never used to approve.
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from propfirm.policy import PolicySource
+from propfirm.policy import Policy, PolicySource
 from propfirm.staff.model import ROLES, Access, Tier, legacy_access, no_access
 from propfirm.staff.records import (
     SYSTEM,
@@ -29,6 +29,7 @@ from propfirm.staff.records import (
     parse_level,
 )
 from propfirm.staff.store import StaffOps, StaffStore
+from propfirm.staff.training import Passed, courses, current
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,8 +65,56 @@ class Directory:
     def store(self) -> StaffStore:
         return self._store
 
+    async def policy_now(self) -> Policy:
+        return await self._policy.current()
+
     async def _limits(self) -> Limits:
         return (await self._policy.current()).staff.limits
+
+    # --- training (5c) ----------------------------------------------------------------
+
+    async def _gate(self, ops: StaffOps, sid: str, sections: Sequence[str], now: int) -> None:
+        """Each section's course passed and still valid, if the gate is on."""
+        staff = (await self._policy.current()).staff
+        if not staff.training_gate:
+            return
+        passes = await ops.training(sid)
+        for section in sections:
+            if current(passes, section, now, staff.training_valid_months) is None:
+                course = courses()[section]
+                raise StaffRefused(
+                    "training",
+                    f"{sid} has not passed the {section} course ({course.course}: "
+                    f"{course.title}) in the last {staff.training_valid_months} months",
+                )
+
+    async def record_training(
+        self, actor: Actor, sid: str, section: str, note: str, now: int
+    ) -> Passed:
+        """An assessor (T2 or above in the section, or an admin; never the
+        trainee) records a pass of the section's course."""
+        if section not in ROLES:
+            raise StaffRefused("invalid", f"section must be one of {ROLES}")
+        async with self._store.change() as ops:
+            me = await self._access(ops, actor, now)
+            member = await self._member(ops, sid)
+            if me.subject == member.subject:
+                raise StaffRefused("own_access", "nobody records their own training")
+            level = me.level(section)
+            if level is None or level < Tier.SPECIALIST:
+                raise StaffRefused(
+                    "forbidden", f"a {section} pass is recorded by a {section} T2+ or an admin"
+                )
+            if not member.active(now):
+                raise StaffRefused("not_allowed", f"{sid} is not active")
+            course = courses()[section]
+            passed = Passed(sid, section, course.course, course.version, now, actor.subject, note)
+            await ops.record_training(passed)
+            return passed
+
+    async def training(self, sid: str) -> list[Passed]:
+        async with self._store.read() as ops:
+            return await ops.training(sid)
 
     # --- access -----------------------------------------------------------------------
 
@@ -280,8 +329,13 @@ class Directory:
                 "reason": reason,
             }
             staff = await ops.member_event(new_sid, "joined", now, joined)
-            # Associate (T1) in each section the apprentice learnt in
+            # Associate (T1) in each section the apprentice learnt in, each
+            # section's course passed (carried over to the new record)
             sections = sorted((await self._member_access(ops, apprentice, now)).roles)
+            await self._gate(ops, sid, sections, now)
+            for p in await ops.training(sid):
+                note = f"carried over from {sid}: {p.note}"
+                await ops.record_training(replace(p, sid=new_sid, note=note))
             given: list[tuple[str, int | str]] = [("level", f"{s}:1") for s in sections]
             for grant, value in given or [("tier", int(Tier.ASSOCIATE))]:
                 grt = await ops.new_grt()
@@ -316,7 +370,7 @@ class Directory:
         now: int,
     ) -> Grant:
         limits = await self._limits()
-        if grant == "tier":
+        if grant in ("tier", "level"):  # until replaced or revoked (or the member ends)
             ends_at = None
         member_access = await self._member_access(ops, member, now)
         check_request(me, member, member_access, grant, value, starts_at, ends_at, now, limits)
@@ -358,6 +412,10 @@ class Directory:
             me = await self._access(ops, actor, now)
             grant, member = await self._grant(ops, grt)
             check_approval(me, member, await self._member_access(ops, member, now), grant, now)
+            if grant.grant == "level" and parse_level(grant.value)[1] >= Tier.ASSOCIATE:
+                await self._gate(ops, member.sid, [parse_level(grant.value)[0]], now)
+            elif grant.grant == "role" and member.kind != "apprentice":
+                await self._gate(ops, member.sid, [str(grant.value)], now)
             detail = {"by": actor.subject, "tier": int(me.tier or 0), "reason": reason}
             approved = await ops.grant_event(grt, "approved", now, detail)
             if grant.grant in ("tier", "level"):  # the new one replaces the old

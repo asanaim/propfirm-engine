@@ -32,10 +32,18 @@ async def me(p: Platform, who: str) -> Any:
     return await ok(p, who, "GET", "/staff/me")
 
 
+async def trained(p: Platform, assessor: str, sid: str, section: str) -> None:
+    body = {"section": section, "note": "course and test passed"}
+    await ok(p, assessor, "POST", f"/staff/members/{sid}/training", body)
+
+
 async def join(p: Platform, by: str, approver: str, subject: str, **fields: Any) -> str:
     """Add a member and approve every grant asked for them."""
     body = {"subject": subject, "name": subject.title(), "kind": "staff", "reason": "hired"}
     joined = await ok(p, by, "POST", "/staff/members", {**body, **fields})
+    if fields.get("kind", "staff") != "apprentice":
+        for section in fields.get("roles", []):  # the training gate (5c)
+            await trained(p, approver, joined["sid"], section)
     for g in joined["grants"]:
         await ok(p, approver, "POST", f"/staff/grants/{g['grt']}/approve", OK)
     sid: str = joined["sid"]
@@ -87,8 +95,13 @@ def test_owners_grant_with_four_eyes_and_grants_end_on_their_own(
             assert [g["grt"] for g in waiting] == [g["grt"] for g in joined["grants"]]
             no_mfa = await as_(p, "kc-owner-b", "POST", approve, OK, mfa=False)
             assert (no_mfa.status_code, no_mfa.json()["detail"]["code"]) == (401, "mfa_required")
-            for g in joined["grants"]:
-                await ok(p, "kc-owner-b", "POST", f"/staff/grants/{g['grt']}/approve", OK)
+            gated = await as_(p, "kc-owner-b", "POST", approve, OK)  # the tier: no course needed
+            assert gated.status_code == 200
+            role = f"/staff/grants/{joined['grants'][1]['grt']}/approve"
+            untrained = await as_(p, "kc-owner-b", "POST", role, OK)
+            assert (untrained.status_code, untrained.json()["detail"]["code"]) == (409, "training")
+            await trained(p, "kc-owner-b", joined["sid"], "payouts")
+            await ok(p, "kc-owner-b", "POST", role, OK)
             lead = await me(p, "kc-lead")
             assert (lead["access"]["tier"], lead["access"]["roles"]) == ("T3", ["payouts"])
             assert "staff.manage" in lead["access"]["permissions"]
@@ -111,6 +124,7 @@ def test_owners_grant_with_four_eyes_and_grants_end_on_their_own(
                 p, "kc-lead", "POST", f"/staff/grants/{spec['grants'][0]['grt']}/approve", OK
             )
             assert by_lead.status_code == 403
+            await trained(p, "kc-admin", spec["sid"], "payouts")
             for g in spec["grants"]:
                 await ok(p, "kc-admin", "POST", f"/staff/grants/{g['grt']}/approve", OK)
             sid = spec["sid"]
@@ -203,8 +217,11 @@ def test_an_apprentice_learns_then_graduates_on_a_new_login(
             }, ends_at=add_months(now, 4))  # fmt: skip
             assert app.startswith("APP")
             learner = await me(p, "kc-app")
-            assert (learner["access"]["tier"], learner["access"]["permissions"]) == ("T0", [])
-            assert (await as_(p, "kc-app", "GET", "/staff/payouts")).status_code == 403
+            assert (learner["access"]["tier"], learner["access"]["permissions"]) == (
+                "T0",
+                ["staff.view_masked", "apprentice.propose"],
+            )
+            assert (await as_(p, "kc-app", "POST", "/staff/cases", {})).status_code in (403, 422)
 
             recommend = f"/staff/members/{app}/recommend"
             graduate = f"/staff/members/{app}/graduate"
@@ -215,6 +232,9 @@ def test_an_apprentice_learns_then_graduates_on_a_new_login(
             await ok(p, "kc-mentor", "POST", recommend, OK)
             assert (await as_(p, "kc-mentor", "POST", graduate, new_login)).status_code == 403
             assert [m["sid"] for m in (await me(p, "kc-admin"))["graduations"]] == [app]
+            untrained = await as_(p, "kc-admin", "POST", graduate, new_login)
+            assert (untrained.status_code, untrained.json()["detail"]["code"]) == (409, "training")
+            await trained(p, "kc-mentor", app, "kyc")  # the mentor (KYC T2) assesses
             staff = await ok(p, "kc-admin", "POST", graduate, new_login)
             assert (staff["from_sid"], staff["kind"], staff["lead"]) == (app, "staff", mentor)
             graduate_me = await me(p, "kc-app-staff")
@@ -229,6 +249,7 @@ def test_an_apprentice_learns_then_graduates_on_a_new_login(
             asked = await ok(p, "kc-admin", "POST", "/staff/grants", up)
             await ok(p, "kc-owner-a", "POST", f"/staff/grants/{asked['grt']}/approve", OK)
             other = {**up, "value": "payouts:1"}
+            await trained(p, "kc-admin", staff["sid"], "payouts")
             asked = await ok(p, "kc-admin", "POST", "/staff/grants", other)
             await ok(p, "kc-owner-a", "POST", f"/staff/grants/{asked['grt']}/approve", OK)
             ladders = (await me(p, "kc-app-staff"))["access"]

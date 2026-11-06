@@ -106,6 +106,9 @@ class StaffPolicy:
     # a leaver's login disabled at the identity provider: alert after, hard limit
     leaver_cutoff_alert_minutes: int = 60
     leaver_cutoff_max_hours: int = 24
+    # the training gate (5c): a section's course before a level in it
+    training_gate: bool = True
+    training_valid_months: int = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -494,6 +497,8 @@ def _staff(t: _Table) -> StaffPolicy:
         proposal_expiry_hours=t.integer("proposal_expiry_hours", 1),
         leaver_cutoff_alert_minutes=t.integer("leaver_cutoff_alert_minutes", 1),
         leaver_cutoff_max_hours=t.integer("leaver_cutoff_max_hours", 1),
+        training_gate=t.boolean("training_gate"),
+        training_valid_months=t.integer("training_valid_months", 1),
     )
     t.done()
     if limits.apprentice_min_months > limits.apprentice_max_months:

@@ -61,7 +61,7 @@ from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
@@ -114,10 +114,19 @@ from propfirm.settings.overlay import CountryGating, StageLimits, stage_limits, 
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.store import ChangeStatus, Proposal
 from propfirm.staff.cutoff import Cutoffs, IdentityError, cutoff_view
-from propfirm.staff.desk import DeskError, StaffDesk, message_view, notification_view
+from propfirm.staff.desk import (
+    ApprenticeDesk,
+    DeskError,
+    StaffDesk,
+    apprentice_proposal_view,
+    message_view,
+    notification_view,
+)
 from propfirm.staff.directory import Actor, Directory
+from propfirm.staff.masking import mask_pii
 from propfirm.staff.model import PERMISSIONS, TITLES, Access, Tier, legacy_access
 from propfirm.staff.records import Grant, Member, StaffRefused
+from propfirm.staff.training import courses, current, valid_until
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
 ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
@@ -194,6 +203,7 @@ class Deps:
     staff: Directory | None = None  # the staff directory; None: Keycloak roles only
     desk: StaffDesk | None = None  # the staff page: duties, notifications, messages
     cutoffs: Cutoffs | None = None  # leavers' logins disabled at the identity provider
+    apprentices: ApprenticeDesk | None = None  # apprentices' proposals to their mentors
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -360,6 +370,20 @@ class GrantBody(_Body):
 
 class MessageBody(_Body):
     body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+
+
+class TrainingBody(_Body):
+    section: Role
+    note: Reason  # what was assessed, e.g. "course and test passed, 86 %"
+
+
+class ApprenticeProposalBody(_Body):
+    """An apprentice's proposal on a live record [staff spec 5c]: a case
+    note ({"text"}) or a case decision ({"outcome", "actions", "reason"})."""
+
+    action: Literal["case.note", "case.decide"]
+    target: Annotated[str, StringConstraints(pattern=r"^CAS[0-9]{8}$")]
+    body: dict[str, Any]
 
 
 class GraduateBody(_Body):
@@ -532,6 +556,7 @@ STAFF_ERRORS = {
     "exists": 409,
     "pending": 409,
     "not_allowed": 409,
+    "training": 409,
 }
 
 
@@ -934,6 +959,18 @@ def _can(name: str) -> Callable[..., Awaitable[Principal]]:
     return check
 
 
+async def _viewer(request: Request, deps: D, me: Me) -> Principal:
+    """Reads of back-office records: staff (T1+) see them whole; apprentices
+    (T0) with personal data masked (`propfirm.staff.masking`)."""
+    access = await _staff_access(deps, me)
+    if access.has("staff.view"):
+        return me
+    if access.has("staff.view_masked"):
+        request.state.mask_pii = True
+        return me
+    raise _forbidden("staff.view")
+
+
 async def _employee(deps: D, me: Me) -> Principal:
     """Anyone with staff access now (an apprentice too)."""
     access = await _staff_access(deps, me)
@@ -944,6 +981,7 @@ async def _employee(deps: D, me: Me) -> Principal:
 
 Trader = Annotated[Principal, Depends(_trader)]
 Staff = Annotated[Principal, Depends(_can("staff.view"))]
+Viewer = Annotated[Principal, Depends(_viewer)]
 Employee = Annotated[Principal, Depends(_employee)]
 Approver = Annotated[Principal, Depends(_can("progression.decide"))]
 IdentityReviewer = Annotated[Principal, Depends(_can("onboarding.decide"))]
@@ -1016,6 +1054,30 @@ def _onboarding(deps: Deps) -> Onboarding:
 
 
 DAY_MS = 86_400_000
+
+
+async def training_view(deps: Deps, access: Access, now: int) -> list[dict[str, Any]]:
+    """Each section held: its course, the pass in force and until when."""
+    if deps.staff is None or access.sid is None:
+        return []
+    months = (await deps.staff.policy_now()).staff.training_valid_months
+    passes = await deps.staff.training(access.sid)
+    out = []
+    for section in sorted(access.roles):
+        course = courses()[section]
+        found = current(passes, section, now, months)
+        out.append(
+            {
+                "section": section,
+                "course": course.course,
+                "title": course.title,
+                "version": course.version,
+                "passed_at": None if found is None else found.passed_at,
+                "valid_until": None if found is None else valid_until(found, months),
+                "status": "missing" if found is None else "valid",
+            }
+        )
+    return out
 
 
 def _todo(kind: str, ref: str, title: str, since: int, due_at: int | None = None) -> dict[str, Any]:
@@ -1093,6 +1155,19 @@ async def build_todo(deps: Deps, me: Principal, access: Access) -> list[dict[str
         for alert in await deps.source_alerts.open_alerts():
             title = f"Add the news a blocked source misses: {alert.source}"
             out.append(_todo("news_gap", f"news-source:{alert.source}", title, alert.since))
+    for t in await training_view(deps, access, now):
+        if access.tier is not None and access.tier >= Tier.ADMIN:
+            break
+        if t["status"] == "missing":
+            title = f"Pass the {t['section']} course: {t['title']}"
+            out.append(_todo("training", t["section"], title, now))
+        elif t["valid_until"] is not None and t["valid_until"] - now <= 30 * DAY_MS:
+            title = f"Refresh the {t['section']} course before it lapses"
+            out.append(_todo("training", t["section"], title, now, t["valid_until"]))
+    if deps.apprentices is not None and access.sid is not None:
+        for mine in await deps.apprentices.proposals(mentor=access.sid, open_only=True):
+            title = f"Your apprentice {mine.sid} proposes {mine.action} on {mine.target}"
+            out.append(_todo("apprentice_proposal", str(mine.id), title, mine.ts))
     if deps.desk is not None:
         for sheet in await deps.desk.duties_view(access):
             if not sheet["acknowledged"]:
@@ -1151,6 +1226,19 @@ def create_app(
     """`deps` directly (tests), or set on `app.state.deps` by `lifespan`."""
     app = FastAPI(title="pipridge platform API", version="0.2.0", lifespan=lifespan)
     app.state.deps = deps
+
+    @app.middleware("http")
+    async def masked_for_apprentices(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """An apprentice's read (`_viewer`): personal data masked."""
+        response = await call_next(request)
+        if not getattr(request.state, "mask_pii", False):
+            return response
+        body = b"".join([chunk async for chunk in response.body_iterator])  # type: ignore[attr-defined]
+        if not response.headers.get("content-type", "").startswith("application/json"):
+            return Response(b"", status_code=500)  # never pass an unmasked body on
+        return JSONResponse(mask_pii(json.loads(body)), status_code=response.status_code)
 
     async def submit(deps: Deps, build: Callable[[int], Input]) -> JSONResponse:
         try:
@@ -1646,7 +1734,7 @@ def create_app(
     @app.get("/staff/progressions")
     async def progressions(
         deps: D,
-        me: Staff,
+        me: Viewer,
         status: STATUSES = "review",
         limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
     ) -> list[dict[str, Any]]:
@@ -1655,7 +1743,7 @@ def create_app(
         return [progression_view(p) for p in found]
 
     @app.get("/staff/progressions/{prg}")
-    async def progression(deps: D, me: Staff, prg: PrgId) -> dict[str, Any]:
+    async def progression(deps: D, me: Viewer, prg: PrgId) -> dict[str, Any]:
         """One progression with its full history."""
         store = _lifecycle(deps).store
         record = await store.progression(prg)
@@ -1699,7 +1787,7 @@ def create_app(
     @app.get("/staff/onboardings")
     async def onboardings(
         deps: D,
-        me: Staff,
+        me: Viewer,
         status: ONB_STATUSES = "review",
         limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
     ) -> list[dict[str, Any]]:
@@ -1708,7 +1796,7 @@ def create_app(
         return [onboarding_view(o) for o in found]
 
     @app.get("/staff/onboardings/{onb}")
-    async def onboarding(deps: D, me: Staff, onb: OnbId) -> dict[str, Any]:
+    async def onboarding(deps: D, me: Viewer, onb: OnbId) -> dict[str, Any]:
         """One onboarding with its full history and the verified identity."""
         store = _onboarding(deps).store
         record = await store.onboarding(onb)
@@ -1787,7 +1875,7 @@ def create_app(
     @app.get("/staff/cases")
     async def list_cases(
         deps: D,
-        me: Staff,
+        me: Viewer,
         status: CASE_STATUSES | None = None,
         cif: Annotated[str | None, Query(pattern=r"^CIF[0-9]{8}$")] = None,
         overdue: bool = False,
@@ -1800,7 +1888,7 @@ def create_app(
         return [case_view(c) for c in found]
 
     @app.get("/staff/cases/{cas}")
-    async def get_case(deps: D, me: Staff, cas: CasId) -> dict[str, Any]:
+    async def get_case(deps: D, me: Viewer, cas: CasId) -> dict[str, Any]:
         store = _cases(deps).store
         record = await store.case(cas)
         if record is None:
@@ -1903,7 +1991,7 @@ def create_app(
     @app.get("/staff/payouts")
     async def list_payouts(
         deps: D,
-        me: Staff,
+        me: Viewer,
         status: PAYOUT_STATUS | None = None,
         limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
     ) -> list[dict[str, Any]]:
@@ -1911,7 +1999,7 @@ def create_app(
         return [payout_view(p) for p in found]
 
     @app.get("/staff/payouts/{po}")
-    async def get_payout(deps: D, me: Staff, po: PoId) -> dict[str, Any]:
+    async def get_payout(deps: D, me: Viewer, po: PoId) -> dict[str, Any]:
         store = _payouts(deps).store
         record = await store.payout(po)
         if record is None:
@@ -2122,7 +2210,7 @@ def create_app(
         return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
 
     @app.get("/staff/news")
-    async def staff_news(deps: D, me: Staff) -> dict[str, Any]:
+    async def staff_news(deps: D, me: Viewer) -> dict[str, Any]:
         """The calendar files (which events are in the engine now), the
         events with no fixed time, and the desk's latest actions."""
         desk = news_desk(deps)
@@ -2229,6 +2317,7 @@ def create_app(
         access = await _access(deps, me)
         out: dict[str, Any] = {"access": access_view(access), "member": None, "grants": []}
         out["todo"] = await build_todo(deps, me, access)
+        out["training"] = await training_view(deps, access, deps.clock())
         out["duties"] = await deps.desk.duties_view(access) if deps.desk is not None else []
         out["notifications"] = (
             [notification_view(n) for n in await deps.desk.notifications(access, limit=50)]
@@ -2467,12 +2556,12 @@ def create_app(
     RefPath = Annotated[str, Path(pattern=r"^(CAS|PO|ONB|PRG|ACC|CIF|GRT|STF|APP)[0-9]{8}$")]
 
     @app.get("/staff/threads")
-    async def threads(deps: D, me: Staff) -> list[dict[str, Any]]:
+    async def threads(deps: D, me: Viewer) -> list[dict[str, Any]]:
         """The records discussed most recently."""
         return await desk(deps).threads()
 
     @app.get("/staff/threads/{ref}")
-    async def thread(deps: D, me: Staff, ref: RefPath) -> list[dict[str, Any]]:
+    async def thread(deps: D, me: Viewer, ref: RefPath) -> list[dict[str, Any]]:
         return [message_view(m) for m in await desk(deps).thread(ref)]
 
     @app.post("/staff/threads/{ref}", status_code=201)
@@ -2519,5 +2608,124 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         alert, hard = await cutoff_limits(deps)
         return cutoff_view(found, deps.clock(), alert, hard)
+
+    # --- apprentices and training (5c) ------------------------------------------------
+
+    @app.post("/staff/members/{sid}/training", status_code=201)
+    async def record_training(
+        deps: D,
+        me: Employee,
+        sid: Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")],
+        body: TrainingBody,
+    ) -> dict[str, Any]:
+        """A pass of a section's course, recorded by an assessor (T2 or above
+        in that section, or an admin; never the trainee)."""
+        now, staff = deps.clock(), directory(deps)
+        passed = await staff_step(
+            lambda: staff.record_training(_actor(me), sid, body.section, body.note, now)
+        )
+        return {
+            "sid": passed.sid,
+            "section": passed.section,
+            "course": passed.course,
+            "version": passed.version,
+            "passed_at": passed.passed_at,
+            "assessor": passed.assessor,
+        }
+
+    def apprentices(deps: Deps) -> ApprenticeDesk:
+        if deps.apprentices is None:
+            raise HTTPException(status_code=503, detail="apprentice proposals are not available")
+        return deps.apprentices
+
+    @app.post("/staff/apprentice/proposals", status_code=201)
+    async def apprentice_propose(
+        deps: D, me: Employee, body: ApprenticeProposalBody
+    ) -> dict[str, Any]:
+        """An apprentice proposes; their mentor's approval carries it out."""
+        access = await _need(deps, me, "apprentice.propose")
+        model = NoteBody if body.action == "case.note" else CaseDecisionBody
+        try:
+            checked = model.model_validate(body.body).model_dump(exclude_none=True)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"body: {exc}") from exc
+        async with directory(deps).store.read() as ops:
+            member = await ops.member_by_subject(me.subject)
+        if member is None or member.mentor is None:
+            raise HTTPException(status_code=403, detail="only an apprentice with a mentor")
+        try:
+            prop = await apprentices(deps).propose(
+                access, member.mentor, body.action, body.target, checked, deps.clock()
+            )
+        except DeskError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return apprentice_proposal_view(prop)
+
+    @app.get("/staff/apprentice/proposals")
+    async def apprentice_proposals(deps: D, me: Employee) -> list[dict[str, Any]]:
+        """An apprentice's own; a mentor's mentees'; every one for admins."""
+        access = await _staff_access(deps, me)
+        desk_ = apprentices(deps)
+        if access.kind == "apprentice":
+            found = await desk_.proposals(sid=access.sid)
+        elif access.tier is not None and access.tier >= Tier.ADMIN:
+            found = await desk_.proposals()
+        else:
+            found = await desk_.proposals(mentor=access.sid or "-")
+        return [apprentice_proposal_view(p) for p in found]
+
+    async def mentor_of(deps: Deps, me: Principal, pid: int) -> tuple[Access, Any]:
+        access = await _staff_access(deps, me)
+        prop = await apprentices(deps).proposal(pid)
+        if prop is None:
+            raise HTTPException(status_code=404, detail="unknown proposal")
+        admin = access.tier is not None and access.tier >= Tier.ADMIN
+        if access.sid != prop.mentor and not admin:
+            raise HTTPException(status_code=403, detail="the apprentice's mentor decides")
+        if prop.decision is not None:
+            raise HTTPException(status_code=409, detail=f"proposal {pid} is {prop.decision}")
+        return access, prop
+
+    @app.post("/staff/apprentice/proposals/{pid}/approve")
+    async def approve_apprentice(
+        deps: D, me: Me, pid: Annotated[int, Path(ge=1)], body: DecisionBody
+    ) -> dict[str, Any]:
+        """The mentor approves: the action is carried out in the mentor's
+        name (who must be allowed to do it), naming the apprentice."""
+        _, prop = await mentor_of(deps, me, pid)
+        b, now, tag = prop.body, deps.clock(), f"[proposed by {prop.sid}]"
+        try:
+            if prop.action == "case.note":
+                await _need(deps, me, "case.work")
+                await _cases(deps).note(prop.target, me.subject, f"{tag} {b['text']}", now)
+            else:
+                actions = list(b.get("actions", []))
+                await _need(deps, me, "case.pass" if needs_authorisation(actions) else "case.work")
+                await _cases(deps).decide(
+                    prop.target, me.subject, b["outcome"], actions, f"{tag} {b['reason']}", now
+                )
+        except CaseRefused as exc:
+            raise _case_refused(exc) from exc
+        try:
+            await apprentices(deps).decide(pid, "approved", me.subject, body.reason, "done", now)
+        except DeskError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        found = await apprentices(deps).proposal(pid)
+        assert found is not None
+        return apprentice_proposal_view(found)
+
+    @app.post("/staff/apprentice/proposals/{pid}/reject")
+    async def reject_apprentice(
+        deps: D, me: Me, pid: Annotated[int, Path(ge=1)], body: DecisionBody
+    ) -> dict[str, Any]:
+        await mentor_of(deps, me, pid)
+        try:
+            await apprentices(deps).decide(pid, "rejected", me.subject, body.reason, None,
+                                           deps.clock())  # fmt: skip
+        except DeskError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        found = await apprentices(deps).proposal(pid)
+        assert found is not None
+        return apprentice_proposal_view(found)
 
     return app
