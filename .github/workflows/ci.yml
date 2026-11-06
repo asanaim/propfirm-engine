@@ -94,3 +94,43 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  # P2 step 7a: dependencies, code, secrets and the runtime image
+  security:
+    runs-on: ubuntu-24.04
+    env:
+      GRYPE: anchore/grype:v0.121.0@sha256:621d56d1d68106b787022c81546f7e0a36202a25d1239f0c20195fab8c16f7ea
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.6"
+      - run: uv python install 3.14
+      - name: Python dependencies (pip-audit, every group, hashes required)
+        run: |
+          uv export --frozen --all-groups --format requirements-txt --no-emit-project \
+            > "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit==2.10.1 -r "$RUNNER_TEMP/requirements.txt" --require-hashes \
+            --disable-pip --progress-spinner off
+      - name: Python code (bandit; skips explained in pyproject.toml)
+        run: uvx bandit==1.9.4 -c pyproject.toml -r src -q
+      - name: Secrets (detect-secrets against the reviewed baseline)
+        run: |
+          uvx detect-secrets==1.5.0 scan --baseline .secrets.baseline \
+            --exclude-files '(^|/)(package-lock\.json|uv\.lock)$'
+          python3 scripts/security_gate.py secrets .secrets.baseline
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.23.4"
+      - name: npm dependencies shipped to browsers (accepted advisories only)
+        run: |
+          for app in portal backoffice; do
+            (cd "$app" && npm audit --omit=dev --json || true) \
+              | python3 scripts/security_gate.py npm "$app"
+          done
+      - name: Runtime image (Grype; fixable High or Critical fails)
+        run: |
+          docker build --target runtime -t pipridge-runtime:ci .
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$GRYPE" \
+            pipridge-runtime:ci --only-fixed --fail-on high
+          test "$(docker run --rm pipridge-runtime:ci id -u)" = 10001

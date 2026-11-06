@@ -395,6 +395,38 @@ verifies, replay is no longer possible), the projections (bars, account
 histories; cursor moved to the head) and the live state. It prints the
 rows and keys deleted: keep that output as the record of the purge.
 
+## Security scans (P2 step 7a)
+
+CI job `security`, on every pull request and push to main:
+
+| Check | Tool | Fails on |
+|---|---|---|
+| Python dependencies, every group | pip-audit 2.10.1 on `uv export` (hashes required) | any known vulnerability |
+| Python code | bandit 1.9.4 (`[tool.bandit]` in `pyproject.toml`) | any finding |
+| Secrets in tracked files | detect-secrets 1.5.0 against `.secrets.baseline` | a finding not reviewed, or marked real |
+| Browser dependencies (portal, back office) | `npm audit --omit=dev` + `scripts/security_gate.py` | moderate or above, unless accepted in `security/accepted-advisories.toml` (reason and review date; an expired acceptance fails) |
+| Runtime image | Grype 0.121.0 (pinned digest) | a fixable High or Critical; also checks the image runs as uid 10001 |
+
+- Bandit skips: B101 (asserts narrow types; images never run with `-O`) and
+  B608 (SQL from strings): `tests/test_sql_strings.py` allows only reviewed
+  identifiers inside SQL f-strings (validated schema names, constant table
+  names and clauses); values are always `$n` parameters.
+- The baseline holds development values only (the development realm's
+  client secret, test passwords, test webhook secrets, alphabets). After
+  adding one on purpose: `uvx detect-secrets==1.5.0 scan --baseline
+  .secrets.baseline --exclude-files '(^|/)(package-lock\.json|uv\.lock)$'`,
+  then set `"is_secret": false` on the new entry once reviewed.
+- Images: `Dockerfile` builds `runtime` (the services: no development
+  tools, no tests, no uv, user `pipridge`, uid 10001) and `test` (the
+  suite). The base image is pinned by digest; take Debian security fixes by
+  moving to a newer digest. `anchors-init` hands a volume made by an older
+  root-run image to uid 10001 once (the only container run as root; it
+  exits). `.dockerignore` keeps `.env`, keys and the web apps out of the
+  build context.
+- Not covered here (step 7): the yearly external penetration test, SAST
+  for the web apps beyond `npm audit` and ESLint, a dynamic scan of the
+  running API.
+
 ## Run the tests without Docker
 
 Needs [uv](https://docs.astral.sh/uv/). Unit tests run anywhere; integration
@@ -818,3 +850,5 @@ or rules uses floating point.
     report, licensed-data purge
   - [ ] 6b: the 12-day trial on a paid key (C10), then `digits` and thresholds settled
 - [ ] Step 7: staging, backups and restore drill, security scans
+  - [x] 7a: security scans in CI (dependencies, code, secrets, image) and a non-root
+    runtime image

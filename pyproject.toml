@@ -52,3 +52,11 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 python_version = "3.14"
 strict = true
 files = ["src", "tests", "scripts"]
+
+[tool.bandit]
+# B101 assert: used for type narrowing only; images never run with -O
+# (PYTHONOPTIMIZE unset). B608 SQL built from strings: every interpolation is a
+# schema or table identifier validated at construction or a constant from the
+# code; values are always $n parameters. tests/test_sql_strings.py enforces
+# the allowlist of what may be interpolated, so a new case needs review.
+skips = ["B101", "B608"]

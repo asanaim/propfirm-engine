@@ -30,7 +30,7 @@ services:
 
   test:
     profiles: ["test"]  # started by `docker compose run --rm --build test`, not by `up`
-    build: .
+    build: {context: ., target: test}
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,12 +52,14 @@ services:
   # --- the platform (P2): docker compose --profile platform up ---------------
   engine:
     profiles: ["platform"]
-    build: .
+    build: &runtime {context: ., target: runtime}  # non-root, no dev tools
     depends_on: &services
       postgres:
         condition: service_healthy
       valkey:
         condition: service_healthy
+      anchors-init:
+        condition: service_completed_successfully
     environment: &platform-env
       VALKEY_URL: redis://valkey:6379/0
       DATABASE_URL: postgresql://${POSTGRES_USER:-propfirm}:${POSTGRES_PASSWORD:-propfirm-dev}@postgres:5432/${POSTGRES_DB:-propfirm}
@@ -69,9 +71,19 @@ services:
     command: ["/opt/venv/bin/python", "-m", "propfirm.service.engine"]
     stop_grace_period: 15s
 
+  # The services run as uid 10001; a volume made by an earlier, root-run image
+  # is handed over once (the only container that runs as root, and exits).
+  anchors-init:
+    profiles: ["platform"]
+    build: *runtime
+    user: "0:0"
+    volumes:
+      - anchors:/var/lib/propfirm
+    command: ["chown", "-R", "10001:10001", "/var/lib/propfirm"]
+
   projector:
     profiles: ["platform"]
-    build: .
+    build: *runtime
     depends_on: *services
     environment: *platform-env
     command: ["/opt/venv/bin/python", "-m", "propfirm.service.projector"]
@@ -100,7 +112,7 @@ services:
 
   api:
     profiles: ["platform"]
-    build: .
+    build: *runtime
     depends_on:
       postgres:
         condition: service_healthy
@@ -126,14 +138,14 @@ services:
   # Development only: synthetic prices, never real ones (CLAUDE.md).
   feeder:
     profiles: ["platform"]
-    build: .
+    build: *runtime
     depends_on: *services
     environment: *platform-env
     command: ["/opt/venv/bin/python", "-m", "propfirm.service.feeder"]
 
   scheduler:
     profiles: ["platform"]
-    build: .
+    build: *runtime
     depends_on: *services
     environment: *platform-env
     command: ["/opt/venv/bin/python", "-m", "propfirm.service.scheduler"]

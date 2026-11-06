@@ -31,7 +31,7 @@ services:
 
   twelvedata:
     profiles: ["platform"]
-    build: .
+    build: {context: ., target: runtime}
     restart: unless-stopped
     depends_on:
       postgres:

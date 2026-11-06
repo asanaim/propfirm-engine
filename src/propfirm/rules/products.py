@@ -48,7 +48,8 @@ class TargetBasis(StrEnum):
 
 class TieRule(StrEnum):
     BREACH_WINS = "breach_wins"
-    PASS_WINS = "pass_wins"
+    # a rule name, not a password
+    PASS_WINS = "pass_wins"  # nosec B105
 
 
 def _usd(dollars: int) -> int:
