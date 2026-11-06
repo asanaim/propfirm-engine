@@ -62,7 +62,7 @@ from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, StrictInt, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
 from propfirm.customers.cases import needs_authorisation
@@ -313,6 +313,10 @@ Email = Annotated[str, StringConstraints(pattern=r"^[^@\s]{1,64}@[^@\s]{1,190}\.
 Team = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Role = Literal["support", "kyc", "risk", "payouts", "integrity", "product", "marketing", "it"]
 Power = Literal["settings.view", "settings.change", "news.cancel"]  # = staff.model.POWERS
+SectionLevel = Annotated[
+    str,
+    StringConstraints(pattern=r"^(support|kyc|risk|payouts|integrity|product|marketing|it):[0-3]$"),
+]
 
 
 class MemberBody(_Body):
@@ -331,6 +335,8 @@ class MemberBody(_Body):
     ends_at: StrictInt | None = None
     tier: StrictInt | None = None
     roles: list[Role] = []
+    # a level per section [decided 6 Nov 2026], e.g. {"kyc": 2, "payouts": 1}
+    sections: dict[Role, Annotated[int, Field(strict=True, ge=0, le=3)]] = {}
     reason: Reason
 
 
@@ -341,11 +347,12 @@ class MoveBody(_Body):
 
 
 class GrantBody(_Body):
-    """`value`: a tier 0 to 5 (tier, acting), a role, or an admin power."""
+    """`value`: a tier 0 to 5 (tier, acting), a role, an admin power, or a
+    section level "<section>:<0..3>" (level)."""
 
     sid: SidText
-    grant: Literal["tier", "role", "power", "acting"]
-    value: StrictInt | Role | Power
+    grant: Literal["tier", "role", "power", "acting", "level"]
+    value: StrictInt | Role | Power | SectionLevel
     starts_at: StrictInt | None = None
     ends_at: StrictInt | None = None
     reason: Reason
@@ -470,6 +477,7 @@ def access_view(a: Access) -> dict[str, Any]:
         "tier": None if a.tier is None else f"T{int(a.tier)}",
         "title": None if a.tier is None else TITLES[a.tier],
         "roles": sorted(a.roles),
+        "sections": {s: f"T{int(lv)}" for s, lv in sorted(a.levels.items())},
         "powers": sorted(a.powers),
         "permissions": a.permissions(),
         "grants": list(a.grants),
@@ -2292,6 +2300,7 @@ def create_app(
                 roles=body.roles,
                 reason=body.reason,
                 now=now,
+                sections=dict(body.sections.items()),
             )
         )
         return {**member_view(member, now), "grants": [grant_view(g, now) for g in grants]}

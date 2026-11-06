@@ -193,7 +193,8 @@ def test_an_apprentice_learns_then_graduates_on_a_new_login(
             mentor = await join(p, "kc-lead", "kc-admin", "kc-mentor", tier=2, roles=["kyc"])
 
             base = {"subject": "kc-app", "name": "Learner", "kind": "apprentice",
-                    "mentor": mentor, "team": "kyc", "reason": "intake"}  # fmt: skip
+                    "mentor": mentor, "team": "kyc", "roles": ["kyc"],
+                    "reason": "intake"}  # fmt: skip
             seven = await as_(p, "kc-lead", "POST", "/staff/members",
                               {**base, "ends_at": add_months(now, 7)})  # fmt: skip
             assert seven.status_code == 422  # 3 to 6 months
@@ -218,6 +219,22 @@ def test_an_apprentice_learns_then_graduates_on_a_new_login(
             assert (staff["from_sid"], staff["kind"], staff["lead"]) == (app, "staff", mentor)
             graduate_me = await me(p, "kc-app-staff")
             assert graduate_me["access"]["tier"] == "T1"
+            assert graduate_me["access"]["sections"] == {"kyc": "T1"}  # the section learnt
+
+            # promoted inside one section [decided 6 Nov 2026]: asked by that
+            # section's lead or an admin, approved by another admin
+            up = {"sid": staff["sid"], "grant": "level", "value": "kyc:2", "reason": "promoted"}
+            no_lead = await as_(p, "kc-lead", "POST", "/staff/grants", up)
+            assert no_lead.status_code == 403  # a lead, but of no section
+            asked = await ok(p, "kc-admin", "POST", "/staff/grants", up)
+            await ok(p, "kc-owner-a", "POST", f"/staff/grants/{asked['grt']}/approve", OK)
+            other = {**up, "value": "payouts:1"}
+            asked = await ok(p, "kc-admin", "POST", "/staff/grants", other)
+            await ok(p, "kc-owner-a", "POST", f"/staff/grants/{asked['grt']}/approve", OK)
+            ladders = (await me(p, "kc-app-staff"))["access"]
+            assert ladders["sections"] == {"kyc": "T2", "payouts": "T1"}
+            assert "onboarding.decide" in ladders["permissions"]
+            assert "payout.pass" not in ladders["permissions"]  # payouts: T1 only
             assert (await as_(p, "kc-app", "GET", "/staff/me")).status_code == 403
             record = await ok(p, "kc-admin", "GET", f"/staff/members/{app}")
             assert (record["status"], record["to_sid"]) == ("graduated", staff["sid"])

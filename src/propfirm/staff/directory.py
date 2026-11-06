@@ -6,7 +6,7 @@ actor's access is computed inside it, so a grant revoked a moment earlier
 is never used to approve.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +26,7 @@ from propfirm.staff.records import (
     check_recommend,
     check_request,
     check_revoke,
+    parse_level,
 )
 from propfirm.staff.store import StaffOps, StaffStore
 
@@ -157,9 +158,11 @@ class Directory:
         roles: Sequence[str],
         reason: str,
         now: int,
+        sections: Mapping[str, int] | None = None,
     ) -> tuple[Member, list[Grant]]:
-        """A joiner, and the tier and roles requested for them (each waits
-        for its approver)."""
+        """A joiner, and what is requested for them (each waits for its
+        approver): a level in each of `sections` (asked by that section's
+        lead or an admin), and/or a firm-wide tier with roles at that tier."""
         limits = await self._limits()
         async with self._store.change() as ops:
             me = await self._access(ops, actor, now)
@@ -191,6 +194,7 @@ class Directory:
             requested: list[Grant] = []
             wanted: list[tuple[str, int | str]] = [] if tier is None else [("tier", tier)]
             wanted += [("role", r) for r in dict.fromkeys(roles)]
+            wanted += [("level", f"{s}:{lv}") for s, lv in sorted((sections or {}).items())]
             for grant, value in wanted:
                 requested.append(
                     await self._request(ops, me, member, grant, value, now, ends_at, reason, now)
@@ -276,21 +280,22 @@ class Directory:
                 "reason": reason,
             }
             staff = await ops.member_event(new_sid, "joined", now, joined)
-            grt = await ops.new_grt()
-            await ops.grant_event(
-                grt,
-                "requested",
-                now,
-                {
+            # Associate (T1) in each section the apprentice learnt in
+            sections = sorted((await self._member_access(ops, apprentice, now)).roles)
+            given: list[tuple[str, int | str]] = [("level", f"{s}:1") for s in sections]
+            for grant, value in given or [("tier", int(Tier.ASSOCIATE))]:
+                grt = await ops.new_grt()
+                requested = {
                     "sid": new_sid,
-                    "grant": "tier",
-                    "value": int(Tier.ASSOCIATE),
+                    "grant": grant,
+                    "value": value,
                     "starts_at": now,
                     "by": apprentice.recommended_by,
                     "reason": f"graduation of {sid}",
-                },
-            )
-            await ops.grant_event(grt, "approved", now, {"by": actor.subject, "reason": reason})
+                }
+                await ops.grant_event(grt, "requested", now, requested)
+                approved = {"by": actor.subject, "reason": reason}
+                await ops.grant_event(grt, "approved", now, approved)
             graduated = {"by": actor.subject, "reason": reason, "to_sid": new_sid}
             await ops.member_event(sid, "graduated", now, graduated)
             await self._end_grants(ops, sid, actor.subject, f"graduated to {new_sid}", now)
@@ -355,9 +360,13 @@ class Directory:
             check_approval(me, member, await self._member_access(ops, member, now), grant, now)
             detail = {"by": actor.subject, "tier": int(me.tier or 0), "reason": reason}
             approved = await ops.grant_event(grt, "approved", now, detail)
-            if grant.grant == "tier":  # one tier at a time: the new one replaces the old
+            if grant.grant in ("tier", "level"):  # the new one replaces the old
+                section = parse_level(grant.value)[0] if grant.grant == "level" else None
                 for g in await ops.grants_of(member.sid):
-                    if g.grant == "tier" and g.status == "approved" and g.grt != grt:
+                    same = g.grant == grant.grant and (
+                        section is None or parse_level(g.value)[0] == section
+                    )
+                    if same and g.status == "approved" and g.grt != grt:
                         await ops.grant_event(
                             g.grt, "superseded", now, {"by": actor.subject, "by_grt": grt}
                         )
