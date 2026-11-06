@@ -46,6 +46,7 @@ from propfirm.service.projector import HistoryReader
 from propfirm.service.setup import setup_from_policy
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
+from propfirm.staff.desk import StaffDesk, load_duties
 from propfirm.staff.directory import Directory, Owner
 from propfirm.staff.store import StaffStore
 from tests.auth_rig import bearer, verifier
@@ -75,6 +76,7 @@ class Platform:
     mailer: SandboxMailer | None = None
     clock: Callable[[], int] = now_ms  # the API's clock; logins happen "now" on it
     staff: Directory | None = None
+    desk: StaffDesk | None = None
 
     async def call(
         self,
@@ -190,6 +192,7 @@ async def platform(
         legacy_roles=legacy_roles,
     )
     await staff.bootstrap(clock())
+    desk = StaffDesk(pool, config.staff_schema, load_duties())
     deps = Deps(
         live=live,
         history=HistoryReader(pool, config.read_schema),
@@ -204,6 +207,7 @@ async def platform(
         cases=cases,
         payouts=payouts,
         staff=staff,
+        desk=desk,
         didit_webhook_secret=didit_webhook_secret,
         sandbox=sandbox,
         country_header="X-Country",
@@ -251,6 +255,7 @@ async def platform(
             mailer,
             clock,
             staff,
+            desk,
         )
     finally:
         await stop_engine()

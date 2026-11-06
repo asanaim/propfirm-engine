@@ -73,6 +73,7 @@ from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, di
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
 from propfirm.customers.onboarding_store import OnboardingRecord, OnboardingStateError
+from propfirm.customers.payout_flow import payout_state
 from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
 from propfirm.customers.payouts import Eligibility, eligibility_json
@@ -111,6 +112,7 @@ from propfirm.settings.newsdesk import Author, NewsDesk, NewsRefused, action_vie
 from propfirm.settings.overlay import CountryGating, stage_limits, to_json
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.store import ChangeStatus
+from propfirm.staff.desk import DeskError, StaffDesk, message_view, notification_view
 from propfirm.staff.directory import Actor, Directory
 from propfirm.staff.model import PERMISSIONS, TITLES, Access, legacy_access
 from propfirm.staff.records import Grant, Member, StaffRefused
@@ -188,6 +190,7 @@ class Deps:
     news: NewsDesk | None = None  # restricted-events calendar and the risk desk's actions
     source_alerts: SourceAlerts | None = None  # news sources the collector cannot read
     staff: Directory | None = None  # the staff directory; None: Keycloak roles only
+    desk: StaffDesk | None = None  # the staff page: duties, notifications, messages
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -343,6 +346,10 @@ class GrantBody(_Body):
     starts_at: StrictInt | None = None
     ends_at: StrictInt | None = None
     reason: Reason
+
+
+class MessageBody(_Body):
+    body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 
 
 class GraduateBody(_Body):
@@ -956,6 +963,74 @@ def _onboarding(deps: Deps) -> Onboarding:
     if deps.onboarding is None:
         raise HTTPException(status_code=503, detail="funded onboarding is not available")
     return deps.onboarding
+
+
+DAY_MS = 86_400_000
+
+
+def _todo(kind: str, ref: str, title: str, since: int, due_at: int | None = None) -> dict[str, Any]:
+    return {"kind": kind, "ref": ref, "title": title, "since": since, "due_at": due_at}
+
+
+async def build_todo(deps: Deps, me: Principal, access: Access) -> list[dict[str, Any]]:
+    """The work waiting for this login, from the queues its permissions
+    reach [staff spec 5b], soonest due (or oldest) first. Each item names
+    the record; the record's own endpoint does the work."""
+    now, out = deps.clock(), []
+    if deps.payouts is not None and (access.has("payout.pass") or access.has("payout.authorise")):
+        store = deps.payouts.store
+        for p in await store.payouts(status="requested"):
+            state = payout_state(p.po, await store.history(p.po))
+            if me.subject in state.approvals:
+                continue
+            step = state.next_step or "pass"
+            if access.has(f"payout.{step}"):
+                amount = p.trader_amount_cents
+                title = f"{step.title()} payout {p.po} ({amount // 100:,}.{amount % 100:02d} USD)"
+                out.append(_todo(f"payout_{step}", p.po, title, p.requested_at))
+    if deps.cases is not None and access.has("case.work"):
+        for c in await deps.cases.store.cases(status="open"):
+            if c.assignee in (None, me.subject):
+                verb = "Work" if c.assignee == me.subject else "Take"
+                title = f"{verb} case {c.cas} ({c.severity})"
+                out.append(_todo("case", c.cas, title, c.opened_at, c.due_at))
+        if access.has("case.confirm") or access.has("case.authorise"):
+            for c in await deps.cases.store.cases(status="decision_pending"):
+                if c.proposed_by != me.subject:
+                    title = f"Confirm or authorise the decision on case {c.cas}"
+                    out.append(_todo("case_decision", c.cas, title, c.opened_at, c.due_at))
+    if deps.onboarding is not None and access.has("onboarding.decide"):
+        for o in await deps.onboarding.store.with_status("review"):
+            out.append(_todo("identity_review", o.onb, f"Review identity, {o.onb}", o.created_at))
+    if deps.lifecycle is not None and access.has("progression.decide"):
+        for g in await deps.lifecycle.store.with_status("review"):
+            out.append(_todo("funded_review", g.prg, f"Funded review {g.prg}", g.created_at))
+    if deps.staff is not None:
+        actor = Actor(me.subject, me.roles)
+        for grant in await deps.staff.awaiting(actor, now):
+            title = f"Approve or deny {grant.grant} {grant.value} for {grant.sid}"
+            out.append(_todo("grant", grant.grt, title, grant.requested_at))
+        for member in await deps.staff.graduations(actor, now):
+            title = f"Graduate apprentice {member.sid}"
+            out.append(_todo("graduation", member.sid, title, member.starts_at))
+        if access.sid is not None:
+            async with deps.staff.store.read() as ops:
+                for grant in await ops.grants_of(access.sid):
+                    ends = grant.ends_at
+                    if grant.in_force(now) and ends is not None and ends - now <= 7 * DAY_MS:
+                        title = f"Your {grant.grant} {grant.value} ends soon ({grant.grt})"
+                        out.append(_todo("grant_ending", grant.grt, title, now, ends))
+    if deps.source_alerts is not None and access.has("news.desk"):
+        for alert in await deps.source_alerts.open_alerts():
+            title = f"Add the news a blocked source misses: {alert.source}"
+            out.append(_todo("news_gap", f"news-source:{alert.source}", title, alert.since))
+    if deps.desk is not None:
+        for sheet in await deps.desk.duties_view(access):
+            if not sheet["acknowledged"]:
+                title = f"Read and acknowledge your duties: {sheet['title']} v{sheet['version']}"
+                out.append(_todo("duties", sheet["sheet"], title, now))
+    out.sort(key=lambda t: (t["due_at"] if t["due_at"] is not None else t["since"], t["ref"]))
+    return out
 
 
 def _checkout(deps: Deps) -> Checkout:
@@ -1986,11 +2061,18 @@ def create_app(
 
     @app.get("/staff/me")
     async def staff_me(deps: D, me: Employee) -> dict[str, Any]:
-        """My staff page (5a part): who I am, my access and every grant, and
-        what waits for my approval."""
+        """My staff page: who I am, my access and every grant, my to-do
+        list, duties and open notifications, and what waits for my approval."""
         now = deps.clock()
         access = await _access(deps, me)
         out: dict[str, Any] = {"access": access_view(access), "member": None, "grants": []}
+        out["todo"] = await build_todo(deps, me, access)
+        out["duties"] = await deps.desk.duties_view(access) if deps.desk is not None else []
+        out["notifications"] = (
+            [notification_view(n) for n in await deps.desk.notifications(access, limit=50)]
+            if deps.desk is not None
+            else []
+        )
         if deps.staff is None:
             return {**out, "awaiting_approval": [], "graduations": []}
         actor = _actor(me)
@@ -2162,5 +2244,77 @@ def create_app(
         now, staff = deps.clock(), directory(deps)
         grant = await staff_step(lambda: staff.revoke(_actor(me), grt, body.reason, now))
         return grant_view(grant, now)
+
+    # --- the staff page (back office 5b) ----------------------------------------------
+
+    def desk(deps: Deps) -> StaffDesk:
+        if deps.desk is None:
+            raise HTTPException(status_code=503, detail="the staff page is not available")
+        return deps.desk
+
+    def desk_refused(exc: DeskError) -> HTTPException:
+        status = 404 if str(exc).startswith("unknown") else 422
+        return HTTPException(status_code=status, detail={"code": "refused", "message": str(exc)})
+
+    @app.get("/staff/me/todo")
+    async def my_todo(deps: D, me: Employee) -> list[dict[str, Any]]:
+        return await build_todo(deps, me, await _staff_access(deps, me))
+
+    @app.post("/staff/me/duties/{sheet}/ack")
+    async def acknowledge_duties(
+        deps: D, me: Employee, sheet: Annotated[str, Path(pattern=r"^[a-z]{2,20}$")]
+    ) -> dict[str, Any]:
+        """I have read the version in force of one of my duty sheets."""
+        access = await _staff_access(deps, me)
+        try:
+            version = await desk(deps).acknowledge(access, sheet, deps.clock())
+        except DeskError as exc:
+            raise desk_refused(exc) from exc
+        return {"sheet": sheet, "version": version}
+
+    @app.get("/staff/notifications")
+    async def my_notifications(
+        deps: D,
+        me: Employee,
+        include_done: Annotated[bool, Query(alias="all")] = False,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> list[dict[str, Any]]:
+        """Notifications reaching me now (by my permissions, or to me):
+        open and not acknowledged, or every one with `all`."""
+        access = await _staff_access(deps, me)
+        found = await desk(deps).notifications(access, include_done=include_done, limit=limit)
+        return [notification_view(n) for n in found]
+
+    @app.post("/staff/notifications/{notification}/ack")
+    async def acknowledge_notification(
+        deps: D, me: Employee, notification: Annotated[int, Path(ge=1)]
+    ) -> dict[str, Any]:
+        access = await _staff_access(deps, me)
+        try:
+            await desk(deps).acknowledge_notification(access, notification, deps.clock())
+        except DeskError as exc:
+            raise desk_refused(exc) from exc
+        return {"id": notification, "acknowledged": True}
+
+    RefPath = Annotated[str, Path(pattern=r"^(CAS|PO|ONB|PRG|ACC|CIF|GRT|STF|APP)[0-9]{8}$")]
+
+    @app.get("/staff/threads")
+    async def threads(deps: D, me: Staff) -> list[dict[str, Any]]:
+        """The records discussed most recently."""
+        return await desk(deps).threads()
+
+    @app.get("/staff/threads/{ref}")
+    async def thread(deps: D, me: Staff, ref: RefPath) -> list[dict[str, Any]]:
+        return [message_view(m) for m in await desk(deps).thread(ref)]
+
+    @app.post("/staff/threads/{ref}", status_code=201)
+    async def post_message(deps: D, me: Staff, ref: RefPath, body: MessageBody) -> dict[str, Any]:
+        """An internal message on one record (never sent outside)."""
+        access = await _staff_access(deps, me)
+        try:
+            message = await desk(deps).post(access, ref, body.body, deps.clock())
+        except DeskError as exc:
+            raise desk_refused(exc) from exc
+        return message_view(message)
 
     return app

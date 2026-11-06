@@ -80,6 +80,7 @@ from propfirm.service.projector import HistoryReader
 from propfirm.settings.newsdesk import Author, NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
+from propfirm.staff.desk import StaffDesk, load_duties
 from propfirm.staff.directory import Directory, Owner
 from propfirm.staff.store import StaffStore
 
@@ -200,6 +201,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             log.warning("owners recorded in the staff directory: %s", added)
         if not config.staff_owners:
             log.warning("STAFF_OWNERS is empty: no owner in the staff directory")
+        desk = StaffDesk(pool, config.staff_schema, load_duties())
         checkout = None
         if config.sandbox:
             checkout = Checkout(
@@ -277,13 +279,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 response.raise_for_status()
                 return response.text
 
-            if not config.news_alert_emails:
-                log.warning("NEWS_ALERT_EMAILS is empty: source failures show only in /staff/news")
+            # source failures are emailed to the news.desk holders in the staff
+            # directory, plus NEWS_ALERT_EMAILS, and shown on their staff page
             alerts = SourceAlerts(
                 SourceStore(pool, config.settings_schema),
                 mailer,
                 config.news_alert_emails,
                 config.news_alert_remind_hours,
+                holders=staff.emails_for,
+                notices=desk,
             )
             collector = Collector(news, live, fetch, alerts=alerts)
             tasks.append(
@@ -311,6 +315,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             payouts=payouts,
             news=news,
             staff=staff,
+            desk=desk,
             source_alerts=SourceAlerts(SourceStore(pool, config.settings_schema), None, ()),
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,

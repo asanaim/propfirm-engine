@@ -458,6 +458,28 @@ Records are append-only (`staff.member_events`, `staff.grant_events`).
 A login with no directory record keeps its Keycloak role (`staff` T2 with
 every role, `admin` T4) until `STAFF_LEGACY_ROLES=0`.
 
+Staff page (5b), `GET /staff/me`: besides access and grants,
+- the **to-do list** (`GET /staff/me/todo`), built from every queue the
+  login's permissions reach, soonest due first: payouts waiting for its
+  step (pass, or authorise), cases to take or work and decisions to confirm
+  or authorise, identity and funded reviews, grants and graduations to
+  approve, its own grants ending within 7 days, blocked news sources to
+  fill, duty sheets not yet acknowledged; never its own request or a payout
+  it already approved;
+- **duties**: the written responsibilities of each sheet that applies (each
+  role held; apprentice, admin, owner), versioned in `config/staff/duties.toml`;
+  `POST /staff/me/duties/{sheet}/ack` records that the version in force was read;
+- **notifications** (`GET /staff/notifications`, `?all=true` with the done
+  ones; `POST /staff/notifications/{id}/ack`): each has an owner, a
+  permission (whoever holds it now) or one member, and stays until that
+  person acknowledges it or the work it points to closes. A news source the
+  collector cannot read notifies the `news.desk` holders (risk desk and
+  admins) and emails them (directory emails, plus `NEWS_ALERT_EMAILS`);
+  reading it again closes it. Escalation to the lead comes with 5d;
+- **messages**: internal threads on one record (`GET|POST /staff/threads/{ref}`,
+  `ref` a CAS, PO, ONB, PRG, ACC, CIF, GRT, STF or APP id; `GET /staff/threads`:
+  the latest discussed), append-only, never sent outside.
+
 Locally: `staff1` and `admin1` have authenticators in the development
 realm; `scripts/dev_token.py` signs them in with their code and prints a
 token that passes the staff rules, step-up included.
@@ -598,7 +620,9 @@ or rules uses floating point.
   - [x] 5a: staff directory, tiers, roles, grants, four eyes, step-up on approvals,
     pass then admin authorisation of payouts, voids and profit removals
   - [ ] 5a-2: maker-checker on admin settings (a second admin)
-  - [ ] 5b: staff page (to-do, notifications, messages); 5c: apprentices' masked views
+  - [x] 5b: staff page: to-do from the work queues, duty sheets, notifications by
+    permission, messages on records
+  - [ ] 5c: apprentices' masked views
     and training; 5d: oversight; 5e: back-office screens
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)
 - [ ] Step 7: staging, backups and restore drill, security scans

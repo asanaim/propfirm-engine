@@ -260,7 +260,16 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             assert (await p.call("POST", approve, "u1", reason)).status_code == 403  # a trader
             early = await p.call("POST", approve, "admin-1", reason, ("admin",), mfa=False)
             assert (early.status_code, early.json()["detail"]["code"]) == (401, "mfa_required")
+
+            async def todo(who: str, roles: tuple[str, ...] = STAFF) -> set[tuple[str, str]]:
+                items = (await p.call("GET", "/staff/me/todo", who, None, roles)).json()
+                return {(t["kind"], t["ref"]) for t in items if t["ref"] == po}
+
+            assert await todo("staff-1") == {("payout_pass", po)}  # on the staff page
             one = (await staff(p, "POST", approve, "staff-1", reason)).json()
+            assert await todo("staff-1") == set()  # passed: an admin's step now
+            assert await todo("staff-2") == set()
+            assert await todo("admin-1", ("admin",)) == {("payout_authorise", po)}
             assert (one["status"], one["approvals"]) == ("requested", 1)
             await p.payouts.advance(clock())  # nothing is taken on a pass
             assert (await p.payouts.store.payout(po)).status == "requested"  # type: ignore[union-attr]
