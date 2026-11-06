@@ -100,6 +100,65 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX grants_status ON {s}.grants (status);
         """,
     ),
+    (
+        2,
+        """
+        -- the staff page (5b): duty acknowledgements, notifications, messages
+        CREATE TABLE {s}.duty_acks (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            subject text NOT NULL,
+            sheet text NOT NULL,
+            version int NOT NULL,
+            ts bigint NOT NULL,
+            UNIQUE (subject, sheet, version)
+        );
+        CREATE TABLE {s}.notifications (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            audience text NOT NULL,  -- a permission (its holders now) or "member:<STF/APP>"
+            kind text NOT NULL,
+            ref text NOT NULL,  -- what it is about: a record id, or e.g. news-source:bls
+            title text NOT NULL,
+            body text NOT NULL,
+            urgent boolean NOT NULL,
+            ts bigint NOT NULL
+        );
+        CREATE INDEX notifications_ref ON {s}.notifications (ref);
+        CREATE TABLE {s}.notification_acks (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            notification bigint NOT NULL REFERENCES {s}.notifications (id),
+            subject text NOT NULL,
+            ts bigint NOT NULL,
+            UNIQUE (notification, subject)
+        );
+        CREATE TABLE {s}.notification_closes (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            notification bigint NOT NULL UNIQUE REFERENCES {s}.notifications (id),
+            reason text NOT NULL,
+            ts bigint NOT NULL
+        );
+        CREATE TABLE {s}.messages (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            ref text NOT NULL,
+            subject text NOT NULL,
+            sid text,
+            body text NOT NULL,
+            ts bigint NOT NULL
+        );
+        CREATE INDEX messages_ref ON {s}.messages (ref, id);
+        CREATE TRIGGER duty_acks_append_only BEFORE UPDATE OR DELETE ON {s}.duty_acks
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER notifications_append_only BEFORE UPDATE OR DELETE ON {s}.notifications
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER notification_acks_append_only
+            BEFORE UPDATE OR DELETE ON {s}.notification_acks
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER notification_closes_append_only
+            BEFORE UPDATE OR DELETE ON {s}.notification_closes
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER messages_append_only BEFORE UPDATE OR DELETE ON {s}.messages
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

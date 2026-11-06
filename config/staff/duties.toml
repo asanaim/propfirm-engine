@@ -1,0 +1,113 @@
+# Duty sheets: the written responsibilities each person acknowledges
+# (staff spec, back office 5b). One sheet per functional role, plus the
+# apprentice, admin and owner sheets. Raise `version` whenever a sheet's
+# duties change: everyone it applies to acknowledges the new version.
+
+[support]
+version = 1
+title = "Support"
+duties = [
+  "Answer trader tickets within the service time of their queue.",
+  "Never promise an outcome of a rule, review, case or payout.",
+  "Hand disputes, fraud signs and complaints to the owning team with the ticket linked.",
+  "Never act on your own customer record, a relative's, or a trader you are linked to.",
+]
+
+[kyc]
+version = 1
+title = "KYC and compliance"
+duties = [
+  "Review identity checks the provider could not settle, against the document and the customer record.",
+  "Escalate sanctions and PEP hits to an admin the same day; never clear one alone.",
+  "Record the reason for every decision; personal data is revealed only with a reason.",
+  "Keep identity documents inside the platform; never download or forward them.",
+]
+
+[risk]
+version = 1
+title = "Risk desk"
+duties = [
+  "Keep the restricted news calendar complete: fill any source the collector reports as blocked.",
+  "Review funded accounts at the funded review: trading record, rules and flags (T2 and above).",
+  "Watch exposure and unusual trading; raise integrity alerts with evidence.",
+  "Use the kill switch only as the runbook says, and report every use.",
+]
+
+[payouts]
+version = 1
+title = "Payouts and finance"
+duties = [
+  "Check each payout before passing it: eligibility, the wallet, open cases, the history (T2 and above).",
+  "A pass is never the final approval: an admin authorises every payout, refund and void.",
+  "Never pass a payout to a wallet you changed or a customer you are linked to.",
+  "Reconcile payouts sent against the ledger every business day.",
+]
+
+[integrity]
+version = 1
+title = "Integrity and fraud"
+duties = [
+  "Work cases in due order; decide with evidence and record the reason.",
+  "Propose a void or profit removal only with evidence; an admin authorises it.",
+  "Never confirm your own proposal; never work a case about yourself or a linked trader.",
+  "Report suspected collusion, copy trading and multi-accounting rings as one case.",
+]
+
+[product]
+version = 1
+title = "Product and pricing"
+duties = [
+  "Propose program, rule-set and price changes with their reason and effect on open accounts.",
+  "A change is a new rule-set version: accounts already open keep theirs.",
+  "Check every change against the industry standard (FTMO, FundedNext) and record the comparison.",
+]
+
+[marketing]
+version = 1
+title = "Marketing and affiliates"
+duties = [
+  "Make no claim about earnings or pass rates that the firm's own data does not support.",
+  "Never market to countries the firm does not serve.",
+  "Affiliate codes and commissions follow the published terms only.",
+]
+
+[it]
+version = 1
+title = "IT and security"
+duties = [
+  "Every staff and admin login uses a second factor; admins and owners use passkeys or hardware keys.",
+  "End a leaver's access the same day: sign-in, sessions, grants and tools.",
+  "Keep backups 3-2-1-1-0 and run the restore test every quarter.",
+  "Keep logs on every important system, shipped where admins cannot delete them.",
+  "Run vulnerability scans in every build and a penetration test yearly and after big changes.",
+  "Keep SPF, DKIM and DMARC on every domain the firm sends from.",
+]
+
+[apprentice]
+version = 1
+title = "Apprentice"
+duties = [
+  "Learn under your mentor; act on live records only by proposing, for your mentor to approve.",
+  "Never approve, pay, void, refund, change settings, grant access or export data.",
+  "Personal data you see stays in the platform; never copy or share it.",
+  "Your access ends on your end date unless an admin approves your graduation.",
+]
+
+[admin]
+version = 1
+title = "Admin"
+duties = [
+  "Authorise payouts, refunds, voids and profit removals only after a T2 or above has passed them.",
+  "Never authorise your own work or a record you are linked to; never change a setting alone once maker-checker applies.",
+  "Approve access requests only for real need and with an end date where the rules ask for one.",
+  "Every approval needs your second factor entered just before it.",
+]
+
+[owner]
+version = 1
+title = "Owner"
+duties = [
+  "Grant or remove admin access only together with the other owner.",
+  "Keep break-glass access sealed; every use is reviewed by both owners.",
+  "Review admin access every month and the staff anomaly report every week.",
+]

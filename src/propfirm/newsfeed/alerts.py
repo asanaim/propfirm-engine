@@ -12,13 +12,16 @@ append-only record (`settings.news_source_events`):
 - recovered: the first successful run after a failure: email that the
   source is read again.
 
-Recipients are `NEWS_ALERT_EMAILS` (staff and admin addresses). An email
-that cannot be sent is logged; the alert still stands and shows in
-`GET /staff/news`.
+Recipients [staff spec 5b]: whoever holds the risk desk's news permission
+now (`news.desk`: the risk desk and admins, from the staff directory), plus
+`NEWS_ALERT_EMAILS` (kept for logins not yet in the directory). Each failure
+is also an in-app notification to the same holders, closed when the source
+is read again. An email that cannot be sent is logged; the alert still
+stands and shows in `GET /staff/news`.
 """
 
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -85,6 +88,27 @@ class SourceLog(Protocol):
     async def record(self, event: SourceEvent) -> None: ...
 
     async def latest(self) -> dict[str, list[SourceEvent]]: ...
+
+
+class Notices(Protocol):
+    """In-app notifications (`propfirm.staff.desk.StaffDesk`)."""
+
+    async def notify(
+        self,
+        audience: str,
+        kind: str,
+        ref: str,
+        title: str,
+        body: str,
+        ts: int,
+        urgent: bool = False,
+    ) -> int: ...
+
+    async def close(self, ref: str, reason: str, ts: int, kind: str | None = None) -> int: ...
+
+
+NOTICE_KIND = "news_source"
+AUDIENCE = "news.desk"  # the risk desk and admins
 
 
 class SourceStore:
@@ -156,17 +180,31 @@ class SourceAlerts:
         mailer: Mailer | None,
         recipients: Sequence[str],
         remind_hours: int = 24,
+        *,
+        holders: Callable[[str, int], Awaitable[Sequence[str]]] | None = None,
+        notices: Notices | None = None,
     ) -> None:
         self._log = log_store
         self._mailer = mailer
         self._to = tuple(recipients)
         self._remind_ms = remind_hours * 3_600_000
+        self._holders = holders
+        self._notices = notices
 
-    async def _email(self, subject: str, body: str) -> int:
+    async def _recipients(self, now: int) -> list[str]:
+        found = list(self._to)
+        if self._holders is not None:
+            try:
+                found += await self._holders(AUDIENCE, now)
+            except Exception:
+                log.exception("news source alert: staff directory not read")
+        return sorted(set(found))
+
+    async def _email(self, subject: str, body: str, now: int = 0) -> int:
         if self._mailer is None:
             return 0
         sent = 0
-        for to in self._to:
+        for to in await self._recipients(now):
             try:
                 await self._mailer.send(to, subject, body)
                 sent += 1
@@ -185,12 +223,14 @@ class SourceAlerts:
             last = events[-1] if events else None
             if last is None or last.kind == "recovered":
                 subject = f"News source not read: {source}"
-                sent = await self._email(subject, _body(source, error, now, False))
+                body = _body(source, error, now, False)
+                sent = await self._email(subject, body, now)
                 out.append(SourceEvent(source, "failed", error, sent, now))
+                await self._notice(source, subject, body, now)
             elif now - last.ts >= self._remind_ms:
                 since = events[0].ts
                 subject = f"Reminder: news source not read: {source}"
-                sent = await self._email(subject, _body(source, error, since, True))
+                sent = await self._email(subject, _body(source, error, since, True), now)
                 out.append(SourceEvent(source, "reminded", error, sent, now))
         for source in succeeded:
             events = history.get(source, [])
@@ -199,12 +239,30 @@ class SourceAlerts:
                     f"News source read again: {source}",
                     f"The news collector reads {source} again ({_utc(now)}); "
                     "its events are collected automatically from now on.",
+                    now,
                 )
                 out.append(SourceEvent(source, "recovered", None, sent, now))
+                if self._notices is not None:
+                    try:
+                        await self._notices.close(
+                            f"news-source:{source}", "source read again", now, NOTICE_KIND
+                        )
+                    except Exception:
+                        log.exception("news source %s: notification not closed", source)
         for event in out:
             await self._log.record(event)
             log.warning("news source %s: %s (%s)", event.source, event.kind, event.error)
         return out
+
+    async def _notice(self, source: str, title: str, body: str, now: int) -> None:
+        if self._notices is None:
+            return
+        try:
+            await self._notices.notify(
+                AUDIENCE, NOTICE_KIND, f"news-source:{source}", title, body, now, urgent=True
+            )
+        except Exception:
+            log.exception("news source %s: notification not recorded", source)
 
     async def open_alerts(self) -> list[OpenAlert]:
         out = []

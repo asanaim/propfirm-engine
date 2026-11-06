@@ -409,6 +409,58 @@ def test_staff_and_admins_are_alerted_reminded_and_told_of_recovery() -> None:
     assert asyncio.run(alerts.update([("bls", "x")], [], NOW + 31 * H))[0].kind == "failed"
 
 
+class Notices:
+    def __init__(self) -> None:
+        self.posted: list[tuple[str, str, str, bool]] = []
+        self.closed: list[str] = []
+
+    async def notify(
+        self,
+        audience: str,
+        kind: str,
+        ref: str,
+        title: str,
+        body: str,
+        ts: int,
+        urgent: bool = False,
+    ) -> int:
+        self.posted.append((audience, kind, ref, urgent))
+        return len(self.posted)
+
+    async def close(self, ref: str, reason: str, ts: int, kind: str | None = None) -> int:
+        self.closed.append(ref)
+        return 1
+
+
+def test_alerts_go_to_whoever_holds_the_news_desk_now_and_to_their_staff_page() -> None:
+    """[staff spec 5b] recipients by role, not a fixed list; the in-app
+    notification closes when the source is read again."""
+    asked: list[str] = []
+
+    async def holders(permission: str, now: int) -> list[str]:
+        asked.append(permission)
+        return ["desk@firm.example", "risk@firm.example"]
+
+    store, mailer, notices = MemorySources(), FlakyMailer(), Notices()
+    alerts = SourceAlerts(store, mailer, ("risk@firm.example",), holders=holders, notices=notices)
+    asyncio.run(alerts.update([("bls", "403")], [], NOW))
+    assert asked == ["news.desk"]
+    assert sorted(to for to, _, _ in mailer.sent) == ["desk@firm.example", "risk@firm.example"]
+    assert notices.posted == [("news.desk", "news_source", "news-source:bls", True)]
+    asyncio.run(alerts.update([], ["bls"], NOW + H))
+    assert notices.closed == ["news-source:bls"]
+
+
+def test_a_directory_outage_does_not_stop_the_alert() -> None:
+    async def holders(permission: str, now: int) -> list[str]:
+        raise OSError("database down")
+
+    store, mailer = MemorySources(), FlakyMailer()
+    alerts = SourceAlerts(store, mailer, ("risk@firm.example",), holders=holders)
+    (event,) = asyncio.run(alerts.update([("bls", "403")], [], NOW))
+    assert (event.kind, event.notified) == ("failed", 1)
+
+
 def test_a_collector_run_raises_alerts_for_unreadable_sources() -> None:
     gateway, log = EngineGateway(), MemoryLog()
     desk = NewsDesk(load_calendars(DEFAULT_NEWS_DIR), log, gateway)

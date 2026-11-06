@@ -429,3 +429,15 @@ class Directory:
                 ):
                     out.append(m)
             return out
+
+    async def emails_for(self, permission: str, now: int) -> list[str]:
+        """Email addresses of the active members who hold `permission` now:
+        alert recipients by role, never a fixed list [staff spec 5b]."""
+        out = []
+        async with self._store.read() as ops:
+            for m in await ops.members("active"):
+                if m.email is None:
+                    continue
+                if access_of(m, await ops.grants_of(m.sid), now).has(permission):
+                    out.append(m.email)
+        return sorted(set(out))
