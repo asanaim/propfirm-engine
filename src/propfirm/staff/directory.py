@@ -289,6 +289,18 @@ class Directory:
             elif g.status == "requested":
                 await ops.grant_event(g.grt, "denied", now, {"by": by, "reason": reason})
 
+    async def reinstate(self, actor: Actor, sid: str, reason: str, now: int) -> Member:
+        """A dormant account back to active: an admin, never the member."""
+        async with self._store.change() as ops:
+            me = await self._access(ops, actor, now)
+            member = await self._member(ops, sid)
+            if me.tier is None or me.tier < Tier.ADMIN or me.subject == member.subject:
+                raise StaffRefused("forbidden", "an admin (not the member) reinstates")
+            if member.status != "dormant":
+                raise StaffRefused("not_allowed", f"{sid} is {member.status}")
+            detail = {"by": actor.subject, "reason": reason}
+            return await ops.member_event(sid, "reinstated", now, detail)
+
     async def recommend(self, actor: Actor, sid: str, reason: str, now: int) -> Member:
         async with self._store.change() as ops:
             me = await self._access(ops, actor, now)

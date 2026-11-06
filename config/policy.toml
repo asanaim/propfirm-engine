@@ -209,6 +209,22 @@ leaver_cutoff_max_hours = 24
 # (config/staff/courses.toml) passed within the last 12 months.
 training_gate = true
 training_valid_months = 12
+# Oversight [staff spec 5d]. An urgent alert nobody acknowledged is raised
+# to leads and admins after `escalate_hours`. No sign-in for `dormant_days`:
+# access suspended until an admin reinstates (owners exempt). Leads review
+# their team's access every `review_days_lead`; owners each admin's every
+# `review_days_admin`. The weekly anomaly report flags approvals outside
+# office hours (Dhaka, Sunday to Thursday, 09:00-18:00; Monday = 0) and the
+# same maker and checker `pair_threshold` times or more.
+escalate_hours = 4
+dormant_days = 30
+review_days_lead = 90
+review_days_admin = 30
+office_timezone = "Asia/Dhaka"
+office_days = [6, 0, 1, 2, 3]
+office_start_hour = 9
+office_end_hour = 18
+pair_threshold = 3
 # Apprentices [decided 31 Oct 2026]: a term of 3 to 6 months, set for each.
 apprentice_min_months = 3
 apprentice_max_months = 6

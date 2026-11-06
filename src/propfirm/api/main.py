@@ -83,6 +83,7 @@ from propfirm.settings.store import SettingsStore
 from propfirm.staff.cutoff import Cutoffs, IdentityProvider, KeycloakAdmin, SandboxIdentity
 from propfirm.staff.desk import ApprenticeDesk, StaffDesk, load_duties
 from propfirm.staff.directory import Directory, Owner
+from propfirm.staff.oversight import Oversight, oversight_policy
 from propfirm.staff.store import StaffStore
 
 RECONCILE_S = 10.0
@@ -104,6 +105,17 @@ async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> N
             await checkout.reconcile(now_ms())
         except Exception:  # retried next round; the order stays paid
             log.exception("provisioning retry failed")
+
+
+async def _oversight_forever(oversight: Oversight, settings: Settings) -> None:
+    """Escalations and dormant accounts, every minute."""
+    while True:
+        try:
+            staff = (await settings.current()).staff
+            await oversight.advance(now_ms(), oversight_policy(staff))
+        except Exception:  # retried next round
+            log.exception("oversight round failed")
+        await asyncio.sleep(CUTOFF_S)
 
 
 async def _cutoffs_forever(cutoffs: Cutoffs) -> None:
@@ -237,6 +249,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             staff_policy.leaver_cutoff_max_hours,
         )
         tasks.append(asyncio.create_task(_cutoffs_forever(cutoffs)))
+        oversight = Oversight(pool, config.staff_schema, config.customer_schema, staff.store, desk)
+        tasks.append(asyncio.create_task(_oversight_forever(oversight, settings)))
         checkout = None
         if config.sandbox:
             checkout = Checkout(
@@ -353,6 +367,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             desk=desk,
             cutoffs=cutoffs,
             apprentices=ApprenticeDesk(pool, config.staff_schema),
+            oversight=oversight,
             source_alerts=SourceAlerts(SourceStore(pool, config.settings_schema), None, ()),
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,

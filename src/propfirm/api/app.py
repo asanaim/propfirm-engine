@@ -125,7 +125,8 @@ from propfirm.staff.desk import (
 from propfirm.staff.directory import Actor, Directory
 from propfirm.staff.masking import mask_pii
 from propfirm.staff.model import PERMISSIONS, TITLES, Access, Tier, legacy_access
-from propfirm.staff.records import Grant, Member, StaffRefused
+from propfirm.staff.oversight import Oversight, oversight_policy
+from propfirm.staff.records import Grant, Member, StaffRefused, access_of
 from propfirm.staff.training import courses, current, valid_until
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
@@ -204,6 +205,7 @@ class Deps:
     desk: StaffDesk | None = None  # the staff page: duties, notifications, messages
     cutoffs: Cutoffs | None = None  # leavers' logins disabled at the identity provider
     apprentices: ApprenticeDesk | None = None  # apprentices' proposals to their mentors
+    oversight: Oversight | None = None  # sign-ins, dormant accounts, reviews, anomalies
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -370,6 +372,11 @@ class GrantBody(_Body):
 
 class MessageBody(_Body):
     body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+
+
+class ReviewBody(_Body):
+    decision: Literal["keep", "change"]  # change: revoke or adjust grants as well
+    note: Reason
 
 
 class TrainingBody(_Body):
@@ -893,6 +900,8 @@ async def _staff_access(deps: Deps, me: Principal) -> Access:
     """The login's staff access; a login with any staff access must have
     signed in with a second factor (`staff.login_needs_mfa`)."""
     access = await _access(deps, me)
+    if access.tier is not None and deps.oversight is not None and me.mfa:
+        await deps.oversight.signed_in(me.subject, deps.clock())  # dormant accounts (5d)
     if access.tier is not None and not me.mfa and (await _staff_policy(deps)).login_needs_mfa:
         raise HTTPException(
             status_code=401,
@@ -1155,6 +1164,11 @@ async def build_todo(deps: Deps, me: Principal, access: Access) -> list[dict[str
         for alert in await deps.source_alerts.open_alerts():
             title = f"Add the news a blocked source misses: {alert.source}"
             out.append(_todo("news_gap", f"news-source:{alert.source}", title, alert.since))
+    if deps.oversight is not None and (access.sid is not None):
+        policy = oversight_policy(await _staff_policy(deps))
+        for sid, due in await deps.oversight.reviews_due(access.sid, access.tier, now, policy):
+            title = f"Review {sid}'s access (keep or change)"
+            out.append(_todo("access_review", sid, title, due, due))
     for t in await training_view(deps, access, now):
         if access.tier is not None and access.tier >= Tier.ADMIN:
             break
@@ -2727,5 +2741,69 @@ def create_app(
         found = await apprentices(deps).proposal(pid)
         assert found is not None
         return apprentice_proposal_view(found)
+
+    # --- oversight (5d) ---------------------------------------------------------------
+
+    def oversight(deps: Deps) -> Oversight:
+        if deps.oversight is None:
+            raise HTTPException(status_code=503, detail="oversight is not available")
+        return deps.oversight
+
+    @app.post("/staff/members/{sid}/reinstate")
+    async def reinstate_member(
+        deps: D,
+        me: Employee,
+        sid: Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")],
+        body: DecisionBody,
+    ) -> dict[str, Any]:
+        """A dormant account back to active (an admin)."""
+        await _step_up(deps, me)
+        now, staff = deps.clock(), directory(deps)
+        member = await staff_step(lambda: staff.reinstate(_actor(me), sid, body.reason, now))
+        if deps.desk is not None:
+            await deps.desk.close(sid, "reinstated", now, "dormant")
+        return member_view(member, now)
+
+    @app.post("/staff/members/{sid}/review", status_code=201)
+    async def review_member(
+        deps: D,
+        me: Employee,
+        sid: Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")],
+        body: ReviewBody,
+    ) -> dict[str, Any]:
+        """An access review: the member's lead (their team), an owner (an
+        admin), or an admin (anyone below admin); never oneself."""
+        access, now = await _staff_access(deps, me), deps.clock()
+        async with directory(deps).store.read() as ops:
+            member = await ops.member(sid)
+            if member is None:
+                raise HTTPException(status_code=404, detail="unknown member")
+            theirs = access_of(member, await ops.grants_of(sid), now)
+        tier = access.tier
+        allowed = (
+            member.subject != me.subject
+            and tier is not None
+            and (
+                (member.lead is not None and member.lead == access.sid)
+                or (tier == Tier.OWNER)
+                or (tier >= Tier.ADMIN and (theirs.tier is None or theirs.tier < Tier.ADMIN))
+            )
+        )
+        if not allowed:
+            raise _forbidden("staff.directory")
+        await oversight(deps).review(sid, me.subject, body.decision, body.note, now)
+        return {"sid": sid, "decision": body.decision, "reviewed_at": now, "by": me.subject}
+
+    @app.get("/staff/reports/anomalies")
+    async def anomaly_report(
+        deps: D, me: Employee, days: Annotated[int, Query(ge=1, le=90)] = 7
+    ) -> dict[str, Any]:
+        """Approvals out of office hours and repeated maker-checker pairs
+        (admins and owners; weekly by default)."""
+        access = await _staff_access(deps, me)
+        if access.tier is None or access.tier < Tier.ADMIN:
+            raise HTTPException(status_code=403, detail="admins and owners read the report")
+        policy = oversight_policy(await _staff_policy(deps))
+        return await oversight(deps).anomalies(deps.clock() - days * DAY_MS, policy)
 
     return app

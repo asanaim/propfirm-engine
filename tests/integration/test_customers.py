@@ -51,6 +51,7 @@ from propfirm.settings.store import SettingsStore
 from propfirm.staff.cutoff import Cutoffs, SandboxIdentity
 from propfirm.staff.desk import ApprenticeDesk, StaffDesk, load_duties
 from propfirm.staff.directory import Directory, Owner
+from propfirm.staff.oversight import Oversight
 from propfirm.staff.store import StaffStore
 from tests.auth_rig import bearer, verifier
 
@@ -82,6 +83,7 @@ class Platform:
     desk: StaffDesk | None = None
     cutoffs: Cutoffs | None = None
     identity: SandboxIdentity | None = None
+    oversight: Oversight | None = None
 
     async def call(
         self,
@@ -200,6 +202,7 @@ async def platform(
     desk = StaffDesk(pool, config.staff_schema, load_duties())
     identity = SandboxIdentity()
     cutoffs = Cutoffs(staff.store, identity, desk)
+    oversight = Oversight(pool, config.staff_schema, config.customer_schema, staff.store, desk)
     deps = Deps(
         live=live,
         history=HistoryReader(pool, config.read_schema),
@@ -217,6 +220,7 @@ async def platform(
         desk=desk,
         cutoffs=cutoffs,
         apprentices=ApprenticeDesk(pool, config.staff_schema),
+        oversight=oversight,
         news=NewsDesk(
             load_calendars(DEFAULT_NEWS_DIR), NewsStore(pool, config.settings_schema), gateway
         ),
@@ -270,6 +274,7 @@ async def platform(
             desk,
             cutoffs,
             identity,
+            oversight,
         )
     finally:
         await stop_engine()

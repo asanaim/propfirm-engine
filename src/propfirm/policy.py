@@ -28,6 +28,7 @@ from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import MarketSpreadConfig
@@ -109,6 +110,16 @@ class StaffPolicy:
     # the training gate (5c): a section's course before a level in it
     training_gate: bool = True
     training_valid_months: int = 12
+    # oversight (5d)
+    escalate_hours: int = 4
+    dormant_days: int = 30
+    review_days_lead: int = 90
+    review_days_admin: int = 30
+    office_timezone: str = "Asia/Dhaka"
+    office_days: tuple[int, ...] = (6, 0, 1, 2, 3)  # Monday = 0
+    office_start_hour: int = 9
+    office_end_hour: int = 18
+    pair_threshold: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,10 +510,27 @@ def _staff(t: _Table) -> StaffPolicy:
         leaver_cutoff_max_hours=t.integer("leaver_cutoff_max_hours", 1),
         training_gate=t.boolean("training_gate"),
         training_valid_months=t.integer("training_valid_months", 1),
+        escalate_hours=t.integer("escalate_hours", 1),
+        dormant_days=t.integer("dormant_days", 1),
+        review_days_lead=t.integer("review_days_lead", 1),
+        review_days_admin=t.integer("review_days_admin", 1),
+        office_timezone=t.text("office_timezone"),
+        office_days=t.integers("office_days"),
+        office_start_hour=t.integer("office_start_hour"),
+        office_end_hour=t.integer("office_end_hour", 1),
+        pair_threshold=t.integer("pair_threshold", 2),
     )
     t.done()
     if limits.apprentice_min_months > limits.apprentice_max_months:
         raise PolicyError(f"{t.name('apprentice_min_months')} must not exceed the maximum")
+    try:
+        ZoneInfo(policy.office_timezone)
+    except (ValueError, ZoneInfoNotFoundError) as exc:
+        raise PolicyError(f"{t.name('office_timezone')}: an IANA time zone") from exc
+    if not set(policy.office_days) <= set(range(7)) or not policy.office_days:
+        raise PolicyError(f"{t.name('office_days')}: weekdays 0 (Monday) to 6 (Sunday)")
+    if not 0 <= policy.office_start_hour < policy.office_end_hour <= 24:
+        raise PolicyError(f"{t.name('office_start_hour')} must be before the end hour")
     return policy
 
 

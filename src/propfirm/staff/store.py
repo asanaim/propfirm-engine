@@ -191,6 +191,44 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         """,
     ),
     (
+        6,
+        """
+        -- oversight (5d): dormant accounts, sign-ins, access reviews, escalations
+        ALTER TABLE {s}.member_events DROP CONSTRAINT member_events_kind_check;
+        ALTER TABLE {s}.member_events ADD CONSTRAINT member_events_kind_check CHECK (kind IN
+            ('joined', 'moved', 'recommended', 'graduated', 'left', 'dormant', 'reinstated'));
+        ALTER TABLE {s}.members DROP CONSTRAINT members_status_check;
+        ALTER TABLE {s}.members ADD CONSTRAINT members_status_check
+            CHECK (status IN ('active', 'left', 'graduated', 'dormant'));
+        CREATE TABLE {s}.sign_ins (
+            subject text NOT NULL,
+            day date NOT NULL,
+            first_ts bigint NOT NULL,
+            PRIMARY KEY (subject, day)
+        );
+        CREATE TABLE {s}.access_reviews (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            sid text NOT NULL,
+            reviewer text NOT NULL,
+            decision text NOT NULL CHECK (decision IN ('keep', 'change')),
+            note text NOT NULL,
+            ts bigint NOT NULL
+        );
+        CREATE INDEX access_reviews_sid ON {s}.access_reviews (sid, id);
+        CREATE TABLE {s}.escalations (
+            notification bigint PRIMARY KEY REFERENCES {s}.notifications (id),
+            escalation bigint NOT NULL REFERENCES {s}.notifications (id),
+            ts bigint NOT NULL
+        );
+        CREATE TRIGGER sign_ins_append_only BEFORE UPDATE OR DELETE ON {s}.sign_ins
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER access_reviews_append_only BEFORE UPDATE OR DELETE ON {s}.access_reviews
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER escalations_append_only BEFORE UPDATE OR DELETE ON {s}.escalations
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
+    (
         5,
         """
         -- apprentices and training (5c)

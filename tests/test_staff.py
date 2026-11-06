@@ -548,3 +548,22 @@ def test_a_section_lead_revokes_a_level_in_their_section_only() -> None:
     level = grant("level", "kyc:2", status="approved")
     check_revoke(leveled(kyc=3), member(), level, NOW)
     refused("forbidden", check_revoke, leveled(payouts=3), member(), level, NOW)
+
+
+# --- oversight (5d) ---------------------------------------------------------------------
+
+
+def test_a_dormant_member_is_reinstated_or_leaves() -> None:
+    sid = "APP00000001"
+    base = [joined(kind="staff", mentor=None)]
+    dormant = MemberEvent(sid, "dormant", NOW + 1, {"by": "system:oversight"})
+    m = member_state(sid, [*base, dormant])
+    assert m.status == "dormant" and not m.active(NOW + 2)
+    back = member_state(sid, [*base, dormant, MemberEvent(sid, "reinstated", NOW + 2, {"by": "a"})])
+    assert back.active(NOW + 3)
+    gone = member_state(sid, [*base, dormant, MemberEvent(sid, "left", NOW + 2, {"by": "a"})])
+    assert gone.status == "left"
+    with pytest.raises(StaffError):  # only a dormant record is reinstated
+        member_state(sid, [*base, MemberEvent(sid, "reinstated", NOW + 2, {"by": "a"})])
+    with pytest.raises(StaffError):  # a dormant record does nothing else
+        member_state(sid, [*base, dormant, MemberEvent(sid, "moved", NOW + 2, {"team": None})])
