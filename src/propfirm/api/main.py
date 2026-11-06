@@ -80,11 +80,13 @@ from propfirm.service.projector import HistoryReader
 from propfirm.settings.newsdesk import Author, NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
+from propfirm.staff.cutoff import Cutoffs, IdentityProvider, KeycloakAdmin, SandboxIdentity
 from propfirm.staff.desk import StaffDesk, load_duties
 from propfirm.staff.directory import Directory, Owner
 from propfirm.staff.store import StaffStore
 
 RECONCILE_S = 10.0
+CUTOFF_S = 60.0
 LIFECYCLE_S = 1.0
 log = logging.getLogger(__name__)
 
@@ -102,6 +104,16 @@ async def _reconcile_forever(checkout: Checkout | None, settings: Settings) -> N
             await checkout.reconcile(now_ms())
         except Exception:  # retried next round; the order stays paid
             log.exception("provisioning retry failed")
+
+
+async def _cutoffs_forever(cutoffs: Cutoffs) -> None:
+    """Leavers' logins disabled at the identity provider, every minute."""
+    while True:
+        try:
+            await cutoffs.advance(now_ms())
+        except Exception:  # retried next round; late ones are alerted
+            log.exception("leaver cut-off round failed")
+        await asyncio.sleep(CUTOFF_S)
 
 
 SYSTEM_CALENDAR = "system:calendar"
@@ -203,6 +215,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if not config.staff_owners:
             log.warning("STAFF_OWNERS is empty: no owner in the staff directory")
         desk = StaffDesk(pool, config.staff_schema, load_duties())
+        provider: IdentityProvider | None = None
+        if config.staff_idp_url:
+            provider = KeycloakAdmin(
+                http,
+                config.staff_idp_url,
+                config.staff_idp_realm,
+                config.staff_idp_client_id,
+                config.staff_idp_client_secret,
+            )
+        elif config.sandbox:
+            provider = SandboxIdentity()
+        else:
+            log.warning("STAFF_IDP_URL not set: leavers' logins are disabled by hand (alerts)")
+        staff_policy = policy.staff
+        cutoffs = Cutoffs(
+            staff.store,
+            provider,
+            desk,
+            staff_policy.leaver_cutoff_alert_minutes,
+            staff_policy.leaver_cutoff_max_hours,
+        )
+        tasks.append(asyncio.create_task(_cutoffs_forever(cutoffs)))
         checkout = None
         if config.sandbox:
             checkout = Checkout(
@@ -317,6 +351,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             news=news,
             staff=staff,
             desk=desk,
+            cutoffs=cutoffs,
             source_alerts=SourceAlerts(SourceStore(pool, config.settings_schema), None, ()),
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,

@@ -630,8 +630,14 @@ def test_realm_gives_each_app_only_its_roles() -> None:
     }
     assert all(c["fullScopeAllowed"] is False for c in realm["clients"])
     users = {
-        u["username"]: set(u["realmRoles"]) - {"default-roles-propfirm"} for u in realm["users"]
+        u["username"]: set(u["realmRoles"]) - {"default-roles-propfirm"}
+        for u in realm["users"]
+        if "serviceAccountClientId" not in u
     }
+    # the leavers' service account: manage-users only, nothing else
+    (service,) = [u for u in realm["users"] if "serviceAccountClientId" in u]
+    assert service["clientRoles"] == {"realm-management": ["manage-users"]}
+    assert "realmRoles" not in service
     assert users == {
         "trader1@example.com": set(),
         "trader2@example.com": set(),  # with an authenticator (TOTP)

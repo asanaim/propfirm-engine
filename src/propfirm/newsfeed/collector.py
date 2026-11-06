@@ -61,11 +61,24 @@ def _months(today: date, count: int) -> list[tuple[int, int]]:
     return out
 
 
+def _not_found(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    return getattr(response, "status_code", None) == 404
+
+
 async def _fed(fetch: Fetch, today: date) -> list[Collected]:
+    """The current month's page must exist; a later month's page is
+    published only some weeks ahead, so its 404 means nothing yet."""
     out = []
-    for y, m in _months(today, 3):
+    for i, (y, m) in enumerate(_months(today, 3)):
         url = src.fed_month_url(y, m)
-        out += src.parse_fed_month(await fetch(url), y, m, url)
+        try:
+            page = await fetch(url)
+        except Exception as exc:
+            if i > 0 and _not_found(exc):
+                break
+            raise
+        out += src.parse_fed_month(page, y, m, url)
     return out
 
 

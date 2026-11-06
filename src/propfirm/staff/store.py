@@ -19,10 +19,12 @@ from propfirm.pgschema import migrate as _migrate
 from propfirm.staff.records import (
     GRANT_KINDS,
     MEMBER_KINDS,
+    Cutoff,
     Grant,
     GrantEvent,
     Member,
     MemberEvent,
+    fold_cutoffs,
     grant_state,
     member_state,
 )
@@ -159,6 +161,25 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        3,
+        """
+        -- leavers' logins disabled at the identity provider (5d)
+        CREATE TABLE {s}.access_cutoffs (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            sid text NOT NULL,
+            subject text NOT NULL,
+            kind text NOT NULL CHECK (kind IN
+                ('requested', 'done', 'failed', 'alerted', 'overdue', 'confirmed')),
+            detail text,
+            ts bigint NOT NULL
+        );
+        CREATE UNIQUE INDEX access_cutoffs_one_request ON {s}.access_cutoffs (sid)
+            WHERE kind = 'requested';
+        CREATE TRIGGER access_cutoffs_append_only BEFORE UPDATE OR DELETE ON {s}.access_cutoffs
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 
@@ -263,7 +284,28 @@ class StaffOps:
         )
         return [GrantEvent(grt, r["kind"], r["ts"], json.loads(r["detail"])) for r in rows]
 
+    async def cutoffs(self) -> list[Cutoff]:
+        rows = await self._c.fetch(
+            f"SELECT sid, subject, kind, detail, ts FROM {self._s}.access_cutoffs ORDER BY id"
+        )
+        return fold_cutoffs(
+            [(r["sid"], r["subject"], r["kind"], r["detail"], r["ts"]) for r in rows]
+        )
+
     # --- writes -----------------------------------------------------------------------
+
+    async def cutoff_event(
+        self, sid: str, subject: str, kind: str, detail: str | None, ts: int
+    ) -> None:
+        await self._c.execute(
+            f"INSERT INTO {self._s}.access_cutoffs (sid, subject, kind, detail, ts) "
+            f"VALUES ($1, $2, $3, $4, $5)",
+            sid,
+            subject,
+            kind,
+            detail,
+            ts,
+        )
 
     async def new_sid(self, kind: str) -> str:
         prefix, seq = (

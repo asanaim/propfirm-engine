@@ -520,3 +520,31 @@ def test_staff_see_open_source_alerts_and_the_alert_settings() -> None:
     )
     with pytest.raises(ConfigError):
         ServiceConfig.from_env({**env, "NEWS_ALERT_EMAILS": "risk desk"})
+
+
+class NotFound(Exception):
+    def __init__(self) -> None:
+        super().__init__("404")
+        self.response = type("R", (), {"status_code": 404})()
+
+
+def test_a_fed_month_not_published_yet_is_not_a_failure() -> None:
+    """The Fed publishes a month's page some weeks ahead: a later month's
+    404 means no events yet; the current month's 404 is a failure."""
+    from propfirm.newsfeed.collector import SOURCES
+
+    def fetch_with(missing: tuple[int, int]) -> Fetch:
+        inner = fixture_fetch()
+
+        async def fetch(url: str) -> str:
+            if url == src.fed_month_url(*missing):
+                raise NotFound()
+            return await inner(url)
+
+        return fetch
+
+    today = date(2026, 10, 30)
+    found = asyncio.run(SOURCES["federal_reserve"](fetch_with((2026, 12)), today))
+    assert found and all(c.event.ts < utc_ms("2026-12-01T00:00", "UTC") for c in found)
+    with pytest.raises(NotFound):
+        asyncio.run(SOURCES["federal_reserve"](fetch_with((2026, 10)), today))

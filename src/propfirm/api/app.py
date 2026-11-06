@@ -51,6 +51,7 @@ money integer cents, times integer UTC milliseconds; floats are refused.
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -112,6 +113,7 @@ from propfirm.settings.newsdesk import Author, NewsDesk, NewsRefused, action_vie
 from propfirm.settings.overlay import CountryGating, StageLimits, stage_limits, to_json
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.store import ChangeStatus, Proposal
+from propfirm.staff.cutoff import Cutoffs, IdentityError, cutoff_view
 from propfirm.staff.desk import DeskError, StaffDesk, message_view, notification_view
 from propfirm.staff.directory import Actor, Directory
 from propfirm.staff.model import PERMISSIONS, TITLES, Access, Tier, legacy_access
@@ -191,6 +193,7 @@ class Deps:
     source_alerts: SourceAlerts | None = None  # news sources the collector cannot read
     staff: Directory | None = None  # the staff directory; None: Keycloak roles only
     desk: StaffDesk | None = None  # the staff page: duties, notifications, messages
+    cutoffs: Cutoffs | None = None  # leavers' logins disabled at the identity provider
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -1028,8 +1031,12 @@ async def build_todo(deps: Deps, me: Principal, access: Access) -> list[dict[str
                 title = f"{step.title()} payout {p.po} ({amount // 100:,}.{amount % 100:02d} USD)"
                 out.append(_todo(f"payout_{step}", p.po, title, p.requested_at))
     if deps.cases is not None and access.has("case.work"):
+        gone: set[str] = set()  # leavers' open work is taken over [staff spec 5d]
+        if deps.staff is not None:
+            async with deps.staff.store.read() as ops:
+                gone = {m.subject for m in await ops.members() if not m.active(now)}
         for c in await deps.cases.store.cases(status="open"):
-            if c.assignee in (None, me.subject):
+            if c.assignee in (None, me.subject) or c.assignee in gone:
                 verb = "Work" if c.assignee == me.subject else "Take"
                 title = f"{verb} case {c.cas} ({c.severity})"
                 out.append(_todo("case", c.cas, title, c.opened_at, c.due_at))
@@ -2304,10 +2311,15 @@ def create_app(
     async def leave_member(
         deps: D, me: Employee, sid: SidPath, body: DecisionBody
     ) -> dict[str, Any]:
-        """A leaver: access ends now, and every grant with it. Disable the
-        Keycloak user too (sessions end there)."""
+        """A leaver: access ends now, and every grant with it; the login is
+        disabled at Keycloak and its sessions ended (`GET /staff/cutoffs`)."""
         now, staff = deps.clock(), directory(deps)
         member = await staff_step(lambda: staff.leave(_actor(me), sid, body.reason, now))
+        if deps.cutoffs is not None:  # the login now, not at the next round
+            try:
+                await deps.cutoffs.advance(now)
+            except Exception:  # the background round retries
+                logging.getLogger(__name__).exception("leaver cut-off at once failed")
         return member_view(member, now)
 
     @app.post("/staff/members/{sid}/recommend")
@@ -2463,5 +2475,40 @@ def create_app(
         except DeskError as exc:
             raise desk_refused(exc) from exc
         return message_view(message)
+
+    # --- leavers' logins (5d) ---------------------------------------------------------
+
+    def cutoffs(deps: Deps) -> Cutoffs:
+        if deps.cutoffs is None:
+            raise HTTPException(status_code=503, detail="cut-offs are not available")
+        return deps.cutoffs
+
+    async def cutoff_limits(deps: Deps) -> tuple[int, int]:
+        staff = await _staff_policy(deps)
+        return staff.leaver_cutoff_alert_minutes * 60_000, staff.leaver_cutoff_max_hours * 3_600_000
+
+    @app.get("/staff/cutoffs")
+    async def staff_cutoffs(deps: D, me: DirectoryReader) -> list[dict[str, Any]]:
+        """Every ended login: pending, late (past the alert time), overdue
+        (past the hard limit) or done, and how."""
+        alert, hard = await cutoff_limits(deps)
+        now = deps.clock()
+        return [cutoff_view(c, now, alert, hard) for c in await cutoffs(deps).all()]
+
+    @app.post("/staff/cutoffs/{sid}/done")
+    async def confirm_cutoff(
+        deps: D,
+        me: Employee,
+        sid: Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")],
+        body: DecisionBody,
+    ) -> dict[str, Any]:
+        """Confirm a login disabled by hand at Keycloak (T3 or above)."""
+        await _need(deps, me, "staff.manage")
+        try:
+            found = await cutoffs(deps).confirm(sid, me.subject, deps.clock())
+        except IdentityError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        alert, hard = await cutoff_limits(deps)
+        return cutoff_view(found, deps.clock(), alert, hard)
 
     return app

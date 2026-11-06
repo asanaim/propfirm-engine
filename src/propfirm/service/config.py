@@ -59,6 +59,11 @@ class ServiceConfig:
     # the owners, recorded once as T5 (STAFF_OWNERS="<keycloak id>=<name>;...")
     staff_owners: tuple[tuple[str, str], ...] = ()
     staff_legacy_roles: bool = True  # Keycloak staff/admin count until the directory is complete
+    # leavers' logins disabled at Keycloak (service account with manage-users only)
+    staff_idp_url: str = ""  # Keycloak base URL reachable from the API, e.g. http://keycloak:8080
+    staff_idp_realm: str = "propfirm"
+    staff_idp_client_id: str = ""
+    staff_idp_client_secret: str = ""
     oidc_issuer: str = ""  # e.g. http://localhost:8080/realms/propfirm (API only)
     oidc_jwks_url: str = ""  # where the API fetches the realm's signing keys
     oidc_audience: str = "propfirm-api"
@@ -108,6 +113,11 @@ class ServiceConfig:
         for address in self.news_alert_emails:
             if not _EMAIL.fullmatch(address):
                 raise ConfigError(f"NEWS_ALERT_EMAILS: {address!r} is not an email address")
+        idp = (self.staff_idp_url, self.staff_idp_client_id, self.staff_idp_client_secret)
+        if any(idp) and not all(idp):
+            raise ConfigError(
+                "STAFF_IDP_URL, STAFF_IDP_CLIENT_ID and STAFF_IDP_CLIENT_SECRET go together"
+            )
         subjects = [subject for subject, _ in self.staff_owners]
         if len(set(subjects)) != len(subjects):
             raise ConfigError("STAFF_OWNERS names each login once")
@@ -188,6 +198,10 @@ class ServiceConfig:
             staff_schema=text("PROPFIRM_STAFF_SCHEMA", "staff"),
             staff_owners=_owners(env.get("STAFF_OWNERS", "")),
             staff_legacy_roles=flag("STAFF_LEGACY_ROLES", True),
+            staff_idp_url=env.get("STAFF_IDP_URL", ""),
+            staff_idp_realm=env.get("STAFF_IDP_REALM", "propfirm"),
+            staff_idp_client_id=env.get("STAFF_IDP_CLIENT_ID", ""),
+            staff_idp_client_secret=env.get("STAFF_IDP_CLIENT_SECRET", ""),
             oidc_issuer=text("OIDC_ISSUER", ""),
             oidc_jwks_url=text("OIDC_JWKS_URL", ""),
             oidc_audience=text("OIDC_AUDIENCE", "propfirm-api"),

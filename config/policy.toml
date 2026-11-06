@@ -198,6 +198,12 @@ staff_may_trade = false
 # maker, approves it. Not approved within the expiry: proposed again.
 settings_need_second_admin = true
 proposal_expiry_hours = 72
+# A leaver loses every login [decided 6 Nov 2026]: access in the platform
+# ends at once; the identity provider disables the login and its sessions
+# within the minute. Not done after the alert time: leads and admins are
+# alerted to do it by hand; the hard limit is 24 hours.
+leaver_cutoff_alert_minutes = 60
+leaver_cutoff_max_hours = 24
 # Apprentices [decided 31 Oct 2026]: a term of 3 to 6 months, set for each.
 apprentice_min_months = 3
 apprentice_max_months = 6
