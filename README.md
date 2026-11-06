@@ -185,6 +185,19 @@ who, when and why: `GET /admin/settings/changes`):
   drawdown limit). The change becomes a new rule-set version
   (`one-step-s1-v2-a1`): accounts already open keep theirs.
 
+Maker-checker [staff spec 5a-2; outline M07, M25]: each change above is
+first a proposal (the PUT answers `"status": "proposed"`); it takes effect
+only when a second admin (T4 or above, never its maker, second factor
+entered in the last 5 minutes) approves it within 72 hours:
+`POST /admin/settings/proposals/{id}/approve`. Another admin may `reject`
+it, the maker may `withdraw` it; `GET /admin/settings/proposals`
+(`?open=false` for all). The limits are checked when proposed and again
+when approved; the change is recorded in the maker's name with the
+approver's (`approved_by`, `proposal_id`). Admins see each proposal on
+their staff page (to-do and a notification) until it is decided.
+`[staff] settings_need_second_admin`, `proposal_expiry_hours` in the policy
+(the policy file only: no setting can switch the check off).
+
 The policy file holds the starting values of these settings; once an
 admin has changed one, the admin value wins.
 
@@ -619,7 +632,7 @@ or rules uses floating point.
 - [ ] Step 5: back office
   - [x] 5a: staff directory, tiers, roles, grants, four eyes, step-up on approvals,
     pass then admin authorisation of payouts, voids and profit removals
-  - [ ] 5a-2: maker-checker on admin settings (a second admin)
+  - [x] 5a-2: maker-checker on admin settings (a second admin)
   - [x] 5b: staff page: to-do from the work queues, duty sheets, notifications by
     permission, messages on records
   - [ ] 5c: apprentices' masked views

@@ -64,6 +64,8 @@ class SettingChange:
     author_email: str | None
     reason: str
     ts: int  # UTC milliseconds
+    approved_by: str | None = None  # the second admin (maker-checker); None before it
+    proposal_id: int | None = None  # the proposal it carried out
 
 
 def limits_rule_set(base: RuleSet, limits: StageLimits, change_id: int) -> RuleSet:

@@ -6,6 +6,10 @@ Append-only tables (updates and deletes are refused by a trigger):
   effect when it is recorded; a stage-limits change when the engine has
   journaled its new rule set (`journal_seq`). Only applied changes are in
   force, so checkout never sells a rule set the engine does not know yet.
+- `proposals` and `proposal_decisions`: maker-checker [staff spec 5a-2]:
+  an admin proposes a change, a second admin approves (the change is then
+  recorded with both names), rejects it, or the maker withdraws it; one
+  decision per proposal;
 - `news_actions`: every restricted-event action of the risk desk (M13):
   who, why, the input it sent and what the engine answered.
 """
@@ -103,6 +107,36 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        5,
+        """
+        -- maker-checker: a change takes effect only once a second admin approves
+        CREATE TABLE {s}.proposals (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            kind text NOT NULL CHECK (kind IN ('country_gating', 'stage_limits')),
+            value jsonb NOT NULL,
+            author text NOT NULL,
+            author_email text,
+            reason text NOT NULL CHECK (length(reason) BETWEEN 1 AND 500),
+            created_at bigint NOT NULL
+        );
+        CREATE TABLE {s}.proposal_decisions (
+            proposal bigint PRIMARY KEY REFERENCES {s}.proposals (id),
+            decision text NOT NULL CHECK (decision IN ('approved', 'rejected', 'withdrawn')),
+            decided_by text NOT NULL,
+            reason text NOT NULL CHECK (length(reason) BETWEEN 1 AND 500),
+            decided_at bigint NOT NULL
+        );
+        ALTER TABLE {s}.changes
+            ADD COLUMN proposal_id bigint UNIQUE REFERENCES {s}.proposals (id),
+            ADD COLUMN approved_by text;
+        CREATE TRIGGER proposals_append_only BEFORE UPDATE OR DELETE ON {s}.proposals
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER proposal_decisions_append_only
+            BEFORE UPDATE OR DELETE ON {s}.proposal_decisions
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 
@@ -126,7 +160,44 @@ def _change(row: asyncpg.Record) -> SettingChange:
         author_email=row["author_email"],
         reason=row["reason"],
         ts=row["created_at"],
+        approved_by=row["approved_by"],
+        proposal_id=row["proposal_id"],
     )
+
+
+@dataclass(frozen=True, slots=True)
+class Proposal:
+    id: int
+    setting: Setting
+    author: str
+    author_email: str | None
+    reason: str
+    ts: int
+    decision: str | None  # approved, rejected, withdrawn; None: open
+    decided_by: str | None
+    decision_reason: str | None
+    decided_at: int | None
+    change_id: int | None  # the change an approval recorded
+
+
+def _proposal(row: asyncpg.Record) -> Proposal:
+    return Proposal(
+        row["id"],
+        from_json(row["kind"], json.loads(row["value"])),
+        row["author"],
+        row["author_email"],
+        row["reason"],
+        row["created_at"],
+        row["decision"],
+        row["decided_by"],
+        row["decision_reason"],
+        row["decided_at"],
+        row["change_id"],
+    )
+
+
+class ProposalDecided(Exception):
+    """The proposal already has its decision."""
 
 
 class SettingsStore:
@@ -203,6 +274,100 @@ class SettingsStore:
             f"ON a.change_id = c.id WHERE a.change_id IS NULL ORDER BY c.id"
         )
         return [_change(r) for r in rows]
+
+    # --- maker-checker ----------------------------------------------------------------
+
+    def _proposals_sql(self, where: str) -> str:
+        s = self._s
+        return (
+            f"SELECT p.*, d.decision, d.decided_by, d.reason AS decision_reason, d.decided_at, "
+            f"c.id AS change_id FROM {s}.proposals p "
+            f"LEFT JOIN {s}.proposal_decisions d ON d.proposal = p.id "
+            f"LEFT JOIN {s}.changes c ON c.proposal_id = p.id {where}"
+        )
+
+    async def propose(
+        self, setting: Setting, author: str, author_email: str | None, reason: str, ts: int
+    ) -> Proposal:
+        kind, value = to_json(setting)
+        pid = await self._pool.fetchval(
+            f"INSERT INTO {self._s}.proposals (kind, value, author, author_email, reason, "
+            f"created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            kind,
+            json.dumps(value, sort_keys=True),
+            author,
+            author_email,
+            reason,
+            ts,
+        )
+        found = await self.proposal(pid)
+        assert found is not None
+        return found
+
+    async def proposal(self, pid: int) -> Proposal | None:
+        row = await self._pool.fetchrow(self._proposals_sql("WHERE p.id = $1"), pid)
+        return None if row is None else _proposal(row)
+
+    async def proposals(self, open_only: bool = True, limit: int = 100) -> Sequence[Proposal]:
+        where = "WHERE ($1 = false OR d.proposal IS NULL) ORDER BY p.id DESC LIMIT $2"
+        rows = await self._pool.fetch(self._proposals_sql(where), open_only, limit)
+        return [_proposal(r) for r in rows]
+
+    async def decide(self, pid: int, decision: str, by: str, reason: str, ts: int) -> None:
+        """Reject or withdraw; ProposalDecided if it already has a decision."""
+        done = await self._pool.execute(
+            f"INSERT INTO {self._s}.proposal_decisions (proposal, decision, decided_by, reason, "
+            f"decided_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (proposal) DO NOTHING",
+            pid,
+            decision,
+            by,
+            reason,
+            ts,
+        )
+        if done.endswith(" 0"):
+            raise ProposalDecided(f"proposal {pid} is already decided")
+
+    async def approve(
+        self, proposal: Proposal, approver: str, reason: str, ts: int, *, applied: bool
+    ) -> SettingChange:
+        """One transaction: the decision, then the change in the maker's
+        name with the approver's (and, for gating, in force at once)."""
+        s = self._s
+        kind, value = to_json(proposal.setting)
+        async with self._pool.acquire() as conn, conn.transaction():
+            done = await conn.execute(
+                f"INSERT INTO {s}.proposal_decisions (proposal, decision, decided_by, reason, "
+                f"decided_at) VALUES ($1, 'approved', $2, $3, $4) "
+                f"ON CONFLICT (proposal) DO NOTHING",
+                proposal.id,
+                approver,
+                reason,
+                ts,
+            )
+            if done.endswith(" 0"):
+                raise ProposalDecided(f"proposal {proposal.id} is already decided")
+            row = await conn.fetchrow(
+                f"INSERT INTO {s}.changes (kind, value, author, author_email, reason, "
+                f"created_at, proposal_id, approved_by) "
+                f"VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+                kind,
+                json.dumps(value, sort_keys=True),
+                proposal.author,
+                proposal.author_email,
+                proposal.reason,
+                ts,
+                proposal.id,
+                approver,
+            )
+            assert row is not None
+            if applied:
+                await conn.execute(
+                    f"INSERT INTO {s}.applied (change_id, journal_seq, applied_at) "
+                    f"VALUES ($1, NULL, $2)",
+                    row["id"],
+                    ts,
+                )
+        return _change(row)
 
     async def history(self, limit: int = 100) -> Sequence[ChangeStatus]:
         """The latest changes first."""

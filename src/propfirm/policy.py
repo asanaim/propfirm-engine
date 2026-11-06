@@ -100,6 +100,9 @@ class StaffPolicy:
     limits: Limits = field(default_factory=Limits)
     login_needs_mfa: bool = True  # every staff and admin login: a second factor
     staff_may_trade: bool = False  # staff and apprentices never buy or trade
+    # maker-checker on admin settings: a second admin approves each change
+    settings_need_second_admin: bool = True
+    proposal_expiry_hours: int = 72
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,6 +487,8 @@ def _staff(t: _Table) -> StaffPolicy:
         limits=limits,
         login_needs_mfa=t.boolean("login_needs_mfa"),
         staff_may_trade=t.boolean("staff_may_trade"),
+        settings_need_second_admin=t.boolean("settings_need_second_admin"),
+        proposal_expiry_hours=t.integer("proposal_expiry_hours", 1),
     )
     t.done()
     if limits.apprentice_min_months > limits.apprentice_max_months:

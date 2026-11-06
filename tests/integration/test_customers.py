@@ -133,7 +133,7 @@ async def platform(
     gateway = Gateway(writer, pool, config.schema)
     store = await CustomerStore.open(pool, config.customer_schema)
     records = await SettingsStore.open(pool, config.settings_schema)
-    settings = Settings(policy, records, gateway, wait_s)
+    settings = Settings(policy, records, gateway, wait_s, proposals=records)
     onboardings = OnboardingStore(pool, config.customer_schema)
     cases = Casework(
         CaseStore(pool, config.customer_schema, config.schema), store, settings, gateway, wait_s
