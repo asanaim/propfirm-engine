@@ -50,7 +50,7 @@ class ServiceConfig:
     news_dir: Path = DEFAULT_NEWS_DIR  # restricted-events calendar files (M13)
     news_collector: bool = True  # read the publishers' schedules (needs internet access)
     collect_hours: int = 6  # how often the collector runs
-    collector_agent: str = "propfirm-news-collector/1.0"  # User-Agent: name the firm
+    collector_agent: str = "pipridge-news-collector/1.0"  # User-Agent: name the firm
     news_alert_emails: tuple[str, ...] = ()  # staff and admins told when a source fails
     news_alert_remind_hours: int = 24  # reminder while a source still fails
     customer_schema: str = "customers"  # CIF, orders, accounts (personal data)
@@ -178,7 +178,7 @@ class ServiceConfig:
             news_dir=Path(news) if news else DEFAULT_NEWS_DIR,
             news_collector=flag("PROPFIRM_NEWS_COLLECTOR", True),
             collect_hours=number("PROPFIRM_COLLECT_HOURS", 6),
-            collector_agent=text("PROPFIRM_COLLECTOR_AGENT", "propfirm-news-collector/1.0"),
+            collector_agent=text("PROPFIRM_COLLECTOR_AGENT", "pipridge-news-collector/1.0"),
             news_alert_emails=tuple(
                 a.strip() for a in env.get("NEWS_ALERT_EMAILS", "").split(",") if a.strip()
             ),

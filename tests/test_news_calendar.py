@@ -459,7 +459,7 @@ def test_the_collector_settings() -> None:
     env = {"DATABASE_URL": "postgresql://u:p@h/db", "VALKEY_URL": "redis://h:6379/0"}
     config = ServiceConfig.from_env(env)
     assert (config.news_collector, config.collect_hours) == (True, 6)
-    assert config.collector_agent == "propfirm-news-collector/1.0"
+    assert config.collector_agent == "pipridge-news-collector/1.0"
     off = ServiceConfig.from_env(
         {**env, "PROPFIRM_NEWS_COLLECTOR": "0", "PROPFIRM_COLLECT_HOURS": "12"}
     )
@@ -484,7 +484,15 @@ def test_cancelling_is_an_approval_it_needs_a_recent_second_factor() -> None:
     assert staff.status_code == 403 and staff.json()["detail"]["permission"] == "news.cancel"
 
 
-def test_desk_work_is_not_an_approval() -> None:
+def test_desk_work_is_not_an_approval_but_every_staff_login_needs_a_second_factor() -> None:
+    """Desk work needs no recent re-entry (any MFA login); a password-only
+    staff login is refused everywhere [decided 6 Nov 2026]."""
     month = "/staff/news/calendars/2026-11/publish"
-    assert call("POST", month, {"reason": "nov"}, mfa=False)[0].status_code == 200
+    assert call("POST", month, {"reason": "nov"}, login_age_s=3_600)[0].status_code == 200
+    password_only = call("POST", month, {"reason": "nov"}, mfa=False)[0]
+    assert (password_only.status_code, password_only.json()["detail"]["code"]) == (
+        401,
+        "mfa_required",
+    )
+    assert call("GET", "/staff/news", mfa=False)[0].status_code == 401
     assert call("POST", month, {"reason": "nov"}, ("trader",))[0].status_code == 403

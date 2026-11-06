@@ -36,7 +36,7 @@ from propfirm.settings.newsdesk import Author, NewsAction, NewsDesk
 log = logging.getLogger(__name__)
 
 SYSTEM_COLLECTOR = "system:collector"
-DEFAULT_AGENT = "propfirm-news-collector/1.0"
+DEFAULT_AGENT = "pipridge-news-collector/1.0"
 
 type Fetch = Callable[[str], Awaitable[str]]
 

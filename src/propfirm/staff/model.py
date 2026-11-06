@@ -56,7 +56,13 @@ PERMISSIONS: dict[str, Permission] = {
     p.name: p
     for p in (
         _P("staff.view", Tier.ASSOCIATE, None, False, "read back-office records"),
-        _P("progression.decide", Tier.ASSOCIATE, None, True, "approve or deny a funded review"),
+        _P(
+            "progression.decide",  # T2, risk desk [decided 6 Nov 2026: fewer approvers of a
+            Tier.SPECIALIST,  # funded account, the main insider-fraud risk (M17)]
+            "risk",
+            True,
+            "approve or deny a funded review",
+        ),
         _P("onboarding.decide", Tier.ASSOCIATE, "kyc", True, "accept or reject an identity"),
         _P("case.work", Tier.ASSOCIATE, "integrity", False, "alerts, notes, decisions on cases"),
         _P("case.pass", Tier.SPECIALIST, "integrity", False, "propose a void or profit removal"),

@@ -1,5 +1,12 @@
 # propfirm-engine
 
+The engine of **pipridge** (the brand, written all lowercase; a buyer of the
+platform sets their own: `VITE_BRAND` for the portal, the realm's display
+name in Keycloak, the sender name in `MAIL_FROM`, e.g.
+`pipridge <no-reply@example.com>`). Internal names (the `propfirm` package,
+schemas, the `propfirm` realm, `PROPFIRM_*` settings, journal formats) stay:
+renaming them would change recorded data and hashes.
+
 The firm's own trading engine: prices, fills, equity, rules, ledger and
 replay. It is phase P1 of the plan: everything runs on synthetic prices, with
 no vendors and no money involved.
@@ -51,8 +58,10 @@ projector, the API on http://127.0.0.1:8000, a synthetic price feeder and
 the clock/checkpoint scheduler. Payments and screening are sandbox
 stand-ins (no money moves). Test users: `trader1@example.com` /
 `dev-trader-password`, `staff1@example.com` / `dev-staff-password`
-(employee) and `admin1@example.com` / `dev-admin-password` (admin); see
-`config/keycloak/README.md`. `docker compose --profile platform down` stops
+(employee) and `admin1@example.com` / `dev-admin-password` (admin), the
+last two with an authenticator; a token for curl:
+`python scripts/dev_token.py staff1@example.com dev-staff-password dev-totp-secret-staff1`
+(see `config/keycloak/README.md`). `docker compose --profile platform down` stops
 them; add `-v` to delete the journal and start over.
 
 ## Trader portal (P2 step 4)
@@ -410,6 +419,13 @@ Apprentices (`APP00000001`, their own login): a T2 or T3 mentor, a term of
 graduates them (`/graduate` with the new staff login): a new T1 member
 linked to the apprentice record.
 
+Decided 6 Nov 2026: every staff and admin login needs a second factor, not
+a password alone (`login_needs_mfa`; 401 `mfa_required` otherwise); staff
+and apprentices never buy or trade (`staff_may_trade = false`: a login with
+staff access gets no trader view, 403 `staff_trading_banned`; households
+are declared, 5d); a funded review is approved by a T2 or above on the risk
+desk (`progression.decide`).
+
 Payouts, refunds and voids [decided 31 Oct 2026]: a T2 or above passes
 (`payouts` role for payouts, `integrity` for voids), an admin authorises; no
 amount is approved below admin. The fee refund is paid with a payout and
@@ -426,10 +442,9 @@ Records are append-only (`staff.member_events`, `staff.grant_events`).
 A login with no directory record keeps its Keycloak role (`staff` T2 with
 every role, `admin` T4) until `STAFF_LEGACY_ROLES=0`.
 
-Locally: the development users' password-grant tokens (`config/keycloak`)
-carry no second factor, so their approvals answer 401. Sign in through the
-portal with a one-time code set up, or point `PROPFIRM_POLICY` at a copy of
-the policy with `approvals_need_mfa = false` (development only).
+Locally: `staff1` and `admin1` have authenticators in the development
+realm; `scripts/dev_token.py` signs them in with their code and prints a
+token that passes the staff rules, step-up included.
 
 ## Payouts
 
