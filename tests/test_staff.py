@@ -147,8 +147,8 @@ def test_powers_are_admin_permissions() -> None:
     assert all(PERMISSIONS[p].tier == Tier.ADMIN for p in POWERS)
 
 
-def test_an_apprentice_or_no_tier_has_no_permission() -> None:
-    assert access(0, *ROLES).permissions() == []
+def test_an_apprentice_reads_masked_and_proposes_only() -> None:
+    assert access(0, *ROLES).permissions() == ["staff.view_masked", "apprentice.propose"]
     assert access(None, *ROLES).permissions() == []
 
 

@@ -19,6 +19,7 @@ progression, account, customer, grant or member), so the discussion is
 part of the record's file. Never sent outside the platform.
 """
 
+import json
 import re
 import tomllib
 from dataclasses import dataclass
@@ -336,4 +337,138 @@ def message_view(m: Message) -> dict[str, Any]:
         "sid": m.sid,
         "body": m.body,
         "ts": m.ts,
+    }
+
+
+# --- apprentices propose, mentors decide (5c) -----------------------------------------
+
+APPRENTICE_ACTIONS = ("case.note", "case.decide")
+
+
+@dataclass(frozen=True, slots=True)
+class ApprenticeProposal:
+    id: int
+    sid: str  # the apprentice
+    subject: str
+    mentor: str  # the mentor's STF
+    action: str
+    target: str
+    body: dict[str, Any]
+    ts: int
+    decision: str | None
+    decided_by: str | None
+    reason: str | None
+    result: str | None
+    decided_at: int | None
+
+
+class ApprenticeDesk:
+    """Apprentices act on live records only by proposing; their mentor's
+    approval carries the action out in the mentor's name, recording both
+    [staff spec 5c]. Append-only."""
+
+    def __init__(self, pool: asyncpg.Pool, schema: str) -> None:
+        self._pool = pool
+        self._s = check_schema(schema)
+
+    def _sql(self, where: str) -> str:
+        return (
+            f"SELECT p.*, d.decision, d.decided_by, d.reason, d.result, d.ts AS decided_at "
+            f"FROM {self._s}.apprentice_proposals p "
+            f"LEFT JOIN {self._s}.apprentice_decisions d ON d.proposal = p.id {where}"
+        )
+
+    @staticmethod
+    def _row(r: asyncpg.Record) -> ApprenticeProposal:
+        return ApprenticeProposal(
+            r["id"],
+            r["sid"],
+            r["subject"],
+            r["mentor"],
+            r["action"],
+            r["target"],
+            json.loads(r["body"]),
+            r["ts"],
+            r["decision"],
+            r["decided_by"],
+            r["reason"],
+            r["result"],
+            r["decided_at"],
+        )
+
+    async def propose(
+        self, access: Access, mentor: str, action: str, target: str, body: dict[str, Any], ts: int
+    ) -> ApprenticeProposal:
+        if access.kind != "apprentice" or access.sid is None:
+            raise DeskError("only an apprentice proposes; staff act themselves")
+        if action not in APPRENTICE_ACTIONS:
+            raise DeskError(f"action must be one of {APPRENTICE_ACTIONS}")
+        if REF.fullmatch(target) is None:
+            raise DeskError("the target is one record id")
+        pid = await self._pool.fetchval(
+            f"INSERT INTO {self._s}.apprentice_proposals "
+            f"(sid, subject, mentor, action, target, body, ts) "
+            f"VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING id",
+            access.sid,
+            access.subject,
+            mentor,
+            action,
+            target,
+            json.dumps(body, sort_keys=True),
+            ts,
+        )
+        found = await self.proposal(pid)
+        assert found is not None
+        return found
+
+    async def proposal(self, pid: int) -> ApprenticeProposal | None:
+        row = await self._pool.fetchrow(self._sql("WHERE p.id = $1"), pid)
+        return None if row is None else self._row(row)
+
+    async def proposals(
+        self, sid: str | None = None, mentor: str | None = None, open_only: bool = False
+    ) -> list[ApprenticeProposal]:
+        rows = await self._pool.fetch(
+            self._sql(
+                "WHERE ($1::text IS NULL OR p.sid = $1) AND ($2::text IS NULL OR p.mentor = $2) "
+                "AND ($3 = false OR d.proposal IS NULL) ORDER BY p.id DESC LIMIT 200"
+            ),
+            sid,
+            mentor,
+            open_only,
+        )
+        return [self._row(r) for r in rows]
+
+    async def decide(
+        self, pid: int, decision: str, by: str, reason: str, result: str | None, ts: int
+    ) -> None:
+        done = await self._pool.execute(
+            f"INSERT INTO {self._s}.apprentice_decisions "
+            f"(proposal, decision, decided_by, reason, result, ts) "
+            f"VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (proposal) DO NOTHING",
+            pid,
+            decision,
+            by,
+            reason,
+            result,
+            ts,
+        )
+        if done.endswith(" 0"):
+            raise DeskError(f"proposal {pid} is already decided")
+
+
+def apprentice_proposal_view(p: ApprenticeProposal) -> dict[str, Any]:
+    return {
+        "id": p.id,
+        "sid": p.sid,
+        "mentor": p.mentor,
+        "action": p.action,
+        "target": p.target,
+        "body": p.body,
+        "proposed_at": p.ts,
+        "status": p.decision or "open",
+        "decided_by": p.decided_by,
+        "reason": p.reason,
+        "result": p.result,
+        "decided_at": p.decided_at,
     }

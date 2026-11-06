@@ -465,8 +465,20 @@ leaver's open cases show on every case worker's to-do list to take over. Owners 
 tier is never changed through the API.
 
 Apprentices (`APP00000001`, their own login): a T2 or T3 mentor, a term of
-3 to 6 months (`ends_at`), T0 with no permissions until masked views exist
-(5c). The mentor recommends (`/recommend`); an admin other than the mentor
+3 to 6 months (`ends_at`), T0 in the sections they learn [staff spec 5c]:
+- they read the same back-office records as staff, with trader names,
+  documents, wallets and contact details masked (`•••`); money and trading
+  figures visible (`propfirm.staff.masking`);
+- they never act on a live record: they propose (`POST /staff/apprentice/proposals`,
+  a case note or a case decision), and their mentor's approval carries it
+  out in the mentor's name, naming the apprentice (`[proposed by APP…]`);
+  the mentor sees each proposal on their to-do list;
+- the training gate: a level of T1 or above in a section, and graduation,
+  need the section's course (`config/staff/courses.toml`) passed within 12
+  months (`training_gate`, `training_valid_months`), recorded by a T2+ of the
+  section or an admin (`POST /staff/members/{sid}/training`); a graduate
+  keeps the apprentice's passes; `GET /staff/me` shows `training`, and the
+  to-do list a missing or lapsing course. The mentor recommends (`/recommend`); an admin other than the mentor
 graduates them (`/graduate` with the new staff login): a new T1 member
 linked to the apprentice record.
 
@@ -657,7 +669,7 @@ or rules uses floating point.
   - [x] 5a-2: maker-checker on admin settings (a second admin)
   - [x] 5b: staff page: to-do from the work queues, duty sheets, notifications by
     permission, messages on records
-  - [ ] 5c: apprentices' masked views
-    and training; 5d: oversight; 5e: back-office screens
+  - [x] 5c: apprentices' masked views, proposals to the mentor, training gate
+  - [ ] 5d: oversight (5d-1 leaver cut-off done); 5e: back-office screens
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)
 - [ ] Step 7: staging, backups and restore drill, security scans

@@ -28,6 +28,7 @@ from propfirm.staff.records import (
     grant_state,
     member_state,
 )
+from propfirm.staff.training import Passed
 
 _LOCK_CLASS = 0x73746166  # "staf"
 
@@ -189,6 +190,49 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             CHECK (grant_kind IN ('tier', 'role', 'power', 'acting', 'level'));
         """,
     ),
+    (
+        5,
+        """
+        -- apprentices and training (5c)
+        CREATE TABLE {s}.training (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            sid text NOT NULL,
+            section text NOT NULL,
+            course text NOT NULL,
+            version int NOT NULL,
+            passed_at bigint NOT NULL,
+            assessor text NOT NULL,
+            note text NOT NULL
+        );
+        CREATE INDEX training_sid ON {s}.training (sid);
+        CREATE TABLE {s}.apprentice_proposals (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            sid text NOT NULL,
+            subject text NOT NULL,
+            mentor text NOT NULL,
+            action text NOT NULL,
+            target text NOT NULL,
+            body jsonb NOT NULL,
+            ts bigint NOT NULL
+        );
+        CREATE TABLE {s}.apprentice_decisions (
+            proposal bigint PRIMARY KEY REFERENCES {s}.apprentice_proposals (id),
+            decision text NOT NULL CHECK (decision IN ('approved', 'rejected')),
+            decided_by text NOT NULL,
+            reason text NOT NULL,
+            result text,
+            ts bigint NOT NULL
+        );
+        CREATE TRIGGER training_append_only BEFORE UPDATE OR DELETE ON {s}.training
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER apprentice_proposals_append_only
+            BEFORE UPDATE OR DELETE ON {s}.apprentice_proposals
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER apprentice_decisions_append_only
+            BEFORE UPDATE OR DELETE ON {s}.apprentice_decisions
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 
@@ -292,6 +336,36 @@ class StaffOps:
             grt,
         )
         return [GrantEvent(grt, r["kind"], r["ts"], json.loads(r["detail"])) for r in rows]
+
+    async def training(self, sid: str) -> list[Passed]:
+        rows = await self._c.fetch(
+            f"SELECT * FROM {self._s}.training WHERE sid = $1 ORDER BY id", sid
+        )
+        return [
+            Passed(
+                r["sid"],
+                r["section"],
+                r["course"],
+                r["version"],
+                r["passed_at"],
+                r["assessor"],
+                r["note"],
+            )
+            for r in rows
+        ]
+
+    async def record_training(self, p: Passed) -> None:
+        await self._c.execute(
+            f"INSERT INTO {self._s}.training (sid, section, course, version, passed_at, "
+            f"assessor, note) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            p.sid,
+            p.section,
+            p.course,
+            p.version,
+            p.passed_at,
+            p.assessor,
+            p.note,
+        )
 
     async def cutoffs(self) -> list[Cutoff]:
         rows = await self._c.fetch(

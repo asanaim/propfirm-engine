@@ -81,7 +81,7 @@ from propfirm.settings.newsdesk import Author, NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
 from propfirm.staff.cutoff import Cutoffs, IdentityProvider, KeycloakAdmin, SandboxIdentity
-from propfirm.staff.desk import StaffDesk, load_duties
+from propfirm.staff.desk import ApprenticeDesk, StaffDesk, load_duties
 from propfirm.staff.directory import Directory, Owner
 from propfirm.staff.store import StaffStore
 
@@ -352,6 +352,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             staff=staff,
             desk=desk,
             cutoffs=cutoffs,
+            apprentices=ApprenticeDesk(pool, config.staff_schema),
             source_alerts=SourceAlerts(SourceStore(pool, config.settings_schema), None, ()),
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,

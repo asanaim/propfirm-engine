@@ -37,6 +37,7 @@ from propfirm.customers.store import CustomerStore, migrate
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import Policy, load_policy
+from propfirm.rules.calendar import DEFAULT_NEWS_DIR, load_calendars
 from propfirm.service.config import ServiceConfig
 from propfirm.service.engine import run
 from propfirm.service.feeder import now_ms
@@ -44,10 +45,11 @@ from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
 from propfirm.service.setup import setup_from_policy
+from propfirm.settings.newsdesk import NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
 from propfirm.staff.cutoff import Cutoffs, SandboxIdentity
-from propfirm.staff.desk import StaffDesk, load_duties
+from propfirm.staff.desk import ApprenticeDesk, StaffDesk, load_duties
 from propfirm.staff.directory import Directory, Owner
 from propfirm.staff.store import StaffStore
 from tests.auth_rig import bearer, verifier
@@ -214,6 +216,10 @@ async def platform(
         staff=staff,
         desk=desk,
         cutoffs=cutoffs,
+        apprentices=ApprenticeDesk(pool, config.staff_schema),
+        news=NewsDesk(
+            load_calendars(DEFAULT_NEWS_DIR), NewsStore(pool, config.settings_schema), gateway
+        ),
         didit_webhook_secret=didit_webhook_secret,
         sandbox=sandbox,
         country_header="X-Country",

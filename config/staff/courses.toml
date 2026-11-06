@@ -1,0 +1,45 @@
+# The training gate [staff spec 5c]: a section's course is passed before a
+# level in that section is granted (T1 and above) and before an apprentice
+# graduates; it is refreshed every `training_valid_months` (policy). An
+# assessor (T2 or above in the section, or an admin) records the pass.
+# Raise `version` when a course changes.
+
+[support]
+course = "support-basics"
+title = "Trader support, complaints and disputes"
+version = 1
+
+[kyc]
+course = "kyc-aml"
+title = "KYC and AML: identity checks, sanctions and PEP screening"
+version = 1
+
+[risk]
+course = "risk-desk"
+title = "Risk desk: news restrictions, exposure, the kill switch"
+version = 1
+
+[payouts]
+course = "payouts-finance"
+title = "Payouts, refunds and reconciliation"
+version = 1
+
+[integrity]
+course = "integrity-fraud"
+title = "Integrity and fraud: evidence, cases, voids"
+version = 1
+
+[product]
+course = "product-rules"
+title = "Programs, rule sets and the industry standard"
+version = 1
+
+[marketing]
+course = "marketing-conduct"
+title = "Fair marketing, affiliates and served countries"
+version = 1
+
+[it]
+course = "it-security"
+title = "Access control, backups, logging and incident response"
+version = 1

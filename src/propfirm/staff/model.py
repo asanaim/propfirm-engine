@@ -61,6 +61,9 @@ PERMISSIONS: dict[str, Permission] = {
     p.name: p
     for p in (
         _P("staff.view", Tier.ASSOCIATE, None, False, "read back-office records"),
+        # apprentices [staff spec 5c]: real work, personal data masked; proposals only
+        _P("staff.view_masked", Tier.APPRENTICE, None, False, "read records, personal data masked"),
+        _P("apprentice.propose", Tier.APPRENTICE, None, False, "propose an action to the mentor"),
         _P(
             "progression.decide",  # T2, risk desk [decided 6 Nov 2026: fewer approvers of a
             Tier.SPECIALIST,  # funded account, the main insider-fraud risk (M17)]
