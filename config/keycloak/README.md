@@ -24,7 +24,17 @@ database (`docker compose --profile platform up`). It defines:
   `trader2@example.com` / `dev-trader2-password` with an authenticator
   (TOTP secret `dev-totp-secret-trader2`, raw bytes, SHA-1, 6 digits, 30 s),
   `staff1@example.com` / `dev-staff-password` (employee) and
-  `admin1@example.com` / `dev-admin-password` (admin).
+  `admin1@example.com` / `dev-admin-password` (admin), both with an
+  authenticator (TOTP secrets `dev-totp-secret-staff1` and
+  `dev-totp-secret-admin1`): staff and admins always sign in with a second
+  factor [decided 6 Nov 2026];
+- `dev-cli` signs in two ways. The password grant records `amr` (`pwd`, and
+  `otp` when the code is sent as `totp=`; a user with an authenticator must
+  send it) but Keycloak gives it no `auth_time`, so the API's step-up
+  (approvals, wallet changes, payouts) refuses it. For those, sign in as a
+  browser does (code flow with PKCE, `auth_time` included):
+  `python scripts/dev_token.py admin1@example.com dev-admin-password dev-totp-secret-admin1`
+  prints an access token.
 
 The realm is imported only into an empty Keycloak database. To load a
 changed realm file locally, remove the Keycloak volume (users and sessions

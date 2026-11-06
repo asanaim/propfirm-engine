@@ -58,8 +58,10 @@ projector, the API on http://127.0.0.1:8000, a synthetic price feeder and
 the clock/checkpoint scheduler. Payments and screening are sandbox
 stand-ins (no money moves). Test users: `trader1@example.com` /
 `dev-trader-password`, `staff1@example.com` / `dev-staff-password`
-(employee) and `admin1@example.com` / `dev-admin-password` (admin); see
-`config/keycloak/README.md`. `docker compose --profile platform down` stops
+(employee) and `admin1@example.com` / `dev-admin-password` (admin), the
+last two with an authenticator; a token for curl:
+`python scripts/dev_token.py staff1@example.com dev-staff-password dev-totp-secret-staff1`
+(see `config/keycloak/README.md`). `docker compose --profile platform down` stops
 them; add `-v` to delete the journal and start over.
 
 ## Trader portal (P2 step 4)
@@ -456,11 +458,9 @@ Records are append-only (`staff.member_events`, `staff.grant_events`).
 A login with no directory record keeps its Keycloak role (`staff` T2 with
 every role, `admin` T4) until `STAFF_LEGACY_ROLES=0`.
 
-Locally: the development users' password-grant tokens (`config/keycloak`)
-carry no second factor, so every staff request answers 401. Sign in through
-the portal with a one-time code set up, or point `PROPFIRM_POLICY` at a copy
-of the policy with `login_needs_mfa = false` and `approvals_need_mfa = false`
-(development only).
+Locally: `staff1` and `admin1` have authenticators in the development
+realm; `scripts/dev_token.py` signs them in with their code and prints a
+token that passes the staff rules, step-up included.
 
 ## Payouts
 

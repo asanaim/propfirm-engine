@@ -151,10 +151,10 @@
     },
     {
       "clientId": "dev-cli",
-      "name": "Development command line (password grant; development realm only)",
+      "name": "Development command line (password grant, or code flow with PKCE via scripts/dev_token.py; development realm only)",
       "enabled": true,
       "publicClient": true,
-      "standardFlowEnabled": false,
+      "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
       "protocolMappers": [
         {
@@ -168,9 +168,26 @@
             "access.token.claim": "true",
             "introspection.token.claim": "true"
           }
+        },
+        {
+          "name": "amr",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-amr-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "lightweight.claim": "false"
+          }
         }
       ],
-      "fullScopeAllowed": false
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "http://localhost/dev-cli/callback"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
     }
   ],
   "users": [
@@ -204,6 +221,12 @@
           "type": "password",
           "value": "dev-staff-password",
           "temporary": false
+        },
+        {
+          "type": "otp",
+          "userLabel": "development authenticator",
+          "secretData": "{\"value\": \"dev-totp-secret-staff1\"}",
+          "credentialData": "{\"subType\": \"totp\", \"digits\": 6, \"counter\": 0, \"period\": 30, \"algorithm\": \"HmacSHA1\"}"
         }
       ],
       "realmRoles": [
@@ -223,6 +246,12 @@
           "type": "password",
           "value": "dev-admin-password",
           "temporary": false
+        },
+        {
+          "type": "otp",
+          "userLabel": "development authenticator",
+          "secretData": "{\"value\": \"dev-totp-secret-admin1\"}",
+          "credentialData": "{\"subType\": \"totp\", \"digits\": 6, \"counter\": 0, \"period\": 30, \"algorithm\": \"HmacSHA1\"}"
         }
       ],
       "realmRoles": [
@@ -1086,6 +1115,66 @@
           "userSetupAllowed": false
         }
       ]
+    },
+    {
+      "alias": "direct-grant-with-amr",
+      "description": "Password grant (dev-cli) that records amr: pwd, and otp when the code is sent (totp=...)",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-username",
+          "priority": 10
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-password",
+          "priority": 20,
+          "authenticatorConfig": "amr-pwd-direct"
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 30,
+          "autheticatorFlow": true,
+          "flowAlias": "direct-grant-with-amr Conditional OTP",
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "direct-grant-with-amr Conditional OTP",
+      "description": "OTP when the user has one",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "conditional-user-configured",
+          "priority": 10
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-otp",
+          "priority": 20,
+          "authenticatorConfig": "amr-otp-direct"
+        }
+      ]
     }
   ],
   "authenticatorConfig": [
@@ -1132,8 +1221,23 @@
       "config": {
         "update.profile.on.first.login": "missing"
       }
+    },
+    {
+      "alias": "amr-pwd-direct",
+      "config": {
+        "default.reference.value": "pwd",
+        "default.reference.maxAge": "36000"
+      }
+    },
+    {
+      "alias": "amr-otp-direct",
+      "config": {
+        "default.reference.value": "otp",
+        "default.reference.maxAge": "36000"
+      }
     }
   ],
   "browserFlow": "browser-with-amr",
-  "ssoSessionMaxLifespan": 36000
+  "ssoSessionMaxLifespan": 36000,
+  "directGrantFlow": "direct-grant-with-amr"
 }
