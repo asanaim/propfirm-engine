@@ -438,7 +438,9 @@ def test_start_up_publishes_every_month_skipping_what_the_engine_has() -> None:
         async def news(self) -> list[dict[str, Any]]:
             return [{"event_id": "2026-12-04-us-employment"}]
 
-    asyncio.run(_publish_calendars(news, Shown()))  # type: ignore[arg-type]
+    # at a fixed time: past events are not sent, so the wall clock would make
+    # this test depend on the day it runs
+    asyncio.run(_publish_calendars(news, Shown(), lambda: NOV_6_NFP - H))  # type: ignore[arg-type]
     sent = {a.event_id for a in log.actions}
     assert "2026-12-04-us-employment" not in sent  # the engine already shows it
     assert {"2026-11-06-us-employment", "2026-12-09-fomc-decision"} <= sent

@@ -150,6 +150,25 @@ services:
     environment: *platform-env
     command: ["/opt/venv/bin/python", "-m", "propfirm.service.scheduler"]
 
+  # Demo data (development only): logins with the password 12345, the staff
+  # directory, traders with paid evaluation accounts, a case, pending approvals.
+  #   docker compose --profile platform run --rm demo-seed
+  demo-seed:
+    profiles: ["demo"]
+    build: *runtime
+    depends_on:
+      api:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+    environment:
+      <<: *platform-env
+      PROPFIRM_SANDBOX: "1"
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin-dev}
+    volumes:
+      - ./config:/app/config:ro
+    command: ["/opt/venv/bin/python", "-m", "propfirm.demo.seed"]
+
   # The two web apps, built and served by Caddy (no Node needed to run them).
   # Development with hot reload is still `npm run dev` in each folder (stop
   # these two first: same ports).

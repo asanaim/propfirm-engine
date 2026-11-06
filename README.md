@@ -170,6 +170,37 @@ terminal windows needed. For hot reload while changing the apps, stop the
 container (`docker compose stop portal` or `backoffice`) and run
 `npm run dev` in the app's folder (same port).
 
+## Demo data (development only)
+
+```sh
+docker compose --profile platform up -d --build --wait
+docker compose --profile platform run --rm demo-seed
+```
+
+Refused unless `PROPFIRM_SANDBOX=1`. Safe to run again (missing data is
+added; the demo logins are reset). Every demo login has the password
+**12345**: the realm's password policy (12 characters) is bypassed for these
+logins only, by importing the password already hashed; real users keep it.
+
+| Who | Login |
+|---|---|
+| Owners (T5) | `owner-a@example.com`, `owner-b@example.com` |
+| Admins (T4) | `admin-a@example.com`, `admin-b@example.com` |
+| One per level in each section (support, kyc, risk, payouts, integrity, product, marketing, it) | `<section>-apprentice@`, `-associate@`, `-specialist@`, `-lead@example.com` |
+| Traders (one paid evaluation account each) | `trader-a@` to `trader-e@example.com` |
+
+Employees need an authenticator code: add the key printed by the seed
+(`OBUXA4TJMRTWKLLEMVWW6LLUN52HA`, one entry serves every demo employee) to
+an authenticator app. Traders sign in with the password only.
+
+Also added: the directory built through its own rules (owners, admins
+approved by the other owner; each section's people joined by admin A,
+trained, approved by admin B; apprentices mentored by their section's
+lead), an integrity case on trader A taken by the integrity lead, an
+apprentice's note waiting for the mentor, and a level in Payouts for the
+KYC associate waiting for an owner. Not included: payouts (they need a
+funded account with profit).
+
 ## Back office (P2 step 5e)
 
 `backoffice/`: react-admin 5.15.5 on MUI 9.5, React 19.3.1, Vite 8.3.4,
