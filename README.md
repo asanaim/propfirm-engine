@@ -159,6 +159,17 @@ npm run typecheck && npm run lint && npm run build
   WCAG 2.2 AA: the colour tokens are checked by a contrast test; every page
   was checked with axe-core in both themes.
 
+## Web apps in containers
+
+`docker compose --profile platform up -d --build --wait` also builds and
+serves both web apps (`web/Dockerfile`: Node builds, Caddy serves; the API
+under `/api` on the same origin; strict Content-Security-Policy; read-only,
+non-root): trader portal http://localhost:5173, back office
+http://localhost:5174. They keep running with the platform; no Node or open
+terminal windows needed. For hot reload while changing the apps, stop the
+container (`docker compose stop portal` or `backoffice`) and run
+`npm run dev` in the app's folder (same port).
+
 ## Back office (P2 step 5e)
 
 `backoffice/`: react-admin 5.15.5 on MUI 9.5, React 19.3.1, Vite 8.3.4,
