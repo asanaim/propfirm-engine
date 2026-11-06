@@ -33,7 +33,7 @@ edited by hand) is logged as a warning.
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 import asyncpg
@@ -131,14 +131,16 @@ async def _cutoffs_forever(cutoffs: Cutoffs) -> None:
 SYSTEM_CALENDAR = "system:calendar"
 
 
-async def _publish_calendars(news: NewsDesk, live: LiveReader) -> None:
+async def _publish_calendars(
+    news: NewsDesk, live: LiveReader, clock: Callable[[], int] = now_ms
+) -> None:
     """Publish the calendar files at start-up; events the engine already
     shows are skipped, and any other repeat is refused by the engine."""
     try:
         known = frozenset(e["event_id"] for e in await live.news())
         versions = ", ".join(c.version for c in news.calendars) or "none"
         who = Author(SYSTEM_CALENDAR, None, f"automatic at start-up ({versions})")
-        done = await news.publish_all(who, now_ms(), known)
+        done = await news.publish_all(who, clock(), known)
         log.info("news calendar: %d events sent at start-up", len(done))
     except Exception:
         log.exception("news calendar publication at start-up failed")
