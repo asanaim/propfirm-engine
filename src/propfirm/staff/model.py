@@ -5,8 +5,12 @@ roles (what work a person does) and time-limited grants of admin powers.
 No permission is attached to a person directly: each comes from a grant
 someone approved (`propfirm.staff.records`).
 
-A permission needs a minimum tier and, below T4, a functional role. Admins
-(T4) and owners (T5) do any role's work. An admin power granted to someone
+Sections [decided 6 Nov 2026]: each functional role is a section with its
+own ladder, Apprentice (T0) to Team lead (T3): a person may be Lead in KYC,
+Specialist in Payouts and Apprentice in Risk at once (`Access.levels`).
+Admin (T4) and Owner (T5) are firm-wide. A permission of a section needs
+that section's level; a permission of no section needs that level in any
+section. Admins and owners do any section's work. An admin power granted to someone
 below T4 gives that one permission only, never payout or void approval: no
 amount is approved below admin [decided 31 Oct 2026].
 
@@ -15,6 +19,7 @@ today's access (`legacy_access`): `admin` is T4, `staff` is T2 with every
 role. `STAFF_LEGACY_ROLES=0` turns that off once the directory is complete.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import IntEnum
@@ -97,6 +102,17 @@ class Access:
     sid: str | None = None
     kind: str | None = None
     grants: tuple[str, ...] = field(default=())  # GRT ids in force
+    # section -> level (T0 to T3); `roles` are the sections held, `tier` the
+    # firm-wide tier (admin, owner) or the highest section level
+    levels: Mapping[str, Tier] = field(default_factory=dict)
+
+    def level(self, section: str) -> Tier | None:
+        if self.tier is not None and self.tier >= Tier.ADMIN:
+            return self.tier
+        if section in self.levels:
+            return self.levels[section]
+        # no level of its own: the tier, for a role held without one
+        return self.tier if section in self.roles else None
 
     def has(self, name: str) -> bool:
         p = PERMISSIONS[name]
@@ -104,9 +120,12 @@ class Access:
             return False
         if name in self.powers:
             return True
-        if self.tier < p.tier:
-            return False
-        return p.role is None or self.tier >= Tier.ADMIN or p.role in self.roles
+        if self.tier >= Tier.ADMIN:
+            return True
+        if p.role is None:
+            return self.tier >= p.tier
+        level = self.level(p.role)
+        return level is not None and level >= p.tier
 
     def permissions(self) -> list[str]:
         return [name for name in PERMISSIONS if self.has(name)]
@@ -124,7 +143,8 @@ def legacy_access(subject: str, keycloak_roles: frozenset[str]) -> Access:
     if "admin" in keycloak_roles:
         return Access(subject, "legacy", Tier.ADMIN, frozenset(ROLES))
     if "staff" in keycloak_roles:
-        return Access(subject, "legacy", Tier.SPECIALIST, frozenset(ROLES))
+        every = {section: Tier.SPECIALIST for section in ROLES}
+        return Access(subject, "legacy", Tier.SPECIALIST, frozenset(ROLES), levels=every)
     return no_access(subject)
 
 

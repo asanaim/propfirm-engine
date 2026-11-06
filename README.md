@@ -428,6 +428,18 @@ Associate, T2 Specialist, T3 Team lead, T4 Admin, T5 Owner. Roles:
 `support`, `kyc`, `risk`, `payouts`, `integrity`, `product`, `marketing`,
 `it`; below T4 a permission needs its role (`propfirm.staff.model`).
 
+Sections [decided 6 Nov 2026]: each role is a section with its own ladder,
+Apprentice (T0), Associate (T1), Specialist (T2), Team lead (T3): one person
+may be Lead in KYC, Specialist in Payouts and Apprentice in Risk at once.
+Admin (T4) and Owner (T5) are firm-wide. A section level is a grant
+(`"grant": "level", "value": "kyc:2"`): asked for by that section's lead or
+an admin, approved by an admin (never the asker), replacing the previous
+level of that section; a section lead may revoke a level in their section.
+`GET /staff/me` shows `access.sections`. Joiners: `"sections": {"kyc": 1}`.
+A graduate starts as Associate (T1) in each section learnt as an
+apprentice. The full path: Apprentice (APP login) → graduation → Associate
+→ Specialist → Lead, per section → Admin (two owners) → Owner.
+
 | Change | Asked by | Approved by | Ends |
 |---|---|---|---|
 | tier (promotion) | T3+ | T4+; T4 or T5: two owners | when another tier is approved |

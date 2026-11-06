@@ -48,7 +48,18 @@ from propfirm.staff.model import (
 
 MEMBER_KINDS = ("joined", "moved", "recommended", "graduated", "left")
 GRANT_KINDS = ("requested", "approved", "denied", "cancelled", "revoked", "superseded")
-GRANTS = ("tier", "role", "power", "acting")
+GRANTS = ("tier", "role", "power", "acting", "level")
+
+
+def parse_level(value: object) -> tuple[str, int]:
+    """A section level grant's value: "<section>:<0..3>" (e.g. "kyc:2")."""
+    if isinstance(value, str) and value.count(":") == 1:
+        section, _, level = value.partition(":")
+        if section in ROLES and level in ("0", "1", "2", "3"):
+            return section, int(level)
+    raise StaffRefused("invalid", f"a level is <section>:<0..3>, section one of {ROLES}")
+
+
 GRANT_STATUSES = ("requested", "approved", "denied", "cancelled", "revoked", "superseded")
 SYSTEM = "system:config"  # the owners named in configuration
 
@@ -249,30 +260,46 @@ def grant_state(grt: str, events: Iterable[GrantEvent]) -> Grant:
 
 
 def access_of(member: Member, grants: Sequence[Grant], now: int) -> Access:
-    """A directory member's access now: the latest approved tier (raised by
-    an acting grant in force), the roles and powers in force."""
+    """A directory member's access now: per section, the latest approved
+    level; the firm-wide tier (admin, owner) or else the highest level; a
+    role held without a level of its own works at the tier; acting cover
+    raises every level held (to T3 at most); the powers in force."""
     if not member.active(now):
         return no_access(member.subject, "directory", member.sid)
-    mine = [g for g in grants if g.sid == member.sid and g.in_force(now)]
-    tiers = sorted(
-        (g for g in mine if g.grant == "tier"),
+    mine = sorted(
+        (g for g in grants if g.sid == member.sid and g.in_force(now)),
         key=lambda g: (g.approved_at or 0, g.grt),
     )
-    if not tiers:
-        return no_access(member.subject, "directory", member.sid)
-    tier = int(tiers[-1].value)
+    tier: int | None = None
+    levels: dict[str, int] = {}
     for g in mine:
-        if g.grant == "acting":
-            tier = max(tier, int(g.value))
+        if g.grant == "tier":
+            tier = int(g.value)  # the latest approved wins
+        elif g.grant == "level":
+            section, level = parse_level(g.value)
+            levels[section] = level
+    roles = {str(g.value) for g in mine if g.grant == "role"} | set(levels)
+    if tier is not None and tier < Tier.ADMIN:
+        for role in roles - set(levels):
+            levels[role] = tier
+    covers = [int(g.value) for g in mine if g.grant == "acting"]
+    for cover in covers:
+        levels = {s: max(lv, cover) for s, lv in levels.items()}
+    if tier is None or tier < Tier.ADMIN:  # the highest of tier, levels and cover
+        candidates = [t for t in (tier, *levels.values(), *covers) if t is not None]
+        tier = max(candidates) if candidates else None
+    if tier is None:
+        return no_access(member.subject, "directory", member.sid)
     return Access(
         member.subject,
         "directory",
         Tier(tier),
-        frozenset(str(g.value) for g in mine if g.grant == "role"),
+        frozenset(roles),
         frozenset(str(g.value) for g in mine if g.grant == "power"),
         member.sid,
         member.kind,
         tuple(sorted(g.grt for g in mine)),
+        {s: Tier(lv) for s, lv in levels.items()},
     )
 
 
@@ -380,6 +407,22 @@ def check_request(
             )
         case "role":
             _need(value in ROLES, "invalid", f"role must be one of {ROLES}")
+        case "level":
+            section, level = parse_level(value)
+            allowed = {"apprentice": (0, 0), "contractor": (1, 2), "staff": (1, 3)}[member.kind]
+            _need(
+                allowed[0] <= level <= allowed[1],
+                "invalid",
+                f"a {member.kind} has a section level T{allowed[0]} to T{allowed[1]}",
+            )
+            # the section's lead asks (or an admin); an admin approves
+            mine = actor.level(section)
+            _need(
+                mine is not None and mine >= Tier.LEAD,
+                "forbidden",
+                f"a {section} level is asked for by that section's lead or an admin",
+            )
+            _need(ends_at is None, "invalid", "a level lasts until another is approved or revoked")
         case "power":
             _need(value in POWERS, "invalid", f"power must be one of {sorted(POWERS)}")
             _need(member.kind == "staff", "invalid", "admin powers go to staff only")
@@ -434,10 +477,14 @@ def check_revoke(actor: Access, member: Member, grant: Grant, now: int) -> None:
     if grant.grant == "tier" and int(grant.value) == Tier.ADMIN:
         _need(tier == Tier.OWNER, "forbidden", "an admin's tier is revoked by an owner")
     lead = actor.sid is not None and actor.sid == member.lead and tier >= Tier.LEAD
+    section_lead = False
+    if grant.grant == "level":
+        level = actor.level(parse_level(grant.value)[0])
+        section_lead = level is not None and level >= Tier.LEAD
     _need(
-        tier >= Tier.ADMIN or (lead and grant.grant in ("role", "acting")),
+        tier >= Tier.ADMIN or (lead and grant.grant in ("role", "acting")) or section_lead,
         "forbidden",
-        "revoking needs T4, or the member's lead for a role or acting cover",
+        "revoking needs T4, the member's lead (role, acting cover) or the section's lead (level)",
     )
 
 

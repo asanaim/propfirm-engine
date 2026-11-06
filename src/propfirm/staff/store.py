@@ -180,6 +180,15 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        4,
+        """
+        -- a level per section [decided 6 Nov 2026]: grant kind "level"
+        ALTER TABLE {s}.grants DROP CONSTRAINT grants_grant_kind_check;
+        ALTER TABLE {s}.grants ADD CONSTRAINT grants_grant_kind_check
+            CHECK (grant_kind IN ('tier', 'role', 'power', 'acting', 'level'));
+        """,
+    ),
 )
 
 

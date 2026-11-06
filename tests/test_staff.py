@@ -473,3 +473,78 @@ def test_the_mentor_recommends_then_another_admin_approves_graduation() -> None:
     refused("forbidden", check_graduate, access(3), recommended, "app-staff", NOW)
     refused("invalid", check_graduate, access(4), recommended, "app", NOW)
     refused("not_allowed", check_recommend, access(2, sid="STF00000002"), recommended, NOW)
+
+
+# --- sections: a ladder each [decided 6 Nov 2026] --------------------------------------
+
+
+def leveled(**levels: int) -> Access:
+    top = max(levels.values())
+    return Access(
+        "actor",
+        "directory",
+        Tier(top),
+        frozenset(levels),
+        frozenset(),
+        "STF00000001",
+        "staff",
+        levels={s: Tier(lv) for s, lv in levels.items()},
+    )
+
+
+def test_each_section_has_its_own_level() -> None:
+    """Lead in KYC, Specialist in Payouts, Apprentice in Risk, at once."""
+    a = leveled(kyc=3, payouts=2, risk=0)
+    assert a.has("onboarding.decide") and a.has("payout.pass")
+    assert not a.has("news.desk")  # risk: apprentice
+    assert not a.has("progression.decide")  # risk T2
+    assert not a.has("case.work")  # not in integrity at all
+    assert a.has("staff.manage")  # a lead in some section
+    assert not a.has("payout.authorise")  # firm-wide admin only
+    assert (a.level("kyc"), a.level("risk"), a.level("it")) == (Tier.LEAD, Tier.APPRENTICE, None)
+
+
+def test_section_levels_come_from_level_grants_the_latest_winning() -> None:
+    m = member()
+    grants = [
+        grant("level", "kyc:1", status="approved", approved_at=NOW - 30, grt="GRT00000001"),
+        grant("level", "kyc:3", status="approved", approved_at=NOW - 10, grt="GRT00000002"),
+        grant("level", "payouts:2", status="approved", approved_at=NOW - 20, grt="GRT00000003"),
+        grant("tier", 1, status="approved", approved_at=NOW - 40, grt="GRT00000004"),
+        grant("role", "risk", status="approved", approved_at=NOW - 40, grt="GRT00000005"),
+    ]
+    a = access_of(m, grants, NOW)
+    assert dict(a.levels) == {"kyc": Tier.LEAD, "payouts": Tier.SPECIALIST, "risk": Tier.ASSOCIATE}
+    assert a.tier == Tier.LEAD  # the highest level
+    cover = grant("acting", 3, status="approved", ends_at=NOW + DAY_MS, grt="GRT00000006")
+    covered = access_of(m, [*grants, cover], NOW)
+    assert covered.levels["payouts"] == Tier.LEAD and covered.levels["risk"] == Tier.LEAD
+    admin = grant("tier", 4, status="approved", approved_at=NOW, grt="GRT00000007")
+    assert access_of(m, [*grants, admin], NOW).tier == Tier.ADMIN
+
+
+def test_a_section_level_is_asked_by_that_sections_lead_and_approved_by_an_admin() -> None:
+    def ask(actor: Access, value: str, kind: str = "staff", ends: int | None = None) -> None:
+        check_request(actor, member(kind=kind, ends_at=NOW + 99 * DAY_MS if kind != "staff"
+                                    else None), access(1, subject="member"), "level", value,
+                      NOW, ends, NOW, LIMITS)  # fmt: skip
+
+    ask(leveled(kyc=3), "kyc:2")
+    refused("forbidden", ask, leveled(support=3), "kyc:2")  # not the KYC lead
+    refused("forbidden", ask, leveled(kyc=2, support=3), "kyc:1")
+    ask(access(4), "risk:3")  # an admin
+    refused("invalid", ask, leveled(kyc=3), "kyc:1", "apprentice")  # apprentices: T0
+    ask(leveled(kyc=3), "kyc:0", "apprentice")
+    refused("invalid", ask, leveled(kyc=3), "kyc:3", "contractor")  # contractors: T1-T2
+    refused("invalid", ask, leveled(kyc=3), "kyc:2", "staff", NOW + DAY_MS)  # no end date
+    refused("invalid", ask, access(4), "kyc:4")
+    refused("invalid", ask, access(4), "sales:1")
+    level = grant("level", "kyc:3", tier=3)
+    refused("forbidden", approve, leveled(kyc=3), level)  # a lead never approves
+    approve(access(4), level)
+
+
+def test_a_section_lead_revokes_a_level_in_their_section_only() -> None:
+    level = grant("level", "kyc:2", status="approved")
+    check_revoke(leveled(kyc=3), member(), level, NOW)
+    refused("forbidden", check_revoke, leveled(payouts=3), member(), level, NOW)
