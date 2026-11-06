@@ -1,0 +1,49 @@
+# Live prices from Twelve Data instead of synthetic ones (P2 step 6).
+#
+#   TWELVE_DATA_API_KEY=... in .env (never committed, never in chat)
+#   docker compose -f compose.yaml -f compose.live.yaml --profile platform up -d --wait
+#
+# The synthetic feeder is left out (synthetic and licensed prices never mix:
+# CLAUDE.md); the connector publishes to the same input stream. Licensed
+# prices are kept only while subscribed: within 30 days of cancelling, stop
+# the engine, projector and connector and run
+#   docker compose -f compose.yaml -f compose.live.yaml run --rm --no-deps \
+#     twelvedata /opt/venv/bin/python -m propfirm.service.purge \
+#     --licensed --confirm "purge licensed prices"
+# (README, "Twelve Data").
+
+services:
+  engine:
+    environment:
+      PROPFIRM_PRICE_SOURCE: twelve_data
+  api:
+    environment:
+      PROPFIRM_PRICE_SOURCE: twelve_data
+  projector:
+    environment:
+      PROPFIRM_PRICE_SOURCE: twelve_data
+  scheduler:
+    environment:
+      PROPFIRM_PRICE_SOURCE: twelve_data
+
+  feeder:
+    profiles: !override ["synthetic-only"]  # never started with this file
+
+  twelvedata:
+    profiles: ["platform"]
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      VALKEY_URL: redis://valkey:6379/0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-propfirm}:${POSTGRES_PASSWORD:-propfirm-dev}@postgres:5432/${POSTGRES_DB:-propfirm}
+      PROPFIRM_PRICE_SOURCE: twelve_data
+      TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:?set TWELVE_DATA_API_KEY in .env}
+      PROPFIRM_FEED_SYMBOLS: ${PROPFIRM_FEED_SYMBOLS:-}
+    volumes:
+      - ./config:/app/config:ro
+    command: ["/opt/venv/bin/python", "-m", "propfirm.service.twelvedata"]

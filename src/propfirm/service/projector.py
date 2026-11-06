@@ -183,6 +183,22 @@ class Projector:
             await self._conn.execute(f"UPDATE {self._r}.cursor SET seq = $1", rows[-1]["seq"])
             return len(rows)
 
+    async def purge_licensed(self) -> dict[str, int]:
+        """Licence ended: delete the bars and account histories (they hold
+        prices and fill prices) and move the cursor to the journal's head,
+        so nothing purged is projected again; return the rows deleted."""
+        counts: dict[str, int] = {}
+        async with self._conn.transaction():
+            for table in ("bars", "account_events"):
+                result: str = await self._conn.execute(f"DELETE FROM {self._r}.{table}")
+                counts[table] = int(result.split()[-1])
+            try:
+                head = await self._conn.fetchval(f"SELECT max(seq) FROM {self._j}.journal")
+            except asyncpg.UndefinedTableError:
+                head = None
+            await self._conn.execute(f"UPDATE {self._r}.cursor SET seq = $1", head or 0)
+        return counts
+
     async def rebuild(self) -> None:
         """Drop the projections; the next runs rebuild them from record 1."""
         async with self._conn.transaction():

@@ -53,6 +53,8 @@ async def feed(
 
 async def _main() -> None:
     config = ServiceConfig.from_env(os.environ)
+    if config.price_source != "synthetic":
+        raise SystemExit("synthetic prices never mix with licensed ones (CLAUDE.md)")
     symbols = tuple(s for s in os.environ.get("PROPFIRM_FEED_SYMBOLS", "").split(",") if s)
     synthetic = SyntheticConfig(
         seed=os.environ.get("PROPFIRM_FEED_SEED", "dev"),

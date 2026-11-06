@@ -62,6 +62,7 @@ services:
       VALKEY_URL: redis://valkey:6379/0
       DATABASE_URL: postgresql://${POSTGRES_USER:-propfirm}:${POSTGRES_PASSWORD:-propfirm-dev}@postgres:5432/${POSTGRES_DB:-propfirm}
       PROPFIRM_ANCHOR_PATH: /var/lib/propfirm/anchors.jsonl
+      PROPFIRM_PRICE_SOURCE: synthetic  # compose.live.yaml: twelve_data
     volumes:
       - anchors:/var/lib/propfirm
       - ./config:/app/config:ro  # edit config/policy.toml, then restart the engine
