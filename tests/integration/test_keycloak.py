@@ -10,7 +10,7 @@ import pytest
 from propfirm.api.app import Deps, create_app
 from propfirm.api.auth import AuthError, JwksKeys, TokenVerifier
 from tests.auth_rig import FakeCustomers
-from tests.keycloak_login import browser_login, claims
+from tests.keycloak_login import browser_login, claims, totp
 
 pytestmark = pytest.mark.integration
 
@@ -21,16 +21,21 @@ USERS = {
 }
 
 
-async def password_token(http: httpx.AsyncClient, base: str, user: str) -> str:
-    response = await http.post(
-        f"{base}/realms/propfirm/protocol/openid-connect/token",
-        data={
-            "grant_type": "password",
-            "client_id": "dev-cli",
-            "username": user,
-            "password": USERS[user],
-        },
-    )
+# staff and admins sign in with a second factor [decided 6 Nov 2026]
+SECRETS = {
+    "staff1@example.com": b"dev-totp-secret-staff1",
+    "admin1@example.com": b"dev-totp-secret-admin1",
+}
+
+
+async def password_token(
+    http: httpx.AsyncClient, base: str, user: str, with_code: bool = True
+) -> str:
+    data = {"grant_type": "password", "client_id": "dev-cli", "username": user}
+    data["password"] = USERS[user]
+    if with_code and user in SECRETS:
+        data["totp"] = totp(SECRETS[user], time.time())
+    response = await http.post(f"{base}/realms/propfirm/protocol/openid-connect/token", data=data)
     response.raise_for_status()
     token: str = response.json()["access_token"]
     return token
@@ -55,6 +60,9 @@ def test_keycloak_tokens_verify_with_roles(keycloak_url: str) -> None:
             assert trader.roles == {"trader"} and trader.email == "trader1@example.com"
             assert staff.roles == {"trader", "staff"}
             assert admin.roles == {"trader", "admin"}
+            assert staff.mfa and admin.mfa and not trader.mfa  # amr: pwd, otp
+            with pytest.raises(httpx.HTTPStatusError):  # the code is required
+                await password_token(http, keycloak_url, "staff1@example.com", with_code=False)
             wrong_audience = TokenVerifier(issuer, "someone-else", JwksKeys(certs, http))
             with pytest.raises(AuthError):
                 await wrong_audience.verify(
@@ -94,3 +102,15 @@ def test_a_portal_sign_in_records_how_and_when(keycloak_url: str) -> None:
     )
     assert claims(with_code["access_token"])["amr"] == ["pwd", "otp"]
     assert claims(with_code["id_token"])["amr"] == ["pwd", "otp"]
+
+
+def test_staff_sign_in_through_the_browser_flow_with_their_code(keycloak_url: str) -> None:
+    """The development staff users have authenticators: a browser sign-in
+    records both factors and when (what the API's staff rules read)."""
+    time.sleep(30.5 - time.time() % 30)  # a fresh code: Keycloak refuses one used before
+    before = int(time.time()) - 5
+    for user, secret in SECRETS.items():
+        signed = browser_login(keycloak_url, user, USERS[user], secret)
+        access = claims(signed["access_token"])
+        assert access["amr"] == ["pwd", "otp"]
+        assert before <= access["auth_time"] <= int(time.time()) + 5
