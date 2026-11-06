@@ -460,7 +460,24 @@ service account with `manage-users` only: `STAFF_IDP_URL`,
 an urgent notification to leads and admins to do it by hand and confirm it
 (`POST /staff/cutoffs/{sid}/done`); again at 24 hours, the hard limit.
 `GET /staff/cutoffs`: each one pending, late, overdue or done, and how. A
-leaver's open cases show on every case worker's to-do list to take over. Owners are recorded once at start-up from
+leaver's open cases show on every case worker's to-do list to take over.
+
+Oversight [staff spec 5d]:
+- escalation: an urgent notification nobody acknowledged within 4 hours
+  (`escalate_hours`) is raised to leads and admins, or a member's own to
+  their lead; once each;
+- dormant accounts: no sign-in (a day's first staff request with MFA) for
+  30 days (`dormant_days`): access suspended (status `dormant`) until an
+  admin reinstates it (`POST /staff/members/{sid}/reinstate`, step-up);
+  owners are exempt;
+- access reviews: each lead reviews their team every 90 days, owners each
+  admin every 30 (`review_days_lead`, `review_days_admin`): due ones on the
+  reviewer's to-do list; `POST /staff/members/{sid}/review`
+  (`keep` or `change`, with a note; grants are changed as usual);
+- anomaly report (`GET /staff/reports/anomalies?days=7`, admins and
+  owners): payout, case and grant approvals outside office hours (Dhaka,
+  Sunday to Thursday, 09:00 to 18:00: `office_*`), and the same maker and
+  checker together `pair_threshold` (3) times or more. Owners are recorded once at start-up from
 `STAFF_OWNERS="<keycloak id>=Owner A;<keycloak id>=Owner B"`; an owner's
 tier is never changed through the API.
 
@@ -670,6 +687,8 @@ or rules uses floating point.
   - [x] 5b: staff page: to-do from the work queues, duty sheets, notifications by
     permission, messages on records
   - [x] 5c: apprentices' masked views, proposals to the mentor, training gate
-  - [ ] 5d: oversight (5d-1 leaver cut-off done); 5e: back-office screens
+  - [x] 5d: oversight: leaver cut-off, escalation, dormant accounts, access reviews,
+    anomaly report
+  - [ ] 5e: back-office screens
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)
 - [ ] Step 7: staging, backups and restore drill, security scans

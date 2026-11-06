@@ -46,7 +46,7 @@ from propfirm.staff.model import (
     no_access,
 )
 
-MEMBER_KINDS = ("joined", "moved", "recommended", "graduated", "left")
+MEMBER_KINDS = ("joined", "moved", "recommended", "graduated", "left", "dormant", "reinstated")
 GRANT_KINDS = ("requested", "approved", "denied", "cancelled", "revoked", "superseded")
 GRANTS = ("tier", "role", "power", "acting", "level")
 
@@ -109,7 +109,7 @@ class Member:
     mentor: str | None  # STF of an apprentice's mentor
     starts_at: int
     ends_at: int | None  # apprentices and contractors: required
-    status: str  # active, left, graduated
+    status: str  # active, left, graduated, dormant
     from_sid: str | None  # the apprentice record a staff member graduated from
     to_sid: str | None  # the staff record an apprentice graduated to
     recommended_by: str | None  # subject of the mentor who recommended graduation
@@ -144,9 +144,18 @@ def member_state(sid: str, events: Iterable[MemberEvent]) -> Member:
                 None,
             )
             continue
-        if m is None or m.status != "active":
+        if m is None:
+            raise StaffError(f"{sid}: {e.kind} before joined")
+        dormant_ok = e.kind in ("reinstated", "left") and m.status == "dormant"
+        if m.status != "active" and not dormant_ok:
             raise StaffError(f"{sid}: {e.kind} on a record not active")
         match e.kind:
+            case "dormant":  # no sign-in for 30 days [staff spec 5d]
+                m = replace(m, status="dormant")
+            case "reinstated":
+                if m.status != "dormant":
+                    raise StaffError(f"{sid}: reinstated while {m.status}")
+                m = replace(m, status="active")
             case "moved":
                 m = replace(m, team=d.get("team"), lead=d.get("lead"))
             case "recommended":
@@ -491,7 +500,7 @@ def check_revoke(actor: Access, member: Member, grant: Grant, now: int) -> None:
 def check_leave(actor: Access, member: Member, member_access: Access, now: int) -> None:
     _need(actor.has("staff.manage"), "forbidden", "marking a leaver needs T3 or above")
     _need(actor.subject != member.subject, "own_access", "nobody marks themselves as left")
-    _need(member.status == "active", "not_allowed", f"{member.sid} is {member.status}")
+    _need(member.status in ("active", "dormant"), "not_allowed", f"{member.sid} is {member.status}")
     _need(member_access.tier != Tier.OWNER, "forbidden", "an owner is not removed through the API")
     _need(
         _tier(actor) > _tier(member_access),
