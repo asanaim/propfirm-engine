@@ -147,7 +147,8 @@ def generate(config: SyntheticConfig, start_ts: int, end_ts: int) -> Iterator[Pr
 def _symbol_updates(
     config: SyntheticConfig, symbol: str, start_ts: int, end_ts: int
 ) -> Iterator[PriceUpdate]:
-    rng = random.Random(f"{config.seed}|{symbol}")
+    # seeded on purpose (deterministic replay); never for secrets
+    rng = random.Random(f"{config.seed}|{symbol}")  # nosec B311
     start = config.start_points[symbol]
     unit = max(1, start // 50_000)
     jump = unit * 200

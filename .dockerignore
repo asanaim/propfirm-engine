@@ -2,3 +2,12 @@
 portal/node_modules
 portal/dist
 .venv
+.env
+*.key
+*.pem
+portal
+backoffice
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
