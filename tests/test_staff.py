@@ -152,6 +152,13 @@ def test_an_apprentice_or_no_tier_has_no_permission() -> None:
     assert access(None, *ROLES).permissions() == []
 
 
+def test_a_funded_review_takes_a_t2_on_the_risk_desk() -> None:
+    """[decided 6 Nov 2026]: fewer people can approve a funded account."""
+    assert not access(1, "risk").has("progression.decide")
+    assert not access(2, "kyc").has("progression.decide")
+    assert access(2, "risk").has("progression.decide")
+
+
 def test_approvals_are_marked_for_step_up() -> None:
     approvals = {n for n, p in PERMISSIONS.items() if p.approval}
     assert {"payout.pass", "payout.authorise", "case.authorise", "settings.change"} <= approvals

@@ -97,6 +97,7 @@ from propfirm.policy import (
     PolicyError,
     PolicySource,
     ProductPolicy,
+    StaffPolicy,
     parse_countries,
     percent_text,
     rule_set_view,
@@ -776,8 +777,23 @@ def _role(me: Principal, roles: frozenset[str]) -> None:
         raise HTTPException(status_code=403, detail="not in this login's view")
 
 
-async def _trader(me: Me) -> Principal:
+async def _staff_policy(deps: Deps) -> StaffPolicy:
+    return (await deps.policy.current()).staff if deps.policy is not None else StaffPolicy()
+
+
+async def _trader(deps: D, me: Me) -> Principal:
+    """A trader, never staff: staff and apprentices do not buy or trade
+    (`staff.staff_may_trade`, decided 6 Nov 2026)."""
     _role(me, TRADER_ROLES)
+    banned = not (await _staff_policy(deps)).staff_may_trade
+    if banned and (await _access(deps, me)).tier is not None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "staff_trading_banned",
+                "message": "staff do not hold challenges or trade",
+            },
+        )
     return me
 
 
@@ -791,13 +807,26 @@ async def _access(deps: Deps, me: Principal) -> Access:
     return await deps.staff.access(_actor(me), deps.clock())
 
 
+async def _staff_access(deps: Deps, me: Principal) -> Access:
+    """The login's staff access; a login with any staff access must have
+    signed in with a second factor (`staff.login_needs_mfa`)."""
+    access = await _access(deps, me)
+    if access.tier is not None and not me.mfa and (await _staff_policy(deps)).login_needs_mfa:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "mfa_required", "message": "staff sign in with a second factor"},
+            headers={"WWW-Authenticate": 'Bearer error="insufficient_user_authentication"'},
+        )
+    return access
+
+
 async def _step_up(deps: Deps, me: Principal) -> None:
     """Every approval: a second factor, entered at most `step_up_minutes`
     ago (RFC 9470 challenge, as the trader's payout request)."""
-    staff = (await deps.policy.current()).staff if deps.policy is not None else None
-    if staff is not None and not staff.approvals_need_mfa:
+    staff = await _staff_policy(deps)
+    if not staff.approvals_need_mfa:
         return
-    minutes = staff.step_up_minutes if staff is not None else 5
+    minutes = staff.step_up_minutes
     challenge = 'Bearer error="insufficient_user_authentication"'
     if not me.mfa:
         raise HTTPException(
@@ -831,7 +860,7 @@ def _forbidden(name: str) -> HTTPException:
 async def _need(deps: Deps, me: Principal, name: str) -> Access:
     """The login's access, if it has the permission (and, for an
     approval, a recent second factor)."""
-    access = await _access(deps, me)
+    access = await _staff_access(deps, me)
     if not access.has(name):
         raise _forbidden(name)
     if PERMISSIONS[name].approval:
@@ -850,7 +879,7 @@ def _can(name: str) -> Callable[..., Awaitable[Principal]]:
 
 async def _employee(deps: D, me: Me) -> Principal:
     """Anyone with staff access now (an apprentice too)."""
-    access = await _access(deps, me)
+    access = await _staff_access(deps, me)
     if access.tier is None:
         raise HTTPException(status_code=403, detail="not in this login's view")
     return me
@@ -943,7 +972,7 @@ async def _cif(deps: Deps, me: Principal) -> CifRecord:
 
 
 async def _may_read(deps: Deps, me: Principal, account_id: str) -> None:
-    if (await _access(deps, me)).has("staff.view"):
+    if (await _staff_access(deps, me)).has("staff.view"):
         return
     _role(me, TRADER_ROLES)
     await _owns(deps, me, account_id)
@@ -976,7 +1005,7 @@ def create_app(
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
 ) -> FastAPI:
     """`deps` directly (tests), or set on `app.state.deps` by `lifespan`."""
-    app = FastAPI(title="propfirm platform API", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="pipridge platform API", version="0.2.0", lifespan=lifespan)
     app.state.deps = deps
 
     async def submit(deps: Deps, build: Callable[[int], Input]) -> JSONResponse:
@@ -1368,7 +1397,7 @@ def create_app(
         result = await deps.gateway.outcome(entry_id, 0)
         accounts = {e.get("account_id") for e in result.events if isinstance(e, dict)}
         accounts.discard(None)
-        if not (await _access(deps, me)).has("staff.view"):
+        if not (await _staff_access(deps, me)).has("staff.view"):
             _role(me, TRADER_ROLES)
             if not accounts:
                 raise HTTPException(status_code=404, detail="unknown input")

@@ -1,5 +1,12 @@
 # propfirm-engine
 
+The engine of **pipridge** (the brand, written all lowercase; a buyer of the
+platform sets their own: `VITE_BRAND` for the portal, the realm's display
+name in Keycloak, the sender name in `MAIL_FROM`, e.g.
+`pipridge <no-reply@example.com>`). Internal names (the `propfirm` package,
+schemas, the `propfirm` realm, `PROPFIRM_*` settings, journal formats) stay:
+renaming them would change recorded data and hashes.
+
 The firm's own trading engine: prices, fills, equity, rules, ledger and
 replay. It is phase P1 of the plan: everything runs on synthetic prices, with
 no vendors and no money involved.
@@ -410,6 +417,13 @@ Apprentices (`APP00000001`, their own login): a T2 or T3 mentor, a term of
 graduates them (`/graduate` with the new staff login): a new T1 member
 linked to the apprentice record.
 
+Decided 6 Nov 2026: every staff and admin login needs a second factor, not
+a password alone (`login_needs_mfa`; 401 `mfa_required` otherwise); staff
+and apprentices never buy or trade (`staff_may_trade = false`: a login with
+staff access gets no trader view, 403 `staff_trading_banned`; households
+are declared, 5d); a funded review is approved by a T2 or above on the risk
+desk (`progression.decide`).
+
 Payouts, refunds and voids [decided 31 Oct 2026]: a T2 or above passes
 (`payouts` role for payouts, `integrity` for voids), an admin authorises; no
 amount is approved below admin. The fee refund is paid with a payout and
@@ -427,9 +441,10 @@ A login with no directory record keeps its Keycloak role (`staff` T2 with
 every role, `admin` T4) until `STAFF_LEGACY_ROLES=0`.
 
 Locally: the development users' password-grant tokens (`config/keycloak`)
-carry no second factor, so their approvals answer 401. Sign in through the
-portal with a one-time code set up, or point `PROPFIRM_POLICY` at a copy of
-the policy with `approvals_need_mfa = false` (development only).
+carry no second factor, so every staff request answers 401. Sign in through
+the portal with a one-time code set up, or point `PROPFIRM_POLICY` at a copy
+of the policy with `login_needs_mfa = false` and `approvals_need_mfa = false`
+(development only).
 
 ## Payouts
 

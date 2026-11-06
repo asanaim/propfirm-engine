@@ -98,6 +98,8 @@ class StaffPolicy:
     approvals_need_mfa: bool = True  # every approval: a second factor
     step_up_minutes: int = 5  # entered at most this long ago (0: any MFA login)
     limits: Limits = field(default_factory=Limits)
+    login_needs_mfa: bool = True  # every staff and admin login: a second factor
+    staff_may_trade: bool = False  # staff and apprentices never buy or trade
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,6 +482,8 @@ def _staff(t: _Table) -> StaffPolicy:
         approvals_need_mfa=t.boolean("approvals_need_mfa"),
         step_up_minutes=t.integer("step_up_minutes"),
         limits=limits,
+        login_needs_mfa=t.boolean("login_needs_mfa"),
+        staff_may_trade=t.boolean("staff_may_trade"),
     )
     t.done()
     if limits.apprentice_min_months > limits.apprentice_max_months:

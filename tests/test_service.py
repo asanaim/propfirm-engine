@@ -450,7 +450,10 @@ def test_staff_read_every_account_but_trade_none() -> None:
     assert call(g, "GET", "/accounts/B", user="staff-1", roles=staff).status_code == 200
     assert call(g, "GET", "/inputs/5-0", user="staff-1", roles=staff).status_code == 200
     placed = call(g, "POST", "/accounts/B/orders", GOOD, user="staff-1", roles=staff)
-    assert placed.status_code == 404 and g.sent == []
+    assert placed.status_code == 403 and g.sent == []
+    assert placed.json()["detail"]["code"] == "staff_trading_banned"  # decided 6 Nov 2026
+    for url in ("/me", "/orders/ORD00000001"):  # no trader view at all, not even their own
+        assert call(g, "GET", url, user="staff-1", roles=staff).status_code == 403
 
 
 @pytest.mark.parametrize("roles", [("staff",), ("admin",)])

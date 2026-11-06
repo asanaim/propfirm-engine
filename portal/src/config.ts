@@ -10,5 +10,5 @@ export const config: PortalConfig = {
   authority: import.meta.env.VITE_OIDC_AUTHORITY ?? "http://localhost:8080/realms/propfirm",
   clientId: "portal",
   apiBase: "/api",
-  brand: import.meta.env.VITE_BRAND ?? "Prop firm",
+  brand: import.meta.env.VITE_BRAND ?? "pipridge", // written all lowercase; a buyer sets their own
 };
