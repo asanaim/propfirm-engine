@@ -159,6 +159,55 @@ npm run typecheck && npm run lint && npm run build
   WCAG 2.2 AA: the colour tokens are checked by a contrast test; every page
   was checked with axe-core in both themes.
 
+## Back office (P2 step 5e)
+
+`backoffice/`: react-admin 5.15.5 on MUI 9.5, React 19.3.1, Vite 8.3.4,
+TypeScript 6.0 (strict). Node 22.
+
+```sh
+cd backoffice
+npm ci
+npm run dev          # http://localhost:5174, with the platform running
+npm run typecheck && npm run lint && npm test && npm run build
+```
+
+- Sign-in: Keycloak client `backoffice`, Authorization Code with PKCE,
+  tokens in memory only; the API refuses a staff login without a second
+  factor. Development logins: `staff1@example.com`, `admin1@example.com`
+  (TOTP secrets in the realm file).
+- My work (home): access by section, the to-do list (each item opens its
+  record), notifications (acknowledge), duty sheets (acknowledge the version
+  in force), training (a missing pass blocks approvals in that section).
+- Screens: payouts (approve: the API picks pass or authorise; deny), cases
+  (take, note, clear, warn, propose a block; confirm or authorise, send
+  back; reopen), identity reviews and funded reviews (approve, deny), staff
+  directory (grants, history; access review keep/change; leaver; reinstate;
+  recommend an apprentice), access requests (approve, deny, cancel,
+  revoke), leaver cut-offs (confirm a manual disable), apprentice proposals
+  (the mentor approves or rejects), setting proposals (approve, reject,
+  withdraw) and changes, the anomaly report, the news desk (read-only).
+- Every change is an action with a reason (the record keeps it); the data
+  provider refuses generic create, update and delete. An approval that needs
+  a fresh second factor (RFC 9470) offers "Confirm it is you" and signs in
+  again with `max_age=0`.
+- Screens are shown by permission for clarity only; the API checks every
+  request. Apprentices get the same screens with personal fields masked by
+  the API.
+- Times are shown in UTC; money from integer cents, never rounded.
+- Not in the screens yet (API only): proposing a void or a profit removal
+  (needs the account and amount), joining a member, requesting a grant,
+  moving a member, graduation, adding or cancelling news events.
+- Known advisory: `decode-uri-component` 0.2.2 (via react-admin's
+  `query-string` 7.1.3; GHSA-vcc3-ghjq-m6fr, GHSA-qr28-fpjm-wq7f), a
+  denial of service on malformed percent-encoding in the page's own URL. No
+  compatible fix: the fixed releases are ESM-only and `query-string` 10 drops
+  the named exports react-admin imports. Impact: a crafted link can hang
+  the staff member's own tab; no data is exposed. Recheck on each react-admin
+  release.
+- Third-party notices as in the portal; `css-mediaquery` 0.1.2 declares
+  "BSD", read by hand as BSD-3-Clause (pinned to that version), and
+  `(MPL-2.0 OR Apache-2.0)` packages are taken under Apache-2.0.
+
 ## Who sees what
 
 | View | Role | Sees and does |
@@ -680,7 +729,7 @@ or rules uses floating point.
   - [x] Trailing orders (engine, API, portal)
   - [x] News calendar input: monthly files, risk-desk publishing, manual and Bank of Japan windows
   - [x] 4d: funded onboarding, wallet, payouts
-- [ ] Step 5: back office
+- [x] Step 5: back office
   - [x] 5a: staff directory, tiers, roles, grants, four eyes, step-up on approvals,
     pass then admin authorisation of payouts, voids and profit removals
   - [x] 5a-2: maker-checker on admin settings (a second admin)
@@ -689,6 +738,6 @@ or rules uses floating point.
   - [x] 5c: apprentices' masked views, proposals to the mentor, training gate
   - [x] 5d: oversight: leaver cut-off, escalation, dormant accounts, access reviews,
     anomaly report
-  - [ ] 5e: back-office screens
+  - [x] 5e: back-office screens (react-admin)
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)
 - [ ] Step 7: staging, backups and restore drill, security scans

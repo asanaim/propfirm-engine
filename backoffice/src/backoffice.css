@@ -1,0 +1,7 @@
+pre.json {
+  margin: 0;
+  max-width: 60rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+}
