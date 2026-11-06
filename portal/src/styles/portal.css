@@ -738,3 +738,78 @@ tbody th {
 td.wrap {
   white-space: normal;
 }
+
+/* Funded onboarding steps and payout checks (4d) */
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  padding: 0;
+  margin: 1rem 0 1.5rem;
+  list-style: none;
+  counter-reset: step;
+}
+
+.steps li {
+  counter-increment: step;
+  color: var(--muted);
+}
+
+.steps li::before {
+  content: counter(step) ". ";
+}
+
+.steps li.done {
+  color: var(--text);
+}
+
+.steps li.done::before {
+  content: "✓ ";
+}
+
+.steps li.current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.contract {
+  max-height: 24rem;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  margin-bottom: var(--space-3);
+}
+
+.contract pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
+.checks {
+  padding-left: 1.25rem;
+}
+
+.check-fail strong {
+  color: var(--danger);
+}
+
+code {
+  overflow-wrap: anywhere;
+}
+
+.field.check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.field input[type="checkbox"] {
+  width: 1.25rem;
+  min-height: 0;
+  height: 1.25rem;
+  padding: 0;
+  accent-color: var(--accent);
+}

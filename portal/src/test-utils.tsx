@@ -17,7 +17,7 @@ export function fakeAuth(change: Partial<Auth> = {}): Auth {
   };
 }
 
-type Route = [method: string, path: string, status: number, body: unknown];
+type Route = [method: string, path: string, status: number, body: unknown, headers?: Record<string, string>];
 
 /** A fetch that answers from a list of routes and records each call. */
 export function fakeFetch(routes: Route[]) {
@@ -26,8 +26,8 @@ export function fakeFetch(routes: Route[]) {
     const path = (input as string).replace(/^\/api/, "");
     const found = routes.find(([m, p]) => m === method && p === path);
     if (found === undefined) return Promise.reject(new Error(`no route ${method} ${path}`));
-    const [, , status, body] = found;
-    return Promise.resolve(new Response(JSON.stringify(body), { status }));
+    const [, , status, body, headers] = found;
+    return Promise.resolve(new Response(JSON.stringify(body), { status, headers: headers ?? {} }));
   });
 }
 

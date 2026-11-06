@@ -75,7 +75,104 @@ export interface Me extends Customer {
   accounts: AccountRecord[];
   orders: Order[];
   progressions: unknown[];
-  onboardings: unknown[];
+  onboardings: Onboarding[];
+}
+
+/** Funded onboarding (ONB): identity check, review, contract, signature. */
+export type OnboardingStatus =
+  | "verification"
+  | "verification_declined"
+  | "checks"
+  | "review"
+  | "rejected"
+  | "contract"
+  | "signature"
+  | "signed"
+  | "provisioned"
+  | "failed";
+
+export interface Onboarding {
+  onb: string;
+  cif: string;
+  source: string;
+  prg: string | null;
+  ord: string | null;
+  product_id: string;
+  size_cents: number;
+  rsv_id: string;
+  status: OnboardingStatus;
+  kyc: string | null;
+  kyc_attempts: number;
+  acc: string | null;
+  contract: string | null;
+  failure: string | null;
+  created_at: number;
+  verification_url?: string | null;
+}
+
+export interface Contract {
+  contract: string;
+  template: string;
+  sha256: string;
+  draft: boolean;
+  body: string;
+  created_at: number;
+}
+
+export interface Wallet {
+  wal: string;
+  network: string;
+  address: string;
+  added_at: number;
+}
+
+export interface EligibilityCheck {
+  name: string;
+  status: string; // "pass", "fail", ...
+  detail: string;
+}
+
+export interface Eligibility {
+  acc: string;
+  as_of: number;
+  eligible: boolean;
+  basis: string;
+  payable_cents: number;
+  split_percent: string;
+  trader_share_cents: number;
+  firm_share_cents: number;
+  fee_refund_cents: number;
+  trader_amount_cents: number;
+  debit_cents: number;
+  trading_days: number;
+  opens_at: number | null;
+  checks: EligibilityCheck[];
+}
+
+export type PayoutStatus =
+  | "requested"
+  | "approved"
+  | "debited"
+  | "sent"
+  | "paid"
+  | "denied"
+  | "cancelled"
+  | "failed";
+
+export interface Payout {
+  po: string;
+  acc: string;
+  cif: string;
+  wal: string;
+  requested_at: number;
+  trader_amount_cents: number;
+  debit_cents: number;
+  status: PayoutStatus;
+  approvals: number;
+  debited_at: number | null;
+  paid_at: number | null;
+  provider_ref: string | null;
+  failure: string | null;
 }
 
 export interface Registration {

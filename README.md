@@ -83,7 +83,8 @@ npm run typecheck && npm run lint && npm run build
   to sign in again, or to set up an authenticator.
 - Pages: overview (registration on the first visit), challenges (the
   catalogue and checkout; sandbox payment under `PROPFIRM_SANDBOX=1`),
-  accounts and orders, security, open-source notices.
+  accounts and orders, funded onboarding, payouts, news, security,
+  open-source notices.
 - Account dashboard (`/accounts/{acc}`), live: balance, equity, the daily
   and maximum loss left with their floors, the profit target, trading days,
   the countdown to the 17:00 New York reset with the daily floor from then
@@ -113,6 +114,21 @@ npm run typecheck && npm run lint && npm run build
   last moved. Frozen prices move and trigger nothing; inside a news window
   levels keep moving, entries are held and trailing stops execute like a
   stop-loss.
+- Funded (4d, `/funded`, `/funded/{onb}`): each funded onboarding with its
+  four steps. Identity check: start it (`POST /me/onboardings/{onb}/verification`)
+  and continue at the provider (Didit, new tab), or complete it in the sandbox;
+  a declined check can be tried again (3 attempts). Checks and review: the
+  status, re-checked on demand. Agreement: the full text, a DRAFT warning
+  while the firm's legal details are not set, its SHA-256; the portal hashes
+  the text it received and allows signing only when it matches, then signs
+  with the name typed as on the identity document and the hash
+  (`POST /me/onboardings/{onb}/sign`). Then the funded account's link.
+- Payouts (4d, `/payouts`): the payout wallet (USDT, TRC-20; shape checked in
+  the portal, Base58Check by the API; a change asks for the authenticator
+  code, step-up), and for each funded account what is payable now (profit,
+  split, fee refund, the amount received), every payout check met or not,
+  the request (`POST /accounts/{acc}/payouts`, step-up), the account's
+  payouts with their status, and cancel while being approved.
 - Live updates: `GET /accounts/{acc}/stream`, server-sent events (`account`
   and `quotes` when they change; `end` after 5 minutes, and the portal
   opens it again with a fresh token).
@@ -577,7 +593,7 @@ or rules uses floating point.
   - [x] 4c: order ticket, positions, history, rulebook, news calendar
   - [x] Trailing orders (engine, API, portal)
   - [x] News calendar input: monthly files, risk-desk publishing, manual and Bank of Japan windows
-  - [ ] 4d: funded onboarding, wallet, payouts
+  - [x] 4d: funded onboarding, wallet, payouts
 - [ ] Step 5: back office
   - [x] 5a: staff directory, tiers, roles, grants, four eyes, step-up on approvals,
     pass then admin authorisation of payouts, voids and profit removals
