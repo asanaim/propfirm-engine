@@ -16,6 +16,20 @@ from propfirm.rules.calendar import DEFAULT_NEWS_DIR
 _EMAIL = re.compile(r"[^@\s,]+@[^@\s,]+\.[^@\s,]+")
 _NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 _KEY = re.compile(r"[A-Za-z0-9:_.-]{1,200}")
+_OWNER_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")  # a Keycloak user id
+
+
+def _owners(raw: str) -> tuple[tuple[str, str], ...]:
+    """STAFF_OWNERS: `<keycloak id>=<name>` entries separated by `;`."""
+    out = []
+    for entry in raw.split(";"):
+        if not entry.strip():
+            continue
+        subject, sep, name = entry.partition("=")
+        if not sep:
+            raise ConfigError("STAFF_OWNERS: each entry is <keycloak id>=<name>")
+        out.append((subject.strip(), name.strip()))
+    return tuple(out)
 
 
 class ConfigError(ValueError):
@@ -41,6 +55,10 @@ class ServiceConfig:
     news_alert_remind_hours: int = 24  # reminder while a source still fails
     customer_schema: str = "customers"  # CIF, orders, accounts (personal data)
     settings_schema: str = "settings"  # admin setting changes
+    staff_schema: str = "staff"  # the staff directory and grants (employees' data)
+    # the owners, recorded once as T5 (STAFF_OWNERS="<keycloak id>=<name>;...")
+    staff_owners: tuple[tuple[str, str], ...] = ()
+    staff_legacy_roles: bool = True  # Keycloak staff/admin count until the directory is complete
     oidc_issuer: str = ""  # e.g. http://localhost:8080/realms/propfirm (API only)
     oidc_jwks_url: str = ""  # where the API fetches the realm's signing keys
     oidc_audience: str = "propfirm-api"
@@ -65,7 +83,7 @@ class ServiceConfig:
         for name in ("database_url", "valkey_url"):
             if not getattr(self, name):
                 raise ConfigError(f"{name} is required")
-        schemas = ("schema", "read_schema", "customer_schema", "settings_schema")
+        schemas = ("schema", "read_schema", "customer_schema", "settings_schema", "staff_schema")
         for name in schemas:
             if not _NAME.fullmatch(getattr(self, name)):
                 raise ConfigError(f"{name} must match {_NAME.pattern}")
@@ -90,6 +108,12 @@ class ServiceConfig:
         for address in self.news_alert_emails:
             if not _EMAIL.fullmatch(address):
                 raise ConfigError(f"NEWS_ALERT_EMAILS: {address!r} is not an email address")
+        subjects = [subject for subject, _ in self.staff_owners]
+        if len(set(subjects)) != len(subjects):
+            raise ConfigError("STAFF_OWNERS names each login once")
+        for subject, name in self.staff_owners:
+            if not _OWNER_ID.fullmatch(subject) or not 1 <= len(name.strip()) <= 200:
+                raise ConfigError("STAFF_OWNERS: each entry is <keycloak id>=<name>")
         if not self.collector_agent.strip() or len(self.collector_agent) > 200:
             raise ConfigError("PROPFIRM_COLLECTOR_AGENT must be 1 to 200 characters")
         for name in (
@@ -161,6 +185,9 @@ class ServiceConfig:
             news_alert_remind_hours=number("NEWS_ALERT_REMIND_HOURS", 24),
             customer_schema=text("PROPFIRM_CUSTOMER_SCHEMA", "customers"),
             settings_schema=text("PROPFIRM_SETTINGS_SCHEMA", "settings"),
+            staff_schema=text("PROPFIRM_STAFF_SCHEMA", "staff"),
+            staff_owners=_owners(env.get("STAFF_OWNERS", "")),
+            staff_legacy_roles=flag("STAFF_LEGACY_ROLES", True),
             oidc_issuer=text("OIDC_ISSUER", ""),
             oidc_jwks_url=text("OIDC_JWKS_URL", ""),
             oidc_audience=text("OIDC_AUDIENCE", "propfirm-api"),

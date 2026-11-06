@@ -51,6 +51,16 @@ def test_config_defaults_and_overrides() -> None:
     assert config.price_source == "synthetic"
     licensed = ServiceConfig.from_env({**ENV, "PROPFIRM_PRICE_SOURCE": "twelve_data"})
     assert licensed.price_source == "twelve_data"
+    assert (config.staff_schema, config.staff_owners, config.staff_legacy_roles) == (
+        "staff",
+        (),
+        True,
+    )
+    owners = ServiceConfig.from_env(
+        {**ENV, "STAFF_OWNERS": " kc-a = Owner A ; kc-b=Owner B;", "STAFF_LEGACY_ROLES": "0"}
+    )
+    assert owners.staff_owners == (("kc-a", "Owner A"), ("kc-b", "Owner B"))
+    assert owners.staff_legacy_roles is False
 
 
 @pytest.mark.parametrize(
@@ -64,6 +74,11 @@ def test_config_defaults_and_overrides() -> None:
         {**ENV, "PROPFIRM_READ_SCHEMA": "engine"},
         {**ENV, "PROPFIRM_STREAM": "bad key with spaces"},
         {**ENV, "PROPFIRM_PRICE_SOURCE": "tradingview"},
+        {**ENV, "PROPFIRM_STAFF_SCHEMA": "settings"},  # schemas differ
+        {**ENV, "STAFF_OWNERS": "kc-a"},  # no name
+        {**ENV, "STAFF_OWNERS": "kc-a=Owner A;kc-a=Owner B"},  # one login twice
+        {**ENV, "STAFF_OWNERS": "kc a=Owner A"},
+        {**ENV, "STAFF_LEGACY_ROLES": "yes"},
     ],
 )
 def test_bad_settings_are_refused(env: dict[str, str]) -> None:

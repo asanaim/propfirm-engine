@@ -107,6 +107,41 @@ def test_histories_no_valid_payout_has_are_refused(steps: tuple[Step, ...]) -> N
         fold(*steps)
 
 
+PASS_AUTHORISE: Step = ("requested", 1, {"approvals_required": 2, "approval": "pass_authorise"})
+PASSED: Step = ("approved", 2, {"by": "s1", "as": "pass", "tier": 2})
+
+
+def test_a_senior_passes_then_an_admin_authorises() -> None:
+    """[decided 31 Oct 2026]: a T2 or above passes, an admin authorises."""
+    assert fold(PASS_AUTHORISE).next_step == "pass"
+    passed = fold(PASS_AUTHORISE, PASSED)
+    assert (passed.status, passed.next_step, passed.approval) == (
+        "requested",
+        "authorise",
+        "pass_authorise",
+    )
+    done = fold(PASS_AUTHORISE, PASSED, ("approved", 3, {"by": "a1", "as": "authorise"}))
+    assert (done.status, done.approvals, done.next_step) == ("approved", ("s1", "a1"), None)
+    assert fold(*TWO).next_step is None  # requested under the count rule
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        (PASS_AUTHORISE, ("approved", 2, {"by": "a1", "as": "authorise"})),  # no pass yet
+        (PASS_AUTHORISE, ("approved", 2, {"by": "s1"})),  # no step named
+        (PASS_AUTHORISE, PASSED, ("approved", 3, {"by": "s2", "as": "pass"})),  # passed twice
+        (PASS_AUTHORISE, PASSED, ("approved", 3, {"by": "s1", "as": "authorise"})),  # same one
+        (REQUESTED, ("approved", 2, {"by": "s1", "as": "pass"})),  # the count rule has no steps
+        (("requested", 1, {"approvals_required": 3, "approval": "pass_authorise"}),),
+        (("requested", 1, {"approvals_required": 2, "approval": "anyone"}),),
+    ],
+)
+def test_pass_and_authorise_out_of_order_are_refused(steps: tuple[Step, ...]) -> None:
+    with pytest.raises(PayoutError):
+        fold(*steps)
+
+
 def test_an_event_of_another_payout_is_refused() -> None:
     with pytest.raises(PayoutError):
         payout_state(PO, [PayoutEvent("PO00000002", "requested", 1, {"approvals_required": 1})])

@@ -3,7 +3,7 @@ running engine, through the API with signed tokens."""
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import date
@@ -46,6 +46,8 @@ from propfirm.service.projector import HistoryReader
 from propfirm.service.setup import setup_from_policy
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
+from propfirm.staff.directory import Directory, Owner
+from propfirm.staff.store import StaffStore
 from tests.auth_rig import bearer, verifier
 
 pytestmark = pytest.mark.integration
@@ -72,6 +74,7 @@ class Platform:
     notifications: Notifications | None = None
     mailer: SandboxMailer | None = None
     clock: Callable[[], int] = now_ms  # the API's clock; logins happen "now" on it
+    staff: Directory | None = None
 
     async def call(
         self,
@@ -104,6 +107,8 @@ async def platform(
     didit_webhook_secret: str | None = None,
     clock: Callable[[], int] = now_ms,
     payout_provider: PayoutProvider | None = None,
+    owners: Sequence[Owner] = (),
+    legacy_roles: bool = True,
 ) -> AsyncIterator[Platform]:
     """`funded`: funded orders wait for funded onboarding (sandbox identity
     check), as the API process runs it; otherwise they open at payment."""
@@ -115,6 +120,7 @@ async def platform(
         read_schema=f"{schema}_r",
         customer_schema=f"{schema}_c",
         settings_schema=f"{schema}_s",
+        staff_schema=f"{schema}_st",
         stream=f"test:inputs:{uuid.uuid4().hex}",
         block_ms=50,
         publish_ms=1,
@@ -177,6 +183,13 @@ async def platform(
         cases=cases,
         wait_s=wait_s,
     )
+    staff = Directory(
+        await StaffStore.open(pool, config.staff_schema),
+        settings,
+        owners,
+        legacy_roles=legacy_roles,
+    )
+    await staff.bootstrap(clock())
     deps = Deps(
         live=live,
         history=HistoryReader(pool, config.read_schema),
@@ -190,6 +203,7 @@ async def platform(
         onboarding=onboarding,
         cases=cases,
         payouts=payouts,
+        staff=staff,
         didit_webhook_secret=didit_webhook_secret,
         sandbox=sandbox,
         country_header="X-Country",
@@ -236,12 +250,19 @@ async def platform(
             notifications,
             mailer,
             clock,
+            staff,
         )
     finally:
         await stop_engine()
         await api.aclose()
         async with pool.acquire() as conn:
-            for s in (config.read_schema, config.customer_schema, config.settings_schema):
+            schemas = (
+                config.read_schema,
+                config.customer_schema,
+                config.settings_schema,
+                config.staff_schema,
+            )
+            for s in schemas:
                 await conn.execute(f"DROP SCHEMA IF EXISTS {s} CASCADE")
         await pool.close()
         await client.delete(config.stream)

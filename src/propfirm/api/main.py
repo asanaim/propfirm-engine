@@ -80,6 +80,8 @@ from propfirm.service.projector import HistoryReader
 from propfirm.settings.newsdesk import Author, NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
+from propfirm.staff.directory import Directory, Owner
+from propfirm.staff.store import StaffStore
 
 RECONCILE_S = 10.0
 LIFECYCLE_S = 1.0
@@ -188,6 +190,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             load_calendars(config.news_dir), NewsStore(pool, config.settings_schema), gateway
         )
         cases = Casework(case_store, customers, settings, gateway)
+        staff = Directory(
+            await StaffStore.open(pool, config.staff_schema),
+            settings,
+            [Owner(subject, name) for subject, name in config.staff_owners],
+            legacy_roles=config.staff_legacy_roles,
+        )
+        if added := await staff.bootstrap(now_ms()):
+            log.warning("owners recorded in the staff directory: %s", added)
+        if not config.staff_owners:
+            log.warning("STAFF_OWNERS is empty: no owner in the staff directory")
         checkout = None
         if config.sandbox:
             checkout = Checkout(
@@ -298,6 +310,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             cases=cases,
             payouts=payouts,
             news=news,
+            staff=staff,
             source_alerts=SourceAlerts(SourceStore(pool, config.settings_schema), None, ()),
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,

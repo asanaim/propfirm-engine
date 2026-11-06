@@ -45,6 +45,12 @@ first_after_days = 14          # the 14th trading day after the first trade, as 
 # replaces the 15th and last day of the month (D17), 30 Oct 2026.
 interval_days = 14             # a later payout no sooner than this after the last
 approvals_required = 2         # people who must approve each payout
+# Who approves [decided 31 Oct 2026]: a senior staff member (T2 or above,
+# payouts role) passes it, then an admin (T4) authorises it; never one's own,
+# never the same person twice, and no amount is approved below admin. The
+# fee refund paid with a payout follows the same rule. "count": any
+# `approvals_required` employees (the rule before).
+approval = "pass_authorise"
 # D22, D23, confirmed 30 Oct 2026. FTMO (reward on request 14 days from the
 # first trading day; account in profit with no open positions or pending
 # orders) and FundedNext (Stellar standard rewards) set no minimum trading
@@ -172,6 +178,19 @@ template = "funded-agreement-v2"
 firm_name = ""
 governing_law = ""
 account_disclosure = "simulated"  # D1: "simulated" or "live"
+
+[staff]
+# The back office (staff spec, step 5a). Every approval (payouts, voids and
+# profit removals, funded reviews, identity reviews, grants, settings, news
+# cancels) needs a second factor entered at most `step_up_minutes` before
+# (step-up, RFC 9470; as the trader's payout request).
+approvals_need_mfa = true
+step_up_minutes = 5            # 0: any login that used MFA
+# Apprentices [decided 31 Oct 2026]: a term of 3 to 6 months, set for each.
+apprentice_min_months = 3
+apprentice_max_months = 6
+power_max_days = 90            # an admin power granted below T4 ends within this
+acting_max_days = 30           # acting cover ends within this
 
 [cases.sla_hours]
 # Integrity, fraud and compliance cases (M16, M17, M20): hours from an alert

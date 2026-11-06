@@ -15,6 +15,8 @@ from propfirm.customers.cases import (
     CaseState,
     case_state,
     confirmed_actions,
+    needs_authorisation,
+    proposed_actions,
     validate_actions,
 )
 from propfirm.customers.payouts import FAIL, PASS, eligibility
@@ -157,6 +159,33 @@ def test_histories_no_valid_case_has_are_refused(steps: tuple[Step, ...]) -> Non
 def test_invalid_actions_are_refused(actions: list[dict[str, Any]]) -> None:
     with pytest.raises(CaseError):
         validate_actions(actions)
+
+
+def test_a_void_or_profit_removal_needs_an_admins_authorisation() -> None:
+    """[decided 31 Oct 2026]: a T2 or above passes (proposes), an admin
+    authorises; a block alone is confirmed by a T2 or above."""
+    assert needs_authorisation([VOID]) and needs_authorisation([REMOVE, BLOCK])
+    assert not needs_authorisation([BLOCK])
+    with pytest.raises(CaseError):
+        fold(OPENED, ALERT, PROPOSED, ("confirmed", {"by": "s2", "as": "confirm"}))
+    authorised = fold(OPENED, ALERT, PROPOSED, ("confirmed", {"by": "a1", "as": "authorise"}))
+    assert authorised.status == "actioning"
+    block: Step = ("proposed", {"by": "s1", "actions": [BLOCK]})
+    assert fold(OPENED, block, ("confirmed", {"by": "s2", "as": "confirm"})).status == "actioning"
+    with pytest.raises(CaseError):
+        fold(OPENED, block, ("confirmed", {"by": "s2", "as": "approve"}))
+    # confirmations recorded before the rule carry no step and still replay
+    assert fold(OPENED, ALERT, PROPOSED, ("confirmed", {"by": "s2"})).status == "actioning"
+
+
+def test_the_actions_waiting_for_confirmation() -> None:
+    def events(*steps: Step) -> list[CaseEvent]:
+        return [CaseEvent(CAS, k, n, d) for n, (k, d) in enumerate(steps)]
+
+    assert proposed_actions(events(OPENED, PROPOSED)) == [REMOVE, VOID, BLOCK]
+    assert proposed_actions(events(OPENED, PROPOSED, ("rejected", {"by": "s2"}))) == []
+    assert proposed_actions(events(OPENED, PROPOSED, ALERT)) == []  # new evidence
+    assert proposed_actions(events(OPENED, PROPOSED, ("confirmed", {"by": "a1"}))) == []
 
 
 def test_the_actions_in_force_are_the_confirmed_ones() -> None:

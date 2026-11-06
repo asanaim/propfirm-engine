@@ -95,6 +95,11 @@ def test_shipped_policy_is_the_confirmed_configuration() -> None:
     assert SHIPPED.payouts.minimum_cents == 5_000 and SHIPPED.payouts.approvals_required == 2
     assert SHIPPED.scaling.max_allocation_cents == 40_000_000
     assert SHIPPED.news.before_ms == SHIPPED.news.after_ms == 120_000
+    assert SHIPPED.payouts.approval == "pass_authorise"  # decided 31 Oct 2026
+    staff = SHIPPED.staff
+    assert (staff.approvals_need_mfa, staff.step_up_minutes) == (True, 5)
+    assert (staff.limits.apprentice_min_months, staff.limits.apprentice_max_months) == (3, 6)
+    assert (staff.limits.power_max_days, staff.limits.acting_max_days) == (90, 30)
 
 
 def test_numbers_are_editable() -> None:
@@ -174,6 +179,12 @@ def _drop(path: list[Any]) -> Callable[[dict[str, Any]], None]:
         _set(["trading", "gap_threshold_ms_by_symbol"], {"EURUSD": 5000}),
         _set(["payouts", "interval_days"], 0),
         _drop(["payouts", "interval_days"]),
+        _set(["payouts", "approval"], "anyone"),
+        _set(["payouts", "approvals_required"], 3),  # pass_authorise is two people
+        _drop(["staff"]),
+        _set(["staff", "apprentice_min_months"], 7),  # above the maximum
+        _set(["staff", "power_max_days"], 0),
+        _set(["staff", "approvals_need_mfa"], 1),
         _set(["unexpected"], 1),
     ],
 )

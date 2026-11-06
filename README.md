@@ -140,8 +140,10 @@ npm run typecheck && npm run lint && npm run build
 |---|---|---|
 | Public | none | products, sizes, prices, split, discounts; each stage's profit target, daily loss limit, drawdown limit, trading days and consistency rule; minimum age |
 | Trader (portal) | `trader` | own CIF, orders and accounts (each account shows its own target, limits and floors); buys; trades own accounts; own payout wallet and payouts |
-| Employee (back office) | `staff` | every account, its history and inputs; cases; approves or denies payouts (never their own); trades none; no settings |
-| Admin (back office) | `admin` | what an employee sees, plus the admin-only settings below |
+| Employee (back office) | directory tier T1–T3, or Keycloak `staff` (= T2) | every account, its history and inputs; cases; passes or denies payouts (T2+, never their own); trades none; no settings |
+| Admin (back office) | directory T4–T5, or Keycloak `admin` (= T4) | what an employee sees; authorises payouts, voids and profit removals; the admin-only settings below |
+
+What each employee may do comes from the staff directory (next section).
 
 Admin-only settings, changed through the API (each change is recorded with
 who, when and why: `GET /admin/settings/changes`):
@@ -380,6 +382,55 @@ The payout settings (D22, D23) are in `[payouts]` of the policy: closed
 balance, flat at request, and, as FTMO and FundedNext, no minimum trading
 days and no maximum.
 
+## Staff directory and approvals (back office 5a)
+
+Access is a tier, functional roles and time-limited grants, each approved
+by someone else (staff spec, 31 Oct 2026). Tiers: T0 Apprentice, T1
+Associate, T2 Specialist, T3 Team lead, T4 Admin, T5 Owner. Roles:
+`support`, `kyc`, `risk`, `payouts`, `integrity`, `product`, `marketing`,
+`it`; below T4 a permission needs its role (`propfirm.staff.model`).
+
+| Change | Asked by | Approved by | Ends |
+|---|---|---|---|
+| tier (promotion) | T3+ | T4+; T4 or T5: two owners | when another tier is approved |
+| role | T3+ | T4+ | optional date |
+| admin power (`settings.view`, `settings.change`, `news.cancel`) for T3 or below | T3+ | a second admin, or an owner if asked below T4 | required, at most 90 days |
+| acting cover (up to the asker's tier, T3 at most) | T3+ | T4+ | required, at most 30 days |
+
+Nobody asks for, approves or revokes their own access, and the asker never
+approves. Grants end on their own. A leaver (`POST /staff/members/{sid}/leave`,
+by a higher tier) has no access at once and every grant ends; disable the
+Keycloak user too. Owners are recorded once at start-up from
+`STAFF_OWNERS="<keycloak id>=Owner A;<keycloak id>=Owner B"`; an owner's
+tier is never changed through the API.
+
+Apprentices (`APP00000001`, their own login): a T2 or T3 mentor, a term of
+3 to 6 months (`ends_at`), T0 with no permissions until masked views exist
+(5c). The mentor recommends (`/recommend`); an admin other than the mentor
+graduates them (`/graduate` with the new staff login): a new T1 member
+linked to the apprentice record.
+
+Payouts, refunds and voids [decided 31 Oct 2026]: a T2 or above passes
+(`payouts` role for payouts, `integrity` for voids), an admin authorises; no
+amount is approved below admin. The fee refund is paid with a payout and
+follows it. Every approval (payouts, voids and profit removals, funded and
+identity reviews, grants, graduation, settings, news cancels) needs a second
+factor entered in the last 5 minutes (`[staff]` in the policy; 401
+`mfa_required` or `reauth_required`, RFC 9470).
+
+Endpoints: `GET /staff/me` (access, grants, what waits for my approval),
+`GET|POST /staff/members`, `GET /staff/members/{sid}`,
+`POST /staff/members/{sid}/move|leave|recommend|graduate`,
+`GET|POST /staff/grants`, `POST /staff/grants/{grt}/approve|deny|cancel|revoke`.
+Records are append-only (`staff.member_events`, `staff.grant_events`).
+A login with no directory record keeps its Keycloak role (`staff` T2 with
+every role, `admin` T4) until `STAFF_LEGACY_ROLES=0`.
+
+Locally: the development users' password-grant tokens (`config/keycloak`)
+carry no second factor, so their approvals answer 401. Sign in through the
+portal with a one-time code set up, or point `PROPFIRM_POLICY` at a copy of
+the policy with `approvals_need_mfa = false` (development only).
+
 ## Payouts
 
 USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
@@ -403,9 +454,10 @@ USDT on TRON (TRC-20) to the trader's wallet (M06, M19), `PO00000001`:
    denied, cancelled, failed) the account takes no new orders
    (`trading_during_payout = "paused"`, 409 `payout_pending`). The trader
    may cancel until it is fully approved (`POST /me/payouts/{po}/cancel`).
-3. Approval: `POST /staff/payouts/{po}/approve` by `approvals_required` (2)
-   different employees, never on their own customer record; one `deny`
-   ends it. `GET /staff/payouts`, `GET /staff/payouts/{po}` (wallet and
+3. Approval: `POST /staff/payouts/{po}/approve`, twice: a pass by a T2
+   or above (`payouts` role), then the authorisation by an admin, another
+   person (`approval = "pass_authorise"`, decided 31 Oct 2026); never on
+   their own customer record; one `deny` (T2+) ends it. `GET /staff/payouts`, `GET /staff/payouts/{po}` (wallet and
    history).
 4. Once approved (the API's background round, every second): eligibility
    is computed again;
@@ -512,5 +564,10 @@ or rules uses floating point.
   - [x] News calendar input: monthly files, risk-desk publishing, manual and Bank of Japan windows
   - [ ] 4d: funded onboarding, wallet, payouts
 - [ ] Step 5: back office
+  - [x] 5a: staff directory, tiers, roles, grants, four eyes, step-up on approvals,
+    pass then admin authorisation of payouts, voids and profit removals
+  - [ ] 5a-2: maker-checker on admin settings (a second admin)
+  - [ ] 5b: staff page (to-do, notifications, messages); 5c: apprentices' masked views
+    and training; 5d: oversight; 5e: back-office screens
 - [ ] Step 6: Twelve Data connector and 12-day trial (C10)
 - [ ] Step 7: staging, backups and restore drill, security scans

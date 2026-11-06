@@ -15,7 +15,7 @@ from typing import Any, Protocol
 from propfirm.customers.casework import Casework, Submitter
 from propfirm.customers.notifications import wallet_notice
 from propfirm.customers.onboarding_store import OnboardingStore
-from propfirm.customers.payout_flow import tron_address_valid
+from propfirm.customers.payout_flow import payout_state, tron_address_valid
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, PayoutStore, Wallet
 from propfirm.customers.payouts import (
     FAIL,
@@ -187,6 +187,11 @@ class Payouts:
             "mfa": mfa,
             "auth_time": auth_time,
             "approvals_required": policy.payouts.approvals_required,
+            **(
+                {"approval": "pass_authorise"}
+                if policy.payouts.approval == "pass_authorise"
+                else {}
+            ),
             "rsv_id": live["rules"]["rsv_id"],
             "trading_during_payout": policy.payouts.trading_during_payout,
             "eligibility": eligibility_json(e),
@@ -213,8 +218,30 @@ class Payouts:
 
     # --- employees --------------------------------------------------------------------
 
-    async def approve(self, po: str, staff: str, reason: str, ts: int) -> PayoutRecord:
-        return await self._store.decide(po, "approved", staff, ts, {"reason": reason})
+    async def next_step(self, po: str) -> str | None:
+        """pass or authorise when the payout waits for that step; None when
+        the payout counts approvals (or is not waiting)."""
+        if await self._store.payout(po) is None:
+            raise PayoutRefused("unknown", f"no payout {po}")
+        return payout_state(po, await self._store.history(po)).next_step
+
+    async def approve(
+        self,
+        po: str,
+        staff: str,
+        reason: str,
+        ts: int,
+        step: str | None = None,
+        tier: int | None = None,
+    ) -> PayoutRecord:
+        """`step` (pass or authorise) and the employee's tier are recorded
+        with the approval; the history refuses a step out of order."""
+        detail: dict[str, Any] = {"reason": reason}
+        if step is not None:
+            detail["as"] = step
+        if tier is not None:
+            detail["tier"] = tier
+        return await self._store.decide(po, "approved", staff, ts, detail)
 
     async def deny(self, po: str, staff: str, reason: str, ts: int) -> PayoutRecord:
         return await self._store.decide(po, "denied", staff, ts, {"reason": reason})

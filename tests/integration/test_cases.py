@@ -173,11 +173,17 @@ def test_actions_need_a_second_employee_and_take_effect(
                 body={"outcome": "actioned", "actions": actions, "reason": "latency arbitrage"},
             )
             assert proposed.json()["status"] == "decision_pending", proposed.text
-            mine = await staff(p, "POST", f"{url}/confirm", body={"reason": "agree"})
+            agree = {"reason": "agree"}
+            senior = await staff(p, "POST", f"{url}/confirm", "staff-2", agree)
+            assert (senior.status_code, senior.json()["detail"]["permission"]) == (
+                403,
+                "case.authorise",
+            )  # a void and a profit removal: an admin authorises [decided 31 Oct 2026]
+            mine = await p.call("POST", f"{url}/confirm", "staff-1", agree, ("admin",))
             assert mine.status_code == 409  # not the proposer
             assert (await p.call("GET", "/me")).json()["status"] == "registered"  # nothing yet
 
-            confirmed = await staff(p, "POST", f"{url}/confirm", "staff-2", {"reason": "agree"})
+            confirmed = await p.call("POST", f"{url}/confirm", "admin-1", agree, ("admin",))
             assert (confirmed.json()["status"], confirmed.json()["outcome"]) == (
                 "closed",
                 "actioned",
@@ -195,6 +201,7 @@ def test_actions_need_a_second_employee_and_take_effect(
             history = (await staff(p, "GET", url)).json()["history"]
             kinds = [h["kind"] for h in history]
             assert kinds[-5:] == ["confirmed", "applied", "applied", "applied", "closed"]
+            assert history[-5]["detail"]["as"] == "authorise"
             void = next(h for h in history if h["kind"] == "applied" and h["detail"]["index"] == 1)
             assert void["detail"]["result"]["voided"] is True
             assert void["detail"]["result"]["journal_seq"] > 0
