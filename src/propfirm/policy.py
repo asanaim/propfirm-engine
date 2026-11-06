@@ -498,9 +498,12 @@ def _staff(t: _Table) -> StaffPolicy:
         power_max_days=t.integer("power_max_days", 1),
         acting_max_days=t.integer("acting_max_days", 1),
         sections_approval=t.text("sections_approval"),
+        home_proposer_min_level=t.integer("home_proposer_min_level"),
     )
     if limits.sections_approval not in SECTIONS_APPROVALS:
         raise PolicyError(f"{t.name('sections_approval')} must be one of {SECTIONS_APPROVALS}")
+    if not 0 <= limits.home_proposer_min_level <= 3:  # Apprentice to Lead
+        raise PolicyError(f"{t.name('home_proposer_min_level')} must be 0 to 3")
     policy = StaffPolicy(
         approvals_need_mfa=t.boolean("approvals_need_mfa"),
         step_up_minutes=t.integer("step_up_minutes"),

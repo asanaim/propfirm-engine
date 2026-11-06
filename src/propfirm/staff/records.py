@@ -84,14 +84,28 @@ class Limits:
     apprentice_max_months: int = 6
     power_max_days: int = 90
     acting_max_days: int = 30
-    # who assigns a section level (a "charge"): "owner" = an admin proposes
-    # and an owner approves, and for an admin or owner one owner proposes and
-    # another approves [decided 6 Nov 2026]; "admin" = the section's lead (or
-    # an admin) asks and an admin approves (the rule of 5 Nov)
-    sections_approval: str = "owner"
+    # who assigns a section (a level, up to the section's charge, or a role):
+    # "home_section" [decided 6 Nov 2026, clarified]: in the member's own
+    # section (their team) an employee of that section proposes and an admin
+    # approves; in another section an admin proposes and an owner approves;
+    # for an admin or owner, one owner proposes and the other approves.
+    # "owner": every section as another section. "admin": the section's lead
+    # (or an admin) asks, an admin approves (the rule of 5 Nov).
+    sections_approval: str = "home_section"
+    home_proposer_min_level: int = 1  # the proposer's level in the home section
 
 
-SECTIONS_APPROVALS = ("owner", "admin")
+SECTIONS_APPROVALS = ("home_section", "owner", "admin")
+
+
+def section_of(grant: str, value: int | str) -> str:
+    """The section a level or role grant is in."""
+    return parse_level(value)[0] if grant == "level" else str(value)
+
+
+def home_section(member: Member) -> str | None:
+    """The member's own section: their team, when it is a section."""
+    return member.team if member.team in ROLES else None
 
 
 # --- members --------------------------------------------------------------------------
@@ -384,7 +398,14 @@ def check_request(
     now: int,
     limits: Limits,
 ) -> None:
-    _need(actor.has("staff.manage"), "forbidden", "requesting a grant needs T3 or above")
+    home_ask = (
+        limits.sections_approval == "home_section"
+        and grant in ("level", "role")
+        and isinstance(value, str)
+        and _is_home(member, member_access, grant, value)
+    )
+    if not home_ask:  # in the home section an employee of it proposes (below)
+        _need(actor.has("staff.manage"), "forbidden", "requesting a grant needs T3 or above")
     _need(actor.subject != member.subject, "own_access", "nobody requests their own access")
     _need(member.active(now), "invalid", f"{member.sid} is not active")
     _need(grant in GRANTS, "invalid", f"grant must be one of {GRANTS}")
@@ -424,8 +445,8 @@ def check_request(
             )
         case "role":
             _need(value in ROLES, "invalid", f"role must be one of {ROLES}")
-            if limits.sections_approval == "owner":  # a role is a section too
-                _assigner(actor_tier, member_access)
+            if limits.sections_approval != "admin":  # a role is a section too
+                _assigner(actor, member, member_access, "role", str(value), limits)
         case "level":
             section, level = parse_level(value)
             allowed = {"apprentice": (0, 0), "contractor": (1, 2), "staff": (1, 3)}[member.kind]
@@ -434,8 +455,8 @@ def check_request(
                 "invalid",
                 f"a {member.kind} has a section level T{allowed[0]} to T{allowed[1]}",
             )
-            if limits.sections_approval == "owner":
-                _assigner(actor_tier, member_access)
+            if limits.sections_approval != "admin":
+                _assigner(actor, member, member_access, "level", str(value), limits)
             else:  # "admin": the section's lead asks (or an admin); an admin approves
                 mine = actor.level(section)
                 _need(
@@ -473,17 +494,44 @@ def _admin_or_owner(a: Access) -> bool:
     return a.tier is not None and a.tier >= Tier.ADMIN
 
 
-def _assigner(actor_tier: int, member_access: Access) -> None:
-    """Who proposes a section (a level or a role) under `"owner"`."""
+def _is_home(member: Member, member_access: Access, grant: str, value: int | str) -> bool:
+    """A section in the member's own section, for a member below admin."""
+    if _admin_or_owner(member_access):
+        return False
+    try:
+        section = section_of(grant, value)
+    except StaffRefused:
+        return False
+    return section == home_section(member)
+
+
+def _assigner(
+    actor: Access, member: Member, member_access: Access, grant: str, value: str, limits: Limits
+) -> None:
+    """Who proposes a section (a level or a role), "home_section" or "owner"."""
+    actor_tier = _tier(actor)
     if _admin_or_owner(member_access):
         _need(
             actor_tier == Tier.OWNER,
             "forbidden",
             "an owner proposes a section for an admin; another owner approves",
         )
+    elif limits.sections_approval == "home_section" and _is_home(
+        member, member_access, grant, value
+    ):
+        section = section_of(grant, value)
+        mine = actor.level(section)
+        _need(
+            mine is not None and mine >= limits.home_proposer_min_level,
+            "forbidden",
+            f"in {section} (their own section) an employee of {section} proposes; "
+            "an admin approves",
+        )
     else:
         _need(
-            actor_tier >= Tier.ADMIN, "forbidden", "an admin proposes a section; an owner approves"
+            actor_tier >= Tier.ADMIN,
+            "forbidden",
+            "a section other than the member's own: an admin proposes, an owner approves",
         )
 
 
@@ -506,7 +554,10 @@ def check_approval(
             member_access.tier is not None and member_access.tier >= Tier.ADMIN
         ):
             _need(tier == Tier.OWNER, "forbidden", "an admin's or owner's tier needs two owners")
-        case "level" | "role" if limits.sections_approval == "owner":
+        case "level" | "role" if limits.sections_approval == "owner" or (
+            limits.sections_approval == "home_section"
+            and not _is_home(member, member_access, grant.grant, grant.value)
+        ):
             _need(tier == Tier.OWNER, "forbidden", "an owner approves a section assignment")
         case "power" if (grant.requester_tier or 0) < Tier.ADMIN:
             _need(tier == Tier.OWNER, "forbidden", "an admin power needs two admins or an owner")

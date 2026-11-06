@@ -265,6 +265,12 @@ class Directory:
                 raise StaffRefused("forbidden", "nobody moves someone of a higher tier")
             if not member.active(now):
                 raise StaffRefused("not_allowed", f"{sid} is not active")
+            # a new own section changes who approves sections (home_section):
+            # an admin moves someone between sections, never a lead
+            sections = (await self._limits()).sections_approval == "home_section"
+            changes = team != member.team and (team in ROLES or member.team in ROLES)
+            if sections and changes and (me.tier is None or me.tier < Tier.ADMIN):
+                raise StaffRefused("forbidden", "moving someone to another section needs an admin")
             if lead is not None:
                 new_lead = await self._member(ops, lead)
                 if not new_lead.active(now) or lead == sid:
@@ -349,7 +355,7 @@ class Directory:
                 note = f"carried over from {sid}: {p.note}"
                 await ops.record_training(replace(p, sid=new_sid, note=note))
             given: list[tuple[str, int | str]] = [("level", f"{s}:1") for s in sections]
-            owners_assign = (await self._limits()).sections_approval == "owner"
+            owners_assign = (await self._limits()).sections_approval != "admin"
             for grant, value in given or [("tier", int(Tier.ASSOCIATE))]:
                 grt = await ops.new_grt()
                 requested = {
@@ -361,7 +367,8 @@ class Directory:
                     "reason": f"graduation of {sid}",
                 }
                 if grant == "level" and owners_assign:
-                    # the graduating admin proposes the sections; an owner approves
+                    # the graduating admin proposes the sections; another admin
+                    # (own section) or an owner (another section) approves
                     requested["by"] = actor.subject
                     requested["tier"] = int(me.tier or 0)
                     await ops.grant_event(grt, "requested", now, requested)
