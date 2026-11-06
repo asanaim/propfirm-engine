@@ -186,7 +186,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         if fixed:
             log.warning("cached status differed from the history and was rebuilt: %s", fixed)
-        settings = Settings(policy, await SettingsStore.open(pool, config.settings_schema), gateway)
+        settings_store = await SettingsStore.open(pool, config.settings_schema)
+        settings = Settings(policy, settings_store, gateway, proposals=settings_store)
         news = NewsDesk(
             load_calendars(config.news_dir), NewsStore(pool, config.settings_schema), gateway
         )

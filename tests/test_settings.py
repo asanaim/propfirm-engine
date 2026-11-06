@@ -3,6 +3,7 @@ service, and the admin-only API views."""
 
 import asyncio
 import copy
+import dataclasses
 import json
 import tomllib
 from collections.abc import Sequence
@@ -30,7 +31,7 @@ from propfirm.settings.overlay import (
     to_json,
 )
 from propfirm.settings.service import Settings, SettingsError
-from propfirm.settings.store import ChangeStatus
+from propfirm.settings.store import ChangeStatus, Proposal, ProposalDecided
 from tests.auth_rig import FakeCustomers, bearer, verifier
 
 BASE = load_policy()
@@ -191,6 +192,58 @@ class MemoryRecords:
         return out
 
 
+class MemoryProposals:
+    """Maker-checker proposals, recording approved changes in `records`."""
+
+    def __init__(self, records: MemoryRecords) -> None:
+        self.records = records
+        self.items: dict[int, Proposal] = {}
+
+    async def propose(
+        self, setting: Setting, author: str, author_email: str | None, reason: str, ts: int
+    ) -> Proposal:
+        pid = len(self.items) + 1
+        self.items[pid] = Proposal(
+            pid, setting, author, author_email, reason, ts, None, None, None, None, None
+        )
+        return self.items[pid]
+
+    async def proposal(self, pid: int) -> Proposal | None:
+        return self.items.get(pid)
+
+    async def proposals(self, open_only: bool = True, limit: int = 100) -> Sequence[Proposal]:
+        found = [p for p in self.items.values() if not open_only or p.decision is None]
+        return sorted(found, key=lambda p: -p.id)[:limit]
+
+    async def decide(self, pid: int, decision: str, by: str, reason: str, ts: int) -> None:
+        p = self.items[pid]
+        if p.decision is not None:
+            raise ProposalDecided("decided")
+        self.items[pid] = dataclasses.replace(
+            p, decision=decision, decided_by=by, decision_reason=reason, decided_at=ts
+        )
+
+    async def approve(
+        self, proposal: Proposal, approver: str, reason: str, ts: int, *, applied: bool
+    ) -> SettingChange:
+        await self.decide(proposal.id, "approved", approver, reason, ts)
+        made = SettingChange(
+            len(self.records.changes) + 1,
+            proposal.setting,
+            proposal.author,
+            proposal.author_email,
+            proposal.reason,
+            ts,
+            approver,
+            proposal.id,
+        )
+        self.records.changes.append(made)
+        if applied:
+            self.records.applied[made.id] = (None, ts)
+        self.items[proposal.id] = dataclasses.replace(self.items[proposal.id], change_id=made.id)
+        return made
+
+
 class Engine:
     """Answers AddRuleSet like the engine; `down` leaves it unanswered."""
 
@@ -313,8 +366,17 @@ def api(
     engine: Engine | None = None,
     records: MemoryRecords | None = None,
     signed_in: bool = True,
+    proposals: MemoryProposals | None = None,
+    user: str = "admin-1",
 ) -> httpx.Response:
-    settings = Settings(BASE, records or MemoryRecords(), engine or Engine())
+    """Without `proposals`, the policy runs without maker-checker (the
+    direct path); with them, as shipped (a second admin approves)."""
+    base = BASE
+    if proposals is None:
+        staff = dataclasses.replace(BASE.staff, settings_need_second_admin=False)
+        base = dataclasses.replace(BASE, staff=staff)
+    records = records if records is not None else MemoryRecords()
+    settings = Settings(base, records, engine or Engine(), proposals=proposals)
     deps = Deps(
         None,  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
@@ -326,7 +388,7 @@ def api(
         clock=lambda: T0,
     )
     app = create_app(deps)
-    headers = bearer("admin-1", roles) if signed_in else {}
+    headers = bearer(user, roles) if signed_in else {}
 
     async def go() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
@@ -387,6 +449,8 @@ def test_admin_changes_gating_and_the_history_shows_who_and_why() -> None:
         "status": "applied",
         "applied_at": T0,
         "journal_seq": None,
+        "approved_by": None,
+        "proposal_id": None,
     }
     assert api("GET", "/admin/access", records=records).json()["country_gating"] is True
     (entry,) = api("GET", "/admin/settings/changes", records=records).json()
@@ -454,6 +518,103 @@ def test_funded_limits_take_no_profit_target() -> None:
     changed = api("PUT", "/admin/products/one-step/stages/funded/limits", funded)
     assert changed.status_code == 200, changed.text
     assert changed.json()["rsv_id"] == "one-step-funded-v1-a1"
+
+
+# --- maker-checker: a second admin approves every settings change ----------------------
+
+
+def test_shipped_policy_needs_a_second_admin_for_settings() -> None:
+    assert BASE.staff.settings_need_second_admin is True
+    assert BASE.staff.proposal_expiry_hours == 72
+
+
+def test_a_gating_change_waits_for_a_second_admin() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    proposed = api("PUT", "/admin/access/country-gating", GATING, records=records,
+                   proposals=proposals)  # fmt: skip
+    assert proposed.status_code == 200, proposed.text
+    body = proposed.json()
+    assert body["status"] == "proposed" and body["proposal"]["status"] == "open"
+    assert body["proposal"]["expires_at"] == T0 + 72 * 3_600_000
+    assert records.changes == []  # nothing in force yet
+    assert (
+        api("GET", "/admin/access", records=records, proposals=proposals).json()["country_gating"]
+        is False
+    )
+    url = "/admin/settings/proposals/1"
+    own = api("POST", f"{url}/approve", {"reason": "ok"}, records=records, proposals=proposals)
+    assert (own.status_code, own.json()["detail"]["code"]) == (403, "four_eyes")
+    approved = api("POST", f"{url}/approve", {"reason": "checked"}, records=records,
+                   proposals=proposals, user="admin-2")  # fmt: skip
+    assert approved.status_code == 200, approved.text
+    change = approved.json()["change"]
+    assert (change["author"], change["approved_by"], change["proposal_id"]) == (
+        "admin-1",
+        "admin-2",
+        1,
+    )
+    assert (
+        api("GET", "/admin/access", records=records, proposals=proposals).json()["country_gating"]
+        is True
+    )
+    again = api("POST", f"{url}/approve", {"reason": "x"}, records=records, proposals=proposals,
+                user="admin-3")  # fmt: skip
+    assert (again.status_code, again.json()["detail"]["code"]) == (409, "decided")
+
+
+def test_stage_limits_are_checked_when_proposed_and_published_when_approved() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    bad = api("PUT", LIMITS_URL, {**LIMITS, "daily_loss_percent": "6"}, records=records,
+              proposals=proposals)  # fmt: skip
+    assert bad.status_code == 422 and proposals.items == {}
+    proposed = api("PUT", LIMITS_URL, LIMITS, records=records, proposals=proposals)
+    assert proposed.status_code == 202 and proposed.json()["status"] == "proposed"
+    approved = api("POST", "/admin/settings/proposals/1/approve", {"reason": "ok"},
+                   records=records, proposals=proposals, user="admin-2")  # fmt: skip
+    assert approved.status_code == 200, approved.text
+    assert (approved.json()["status"], approved.json()["rsv_id"]) == (
+        "applied",
+        "one-step-s1-v2-a1",
+    )
+
+
+def test_the_maker_withdraws_another_admin_rejects_and_staff_never_approve() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    for _ in range(2):
+        api("PUT", "/admin/access/country-gating", GATING, records=records, proposals=proposals)
+    kw: dict[str, Any] = {"records": records, "proposals": proposals}
+    by_other = api("POST", "/admin/settings/proposals/1/withdraw", {"reason": "x"}, user="admin-2",
+                   **kw)  # fmt: skip
+    assert (by_other.status_code, by_other.json()["detail"]["code"]) == (403, "not_maker")
+    withdrawn = api("POST", "/admin/settings/proposals/1/withdraw", {"reason": "typo"}, **kw)
+    assert withdrawn.json()["status"] == "withdrawn"
+    own_reject = api("POST", "/admin/settings/proposals/2/reject", {"reason": "x"}, **kw)
+    assert own_reject.json()["detail"]["code"] == "four_eyes"
+    staff = api("POST", "/admin/settings/proposals/2/approve", {"reason": "x"}, roles=("staff",),
+                user="staff-1", **kw)  # fmt: skip
+    assert staff.status_code == 403
+    rejected = api("POST", "/admin/settings/proposals/2/reject", {"reason": "no"}, user="admin-2",
+                   **kw)  # fmt: skip
+    assert (rejected.json()["status"], rejected.json()["decided_by"]) == ("rejected", "admin-2")
+    assert api("GET", "/admin/settings/proposals", **kw).json() == []
+    every = api("GET", "/admin/settings/proposals?open=false", **kw).json()
+    assert [p["status"] for p in every] == ["rejected", "withdrawn"]
+    assert records.changes == []
+
+
+def test_an_expired_proposal_is_not_approved() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    asyncio.run(proposals.propose(CountryGating(True, frozenset({"BD"})), "admin-1", None, "r",
+                                  T0 - 72 * 3_600_000 - 1))  # fmt: skip
+    late = api("POST", "/admin/settings/proposals/1/approve", {"reason": "x"}, records=records,
+               proposals=proposals, user="admin-2")  # fmt: skip
+    assert (late.status_code, late.json()["detail"]["code"]) == (409, "expired")
+    listed = api("GET", "/admin/settings/proposals", records=records, proposals=proposals).json()
+    assert listed[0]["status"] == "expired"
 
 
 # --- the realm: each app's tokens carry only its view's roles ----------------------------

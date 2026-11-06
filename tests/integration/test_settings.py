@@ -4,14 +4,15 @@ the API with signed tokens."""
 import asyncio
 
 import asyncpg
+import httpx
 import pytest
 
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import load_policy
 from propfirm.service.feeder import now_ms
 from propfirm.settings.overlay import CountryGating, apply_changes, stage_limits
-from propfirm.settings.store import SettingsStore, migrate, policy_in_force
-from tests.integration.test_customers import ADULT, eventually, platform
+from propfirm.settings.store import ProposalDecided, SettingsStore, migrate, policy_in_force
+from tests.integration.test_customers import ADULT, Platform, eventually, platform
 
 pytestmark = pytest.mark.integration
 
@@ -26,6 +27,16 @@ NEW_LIMITS = {
     "reason": "launch offer",
 }
 ONE_STEP_25K = {"product_id": "one-step", "size_cents": 2_500_000}
+
+
+async def two_admins(p: Platform, url: str, body: object) -> httpx.Response:
+    """admin-1 proposes, admin-2 approves (maker-checker): the approval."""
+    proposed = await p.call("PUT", url, "admin-1", body, ADMIN)
+    assert proposed.json()["status"] == "proposed", proposed.text
+    pid = proposed.json()["proposal"]["id"]
+    return await p.call(
+        "POST", f"/admin/settings/proposals/{pid}/approve", "admin-2", {"reason": "ok"}, ADMIN
+    )
 
 
 def test_store_is_append_only_and_gives_the_policy_in_force(
@@ -55,11 +66,24 @@ def test_store_is_append_only_and_gives_the_policy_in_force(
             in_force = await policy_in_force(database_url, schema, BASE)
             rule_set = in_force.product("one-step").rule_sets[0]
             assert rule_set.rsv_id == "one-step-s1-v2-a2"
+            # maker-checker: one decision per proposal; the change names both admins
+            prop = await store.propose(gating, "a-1", None, "counsel", 40)
+            change = await store.approve(prop, "a-2", "checked", 41, applied=True)
+            assert (change.author, change.approved_by, change.proposal_id) == ("a-1", "a-2", 1)
+            with pytest.raises(ProposalDecided):
+                await store.approve(prop, "a-3", "again", 42, applied=True)
+            with pytest.raises(ProposalDecided):
+                await store.decide(prop.id, "rejected", "a-3", "late", 43)
+            found = await store.proposal(prop.id)
+            assert found is not None and (found.decision, found.change_id) == ("approved", 3)
+            assert await store.proposals(open_only=True) == []
             for sql in (
                 f"UPDATE {schema}.changes SET reason = 'edited'",
                 f"DELETE FROM {schema}.changes",
                 f"UPDATE {schema}.applied SET journal_seq = 1",
                 f"DELETE FROM {schema}.applied",
+                f"DELETE FROM {schema}.proposals",
+                f"UPDATE {schema}.proposal_decisions SET decision = 'approved'",
             ):
                 with pytest.raises(asyncpg.RaiseError, match="append-only"):
                     await pool.execute(sql)
@@ -89,7 +113,7 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             before = await buy()
             refused = await p.call("PUT", LIMITS_URL, "u1", NEW_LIMITS)  # a trader
             assert refused.status_code == 403
-            changed = await p.call("PUT", LIMITS_URL, "admin-1", NEW_LIMITS, ADMIN)
+            changed = await two_admins(p, LIMITS_URL, NEW_LIMITS)
             assert changed.status_code == 200, changed.text
             assert changed.json()["rsv_id"] == "one-step-s1-v2-a1"
             after = await buy()
@@ -132,9 +156,10 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             history = (
                 await p.call("GET", "/admin/settings/changes", "admin-1", None, ADMIN)
             ).json()
-            assert [(c["id"], c["status"], c["author"]) for c in history] == [
-                (1, "applied", "admin-1")
-            ]
+            assert [
+                (c["id"], c["status"], c["author"], c["approved_by"], c["proposal_id"])
+                for c in history
+            ] == [(1, "applied", "admin-1", "admin-2", 1)]
 
     asyncio.run(scenario())
 
@@ -146,7 +171,7 @@ def test_limits_changed_while_the_engine_is_down_apply_once_it_has_them(
         async with platform(
             database_url, valkey_url, pg_schema, wait_s=0.3, start_engine=False
         ) as p:
-            pending = await p.call("PUT", LIMITS_URL, "admin-1", NEW_LIMITS, ADMIN)
+            pending = await two_admins(p, LIMITS_URL, NEW_LIMITS)
             assert pending.status_code == 202 and pending.json()["status"] == "pending"
             await p.call("POST", "/me", body=ADULT)
             order = (await p.call("POST", "/orders", body=ONE_STEP_25K)).json()
@@ -174,15 +199,31 @@ def test_an_admin_switches_country_gating(
             on = {"country_gating": True, "blocked_countries": ["BD"], "reason": "counsel C8"}
             url = "/admin/access/country-gating"
             assert (await p.call("PUT", url, "staff-1", on, ("staff",))).status_code == 403
-            assert (await p.call("PUT", url, "admin-1", on, ADMIN)).status_code == 200
+            proposed = await p.call("PUT", url, "admin-1", on, ADMIN)
+            assert proposed.json()["status"] == "proposed"
             bd = {**ADULT, "residence_country": "BD"}
+            assert (await p.call("POST", "/me", "bd-0", bd)).status_code == 201  # not yet
+            # the second admin sees it on their staff page, then approves
+            todo = (await p.call("GET", "/staff/me/todo", "admin-2", None, ADMIN)).json()
+            assert ("settings_proposal", "1") in {(t["kind"], t["ref"]) for t in todo}
+            mine = (await p.call("GET", "/staff/me/todo", "admin-1", None, ADMIN)).json()
+            assert "settings_proposal" not in {t["kind"] for t in mine}
+            notes = (await p.call("GET", "/staff/notifications", "admin-2", None, ADMIN)).json()
+            assert [n["ref"] for n in notes] == ["setting-proposal:1"]
+            approve = "/admin/settings/proposals/1/approve"
+            assert (
+                await p.call("POST", approve, "admin-2", {"reason": "ok"}, ADMIN)
+            ).status_code == 200
+            assert (
+                await p.call("GET", "/staff/notifications", "admin-2", None, ADMIN)
+            ).json() == []
             refused = await p.call("POST", "/me", "bd-1", bd)
             assert refused.status_code == 403 and "declared:BD" in refused.text
             assert (
                 await p.call("POST", "/me", "in-1", {**ADULT, "residence_country": "IN"})
             ).status_code == 201
             off = {**on, "country_gating": False}
-            assert (await p.call("PUT", url, "admin-1", off, ADMIN)).status_code == 200
+            assert (await two_admins(p, url, off)).status_code == 200
             assert (await p.call("POST", "/me", "bd-2", bd)).status_code == 201
             access = (await p.call("GET", "/admin/access", "admin-1", None, ADMIN)).json()
             assert access == {"country_gating": False, "blocked_countries": ["BD"], "min_age": 18}

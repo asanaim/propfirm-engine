@@ -109,12 +109,12 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.service.projector import INTERVALS
 from propfirm.settings.newsdesk import Author, NewsDesk, NewsRefused, action_view
-from propfirm.settings.overlay import CountryGating, stage_limits, to_json
+from propfirm.settings.overlay import CountryGating, StageLimits, stage_limits, to_json
 from propfirm.settings.service import Settings, SettingsError
-from propfirm.settings.store import ChangeStatus
+from propfirm.settings.store import ChangeStatus, Proposal
 from propfirm.staff.desk import DeskError, StaffDesk, message_view, notification_view
 from propfirm.staff.directory import Actor, Directory
-from propfirm.staff.model import PERMISSIONS, TITLES, Access, legacy_access
+from propfirm.staff.model import PERMISSIONS, TITLES, Access, Tier, legacy_access
 from propfirm.staff.records import Grant, Member, StaffRefused
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
@@ -544,7 +544,46 @@ def change_view(status: ChangeStatus) -> dict[str, Any]:
         "status": "pending" if status.applied_at is None else "applied",
         "applied_at": status.applied_at,
         "journal_seq": status.journal_seq,
+        "approved_by": change.approved_by,
+        "proposal_id": change.proposal_id,
     }
+
+
+def proposal_view(p: Proposal, now: int, expiry_ms: int) -> dict[str, Any]:
+    kind, value = to_json(p.setting)
+    status = p.decision or ("expired" if expiry_ms and now - p.ts > expiry_ms else "open")
+    return {
+        "id": p.id,
+        "kind": kind,
+        "value": value,
+        "author": p.author,
+        "author_email": p.author_email,
+        "reason": p.reason,
+        "created_at": p.ts,
+        "expires_at": p.ts + expiry_ms if expiry_ms else None,
+        "status": status,
+        "decided_by": p.decided_by,
+        "decision_reason": p.decision_reason,
+        "decided_at": p.decided_at,
+        "change_id": p.change_id,
+    }
+
+
+SETTINGS_ERRORS = {
+    "unknown": 404,
+    "engine_refused": 502,
+    "four_eyes": 403,
+    "not_maker": 403,
+    "decided": 409,
+    "expired": 409,
+}
+
+
+def _settings_refused(exc: SettingsError) -> HTTPException:
+    return HTTPException(
+        status_code=SETTINGS_ERRORS.get(exc.code, 422),
+        detail={"code": exc.code, "message": str(exc)},
+    )
 
 
 def cif_view(c: CifRecord) -> dict[str, Any]:
@@ -1020,6 +1059,21 @@ async def build_todo(deps: Deps, me: Principal, access: Access) -> list[dict[str
                     if grant.in_force(now) and ends is not None and ends - now <= 7 * DAY_MS:
                         title = f"Your {grant.grant} {grant.value} ends soon ({grant.grt})"
                         out.append(_todo("grant_ending", grant.grt, title, now, ends))
+    if (
+        deps.settings is not None
+        and access.has("settings.change")
+        and access.tier is not None
+        and access.tier >= Tier.ADMIN
+    ):
+        expiry = (await deps.settings.current()).staff.proposal_expiry_hours * 3_600_000
+        try:
+            waiting = await deps.settings.proposals(open_only=True)
+        except SettingsError:
+            waiting = []  # no proposal store
+        for prop in waiting:
+            if prop.author != me.subject and now - prop.ts <= expiry:
+                title = f"Approve or reject settings proposal {prop.id}"
+                out.append(_todo("settings_proposal", str(prop.id), title, prop.ts))
     if deps.source_alerts is not None and access.has("news.desk"):
         for alert in await deps.source_alerts.open_alerts():
             title = f"Add the news a blocked source misses: {alert.source}"
@@ -1893,6 +1947,93 @@ def create_app(
             "min_age": gate.min_age,
         }
 
+    # --- maker-checker on admin settings (5a-2) ----------------------------------------
+
+    async def expiry_ms(deps: Deps) -> int:
+        return (await _staff_policy(deps)).proposal_expiry_hours * 3_600_000
+
+    async def propose_setting(
+        deps: Deps, me: Principal, setting: CountryGating | StageLimits, reason: str
+    ) -> dict[str, Any]:
+        """The change waits for a second admin; they are notified."""
+        now = deps.clock()
+        try:
+            proposal = await _settings(deps).propose(me.subject, me.email, setting, reason, now)
+        except SettingsError as exc:
+            raise _settings_refused(exc) from exc
+        if deps.desk is not None:
+            kind, _ = to_json(setting)
+            await deps.desk.notify(
+                "settings.change",
+                "settings_proposal",
+                f"setting-proposal:{proposal.id}",
+                f"A {kind.replace('_', ' ')} change waits for a second admin",
+                f"Proposal {proposal.id} by {me.email or me.subject}: {reason}",
+                now,
+            )
+        return {
+            "status": "proposed",
+            "proposal": proposal_view(proposal, now, await expiry_ms(deps)),
+        }
+
+    async def close_proposal(deps: Deps, pid: int, outcome: str) -> None:
+        if deps.desk is not None:
+            await deps.desk.close(f"setting-proposal:{pid}", outcome, deps.clock())
+
+    @app.get("/admin/settings/proposals")
+    async def setting_proposals(
+        deps: D, me: SettingsReader, open_only: Annotated[bool, Query(alias="open")] = True
+    ) -> list[dict[str, Any]]:
+        now, expiry = deps.clock(), await expiry_ms(deps)
+        return [proposal_view(p, now, expiry) for p in await _settings(deps).proposals(open_only)]
+
+    @app.post("/admin/settings/proposals/{pid}/approve")
+    async def approve_setting(
+        deps: D, me: Me, pid: Annotated[int, Path(ge=1)], body: DecisionBody
+    ) -> JSONResponse:
+        """The second admin (T4 or above, never the maker): the change takes
+        effect. 200 when in force, 202 while the engine has not answered."""
+        access = await _need(deps, me, "settings.change")
+        if access.tier is None or access.tier < Tier.ADMIN:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "forbidden", "message": "a second admin (T4) approves settings"},
+            )
+        try:
+            status, rule_set = await _settings(deps).approve(
+                pid, me.subject, body.reason, deps.clock(), await expiry_ms(deps)
+            )
+        except SettingsError as exc:
+            raise _settings_refused(exc) from exc
+        await close_proposal(deps, pid, "approved")
+        applied = status.applied_at is not None
+        out = {"change": change_view(status), "status": "applied" if applied else "pending"}
+        if rule_set is not None:
+            out["rsv_id"] = rule_set.rsv_id
+        return JSONResponse(out, status_code=200 if applied else 202)
+
+    @app.post("/admin/settings/proposals/{pid}/reject")
+    async def reject_setting(
+        deps: D, me: SettingsChanger, pid: Annotated[int, Path(ge=1)], body: DecisionBody
+    ) -> dict[str, Any]:
+        try:
+            found = await _settings(deps).reject(pid, me.subject, body.reason, deps.clock())
+        except SettingsError as exc:
+            raise _settings_refused(exc) from exc
+        await close_proposal(deps, pid, "rejected")
+        return proposal_view(found, deps.clock(), await expiry_ms(deps))
+
+    @app.post("/admin/settings/proposals/{pid}/withdraw")
+    async def withdraw_setting(
+        deps: D, me: SettingsChanger, pid: Annotated[int, Path(ge=1)], body: DecisionBody
+    ) -> dict[str, Any]:
+        try:
+            found = await _settings(deps).withdraw(pid, me.subject, body.reason, deps.clock())
+        except SettingsError as exc:
+            raise _settings_refused(exc) from exc
+        await close_proposal(deps, pid, "withdrawn")
+        return proposal_view(found, deps.clock(), await expiry_ms(deps))
+
     @app.put("/admin/access/country-gating")
     async def set_country_gating(
         deps: D, me: SettingsChanger, body: CountryGatingBody
@@ -1903,6 +2044,8 @@ def create_app(
         except PolicyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         setting = CountryGating(body.country_gating, countries)
+        if (await _staff_policy(deps)).settings_need_second_admin:
+            return await propose_setting(deps, me, setting, body.reason)
         status = await settings.set_country_gating(
             me.subject, me.email, setting, body.reason, deps.clock()
         )
@@ -1928,6 +2071,10 @@ def create_app(
                 body.max_loss_percent,
                 body.max_loss_kind,
             )
+            if (await _staff_policy(deps)).settings_need_second_admin:
+                return JSONResponse(
+                    await propose_setting(deps, me, setting, body.reason), status_code=202
+                )
             status, rule_set = await settings.set_stage_limits(
                 me.subject, me.email, setting, body.reason, deps.clock()
             )
