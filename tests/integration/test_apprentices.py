@@ -43,9 +43,13 @@ def test_an_apprentice_reads_masked_and_acts_only_through_the_mentor(
             body = {"subject": "kc-app", "name": "Learner", "kind": "apprentice",
                     "mentor": lead["sid"], "sections": {"integrity": 0}, "ends_at": term,
                     "reason": "intake"}  # fmt: skip
-            app = await ok(p, "kc-lead", "POST", "/staff/members", body)
+            # a lead does not propose sections [decided 6 Nov 2026]: an owner
+            # (or an admin) joins the apprentice to integrity; the other owner approves
+            refused = await p.call("POST", "/staff/members", "kc-lead", body, NONE)
+            assert refused.status_code == 403
+            app = await ok(p, "kc-owner-a", "POST", "/staff/members", body)
             for g in app["grants"]:
-                await ok(p, "kc-owner-a", "POST", f"/staff/grants/{g['grt']}/approve", OK)
+                await ok(p, "kc-owner-b", "POST", f"/staff/grants/{g['grt']}/approve", OK)
             me = await ok(p, "kc-app", "GET", "/staff/me")
             assert me["access"]["sections"] == {"integrity": "T0"}
 

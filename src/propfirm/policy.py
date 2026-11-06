@@ -34,7 +34,7 @@ from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import MarketSpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
-from propfirm.staff.records import Limits
+from propfirm.staff.records import SECTIONS_APPROVALS, Limits
 from propfirm.trading.instruments import (
     InstrumentSpec,
     Pricing,
@@ -497,7 +497,10 @@ def _staff(t: _Table) -> StaffPolicy:
         apprentice_max_months=t.integer("apprentice_max_months", 1),
         power_max_days=t.integer("power_max_days", 1),
         acting_max_days=t.integer("acting_max_days", 1),
+        sections_approval=t.text("sections_approval"),
     )
+    if limits.sections_approval not in SECTIONS_APPROVALS:
+        raise PolicyError(f"{t.name('sections_approval')} must be one of {SECTIONS_APPROVALS}")
     policy = StaffPolicy(
         approvals_need_mfa=t.boolean("approvals_need_mfa"),
         step_up_minutes=t.integer("step_up_minutes"),

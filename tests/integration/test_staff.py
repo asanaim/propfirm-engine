@@ -116,17 +116,27 @@ def test_owners_grant_with_four_eyes_and_grants_end_on_their_own(
             )  # fmt: skip
             assert refused.status_code == 403
 
-            # a specialist: the lead asks, an admin approves (never the lead)
+            # a specialist: the lead asks for the tier, an admin approves (never
+            # the lead); the section (role) is proposed by an admin and approved
+            # by an owner [decided 6 Nov 2026]
             body = {"subject": "kc-spec", "name": "Spec", "kind": "staff", "tier": 2,
-                    "roles": ["payouts"], "lead": joined["sid"], "reason": "hired"}  # fmt: skip
+                    "lead": joined["sid"], "reason": "hired"}  # fmt: skip
+            with_role = {**body, "roles": ["payouts"]}
+            no_section = await as_(p, "kc-lead", "POST", "/staff/members", with_role)
+            assert no_section.status_code == 403
             spec = await ok(p, "kc-lead", "POST", "/staff/members", body)
             by_lead = await as_(
                 p, "kc-lead", "POST", f"/staff/grants/{spec['grants'][0]['grt']}/approve", OK
             )
             assert by_lead.status_code == 403
-            await trained(p, "kc-admin", spec["sid"], "payouts")
             for g in spec["grants"]:
                 await ok(p, "kc-admin", "POST", f"/staff/grants/{g['grt']}/approve", OK)
+            await trained(p, "kc-admin", spec["sid"], "payouts")
+            ask = {"sid": spec["sid"], "grant": "role", "value": "payouts", "reason": "desk"}
+            section = await ok(p, "kc-admin", "POST", "/staff/grants", ask)
+            approve = f"/staff/grants/{section['grt']}/approve"
+            assert (await as_(p, "kc-admin", "POST", approve, OK)).status_code == 403
+            await ok(p, "kc-owner-a", "POST", approve, OK)
             sid = spec["sid"]
             s = await me(p, "kc-spec")
             assert "payout.pass" in s["access"]["permissions"]
@@ -204,15 +214,15 @@ def test_an_apprentice_learns_then_graduates_on_a_new_login(
             now = p.clock()
             await join(p, "kc-owner-a", "kc-owner-b", "kc-admin", tier=4)
             await join(p, "kc-owner-a", "kc-admin", "kc-lead", tier=3)
-            mentor = await join(p, "kc-lead", "kc-admin", "kc-mentor", tier=2, roles=["kyc"])
+            mentor = await join(p, "kc-admin", "kc-owner-a", "kc-mentor", tier=2, roles=["kyc"])
 
             base = {"subject": "kc-app", "name": "Learner", "kind": "apprentice",
                     "mentor": mentor, "team": "kyc", "roles": ["kyc"],
                     "reason": "intake"}  # fmt: skip
-            seven = await as_(p, "kc-lead", "POST", "/staff/members",
+            seven = await as_(p, "kc-admin", "POST", "/staff/members",
                               {**base, "ends_at": add_months(now, 7)})  # fmt: skip
             assert seven.status_code == 422  # 3 to 6 months
-            app = await join(p, "kc-lead", "kc-admin", "kc-app", **{
+            app = await join(p, "kc-admin", "kc-owner-a", "kc-app", **{
                 k: v for k, v in base.items() if k not in ("subject", "name", "reason")
             }, ends_at=add_months(now, 4))  # fmt: skip
             assert app.startswith("APP")
@@ -237,15 +247,26 @@ def test_an_apprentice_learns_then_graduates_on_a_new_login(
             await trained(p, "kc-mentor", app, "kyc")  # the mentor (KYC T2) assesses
             staff = await ok(p, "kc-admin", "POST", graduate, new_login)
             assert (staff["from_sid"], staff["kind"], staff["lead"]) == (app, "staff", mentor)
+            # the section learnt: proposed by the graduating admin, approved by
+            # an owner [decided 6 Nov 2026]; no access until then
+            assert (await as_(p, "kc-app-staff", "GET", "/staff/me")).status_code == 403
+            waiting = await ok(p, "kc-owner-a", "GET", "/staff/grants?status=requested")
+            mine = [g for g in waiting if g["sid"] == staff["sid"]]
+            assert [(g["grant"], g["value"], g["requested_by"]) for g in mine] == [
+                ("level", "kyc:1", "kc-admin")
+            ]
+            nope = await as_(p, "kc-admin", "POST", f"/staff/grants/{mine[0]['grt']}/approve", OK)
+            assert nope.status_code == 403  # the proposer, and an admin
+            await ok(p, "kc-owner-a", "POST", f"/staff/grants/{mine[0]['grt']}/approve", OK)
             graduate_me = await me(p, "kc-app-staff")
             assert graduate_me["access"]["tier"] == "T1"
             assert graduate_me["access"]["sections"] == {"kyc": "T1"}  # the section learnt
 
-            # promoted inside one section [decided 6 Nov 2026]: asked by that
-            # section's lead or an admin, approved by another admin
+            # promoted inside one section, or given another [decided 6 Nov
+            # 2026]: an admin proposes, an owner approves
             up = {"sid": staff["sid"], "grant": "level", "value": "kyc:2", "reason": "promoted"}
             no_lead = await as_(p, "kc-lead", "POST", "/staff/grants", up)
-            assert no_lead.status_code == 403  # a lead, but of no section
+            assert no_lead.status_code == 403  # a lead does not propose sections
             asked = await ok(p, "kc-admin", "POST", "/staff/grants", up)
             await ok(p, "kc-owner-a", "POST", f"/staff/grants/{asked['grt']}/approve", OK)
             other = {**up, "value": "payouts:1"}

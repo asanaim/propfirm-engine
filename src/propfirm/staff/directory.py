@@ -349,6 +349,7 @@ class Directory:
                 note = f"carried over from {sid}: {p.note}"
                 await ops.record_training(replace(p, sid=new_sid, note=note))
             given: list[tuple[str, int | str]] = [("level", f"{s}:1") for s in sections]
+            owners_assign = (await self._limits()).sections_approval == "owner"
             for grant, value in given or [("tier", int(Tier.ASSOCIATE))]:
                 grt = await ops.new_grt()
                 requested = {
@@ -359,6 +360,12 @@ class Directory:
                     "by": apprentice.recommended_by,
                     "reason": f"graduation of {sid}",
                 }
+                if grant == "level" and owners_assign:
+                    # the graduating admin proposes the sections; an owner approves
+                    requested["by"] = actor.subject
+                    requested["tier"] = int(me.tier or 0)
+                    await ops.grant_event(grt, "requested", now, requested)
+                    continue
                 await ops.grant_event(grt, "requested", now, requested)
                 approved = {"by": actor.subject, "reason": reason}
                 await ops.grant_event(grt, "approved", now, approved)
@@ -423,7 +430,8 @@ class Directory:
         async with self._store.change() as ops:
             me = await self._access(ops, actor, now)
             grant, member = await self._grant(ops, grt)
-            check_approval(me, member, await self._member_access(ops, member, now), grant, now)
+            member_access = await self._member_access(ops, member, now)
+            check_approval(me, member, member_access, grant, now, await self._limits())
             if grant.grant == "level" and parse_level(grant.value)[1] >= Tier.ASSOCIATE:
                 await self._gate(ops, member.sid, [parse_level(grant.value)[0]], now)
             elif grant.grant == "role" and member.kind != "apprentice":
@@ -446,7 +454,8 @@ class Directory:
         async with self._store.change() as ops:
             me = await self._access(ops, actor, now)
             grant, member = await self._grant(ops, grt)
-            check_approval(me, member, await self._member_access(ops, member, now), grant, now)
+            member_access = await self._member_access(ops, member, now)
+            check_approval(me, member, member_access, grant, now, await self._limits())
             return await ops.grant_event(
                 grt, "denied", now, {"by": actor.subject, "reason": reason}
             )
@@ -474,6 +483,7 @@ class Directory:
 
     async def awaiting(self, actor: Actor, now: int) -> list[Grant]:
         """Requests this login may approve now."""
+        limits = await self._limits()
         async with self._store.read() as ops:
             me = await self._access(ops, actor, now)
             out = []
@@ -481,9 +491,8 @@ class Directory:
                 member = await ops.member(g.sid)
                 assert member is not None
                 try:
-                    check_approval(
-                        me, member, access_of(member, await ops.grants_of(g.sid), now), g, now
-                    )
+                    access = access_of(member, await ops.grants_of(g.sid), now)
+                    check_approval(me, member, access, g, now, limits)
                 except StaffRefused:
                     continue
                 out.append(g)
