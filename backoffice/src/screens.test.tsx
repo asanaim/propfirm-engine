@@ -111,10 +111,11 @@ describe("Home", () => {
     const { api, posted } = fakeApi({ "/staff/me": me });
     render(wrap(api, <Home />));
     expect(await screen.findByText("Rina")).toBeInTheDocument();
-    expect(screen.getByText("payouts T2")).toBeInTheDocument();
+    expect(screen.getByText("payouts · level T2")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Pass payout PO00000001/ })).toHaveAttribute("href", "#/payouts/PO00000001/show");
-    expect(screen.getByText("URGENT · Not acknowledged")).toBeInTheDocument();
-    expect(screen.getByText(/approvals in this section are blocked/)).toBeInTheDocument();
+    expect(screen.getByText(/Urgent · Not acknowledged/)).toBeInTheDocument();
+    expect(screen.getByText(/approvals blocked/)).toBeInTheDocument();
+    expect(screen.getByText("Training blocking approvals").previousSibling).toHaveTextContent("1");
     await userEvent.click(screen.getByRole("button", { name: "I have read these duties" }));
     await userEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
     expect(posted.map((p) => p.path)).toEqual(["/staff/me/duties/payouts/ack", "/staff/notifications/7/ack"]);
