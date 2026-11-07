@@ -280,9 +280,17 @@ def test_the_news_action_log_is_append_only_and_names_manual_events(
             assert first.id == 1 and first.title == "BoJ"
             assert await store.titles() == {"boj": "BoJ"}  # accepted manual or published only
             assert [a.event_id for a in await store.history(2)] == ["cpi", "snb"]
+            # impact marks: the latest of each event wins
+            await store.set_impact("cpi", "low", "s-1", None, "quiet", 6)
+            await store.set_impact("cpi", "medium", "s-2", None, "revised", 7)
+            await store.set_impact("boj", "high", "s-1", None, "rate move", 8)
+            assert await store.impacts() == {"cpi": "medium", "boj": "high"}
+            with pytest.raises(asyncpg.CheckViolationError):
+                await store.set_impact("cpi", "extreme", "s-1", None, "x", 9)
             for sql in (
                 f"UPDATE {schema}.news_actions SET reason = 'edited'",
                 f"DELETE FROM {schema}.news_actions",
+                f"DELETE FROM {schema}.news_impacts",
             ):
                 with pytest.raises(asyncpg.RaiseError, match="append-only"):
                     await pool.execute(sql)

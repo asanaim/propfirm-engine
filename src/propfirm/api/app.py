@@ -117,7 +117,7 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.service.projector import INTERVALS
 from propfirm.settings.authority import Refused, check_appointment, owner_level
-from propfirm.settings.newsdesk import Author, NewsDesk, NewsRefused, action_view
+from propfirm.settings.newsdesk import DEFAULT_IMPACT, Author, NewsDesk, NewsRefused, action_view
 from propfirm.settings.overlay import (
     PAGE_SLUG,
     CountryGating,
@@ -493,6 +493,11 @@ class PolicyPageBody(_Body):
 
 class AcceptPolicyBody(_Body):
     version: Annotated[int, Field(ge=1)]
+
+
+class ImpactBody(_Body):
+    impact: Literal["high", "medium", "low"]
+    reason: Reason
 
 
 class StandInBody(_Body):
@@ -1665,6 +1670,7 @@ def create_app(
         [`start_ts`, `end_ts`), the symbols, a title, the currency and the
         publisher's schedule page where the firm's calendar files name them."""
         titles = await deps.news.titles() if deps.news is not None else {}
+        impacts = await deps.news.impacts() if deps.news is not None else {}
         listed = {
             e.event.event_id: e
             for c in (deps.news.calendars if deps.news is not None else ())
@@ -1680,6 +1686,9 @@ def create_app(
                     "release_ts": item.event.ts if item else None,
                     "currency": item.event.currency if item else None,
                     "source": item.source if item else None,
+                    # marked by the risk desk; every event here is restricted
+                    "impact": impacts.get(e["event_id"], DEFAULT_IMPACT),
+                    "restricted": True,
                 }
             )
         return sorted(out, key=lambda x: (x["start_ts"], x["event_id"]))
@@ -2503,6 +2512,7 @@ def create_app(
         live = {e["event_id"] for e in await deps.live.news()}
         return {
             "calendars": [calendar_view(c, live) for c in desk.calendars],
+            "impacts": await desk.impacts(),  # marked ones; any other is high
             "actions": [action_view(a) for a in await desk.history(100)],
             # sources the collector cannot read: add their events by hand
             "source_alerts": [
@@ -2510,6 +2520,23 @@ def create_app(
                 for a in (await deps.source_alerts.open_alerts() if deps.source_alerts else [])
             ],
         }
+
+    @app.post("/staff/news/events/{event_id}/impact")
+    async def mark_impact(
+        deps: D,
+        me: NewsDesker,
+        event_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9_.:-]{1,120}$")],
+        body: ImpactBody,
+    ) -> dict[str, Any]:
+        """The risk desk marks a release high, medium or low impact for the
+        calendar. One person, as adding a news window (decided 8 Nov 2026);
+        the restriction does not change."""
+        who = Author(me.subject, me.email, body.reason)
+        try:
+            await news_desk(deps).mark_impact(event_id, body.impact, who, deps.clock())
+        except NewsRefused as exc:
+            raise news_refused(exc) from exc
+        return {"event_id": event_id, "impact": body.impact}
 
     @app.post("/staff/news/calendars/{month}/publish")
     async def publish_news(

@@ -154,6 +154,15 @@ class EngineGateway:
 class MemoryLog:
     def __init__(self) -> None:
         self.actions: list[NewsAction] = []
+        self.marks: list[tuple[str, str, str]] = []
+
+    async def set_impact(
+        self, event_id: str, impact: str, author: str, email: str | None, reason: str, ts: int
+    ) -> None:
+        self.marks.append((event_id, impact, author))
+
+    async def impacts(self) -> dict[str, str]:
+        return {event_id: impact for event_id, impact, _ in self.marks}
 
     async def record(self, action: NewsAction) -> NewsAction:
         from dataclasses import replace
@@ -357,7 +366,37 @@ def test_the_calendar_is_public_with_publisher_and_currency() -> None:
         "release_ts": None,
         "currency": None,
         "source": None,
+        "impact": "high",
+        "restricted": True,
     }
+
+
+def test_staff_mark_a_release_high_medium_or_low_impact_and_traders_see_it() -> None:
+    news, gateway, log = desk()
+    deps = Deps(Live(), History(), gateway, verifier(), FakeCustomers(), news=news,
+                clock=lambda: NOV_6_NFP - 10 * H)  # fmt: skip
+    login = (NOV_6_NFP - 10 * H) // 1000
+
+    async def go(method: str, url: str, body: object, roles: tuple[str, ...]) -> httpx.Response:
+        transport = httpx.ASGITransport(app=create_app(deps))
+        async with httpx.AsyncClient(transport=transport, base_url="http://api") as client:
+            headers = bearer("staff-1", roles, mfa=True, auth_time=login)
+            return await client.request(method, url, json=body, headers=headers)
+
+    url = "/staff/news/events/2026-11-10-us-cpi/impact"
+    by_trader = asyncio.run(go("POST", url, {"impact": "low", "reason": "x"}, ("trader",)))
+    assert by_trader.status_code == 403
+    bad = asyncio.run(go("POST", url, {"impact": "extreme", "reason": "x"}, ("staff",)))
+    assert bad.status_code == 422
+    marked = asyncio.run(go("POST", url, {"impact": "medium", "reason": "consensus in line"},
+                            ("staff",)))  # fmt: skip
+    assert marked.json() == {"event_id": "2026-11-10-us-cpi", "impact": "medium"}
+    assert log.marks == [("2026-11-10-us-cpi", "medium", "staff-1")]
+    cpi, unnamed = asyncio.run(go("GET", "/calendar", None, ())).json()
+    assert (cpi["impact"], cpi["restricted"]) == ("medium", True)  # still restricted
+    assert unnamed["impact"] == "high"
+    staff = asyncio.run(go("GET", "/staff/news", None, ("staff",))).json()
+    assert staff["impacts"] == {"2026-11-10-us-cpi": "medium"}
 
 
 def test_staff_publish_and_list_but_only_an_admin_cancels() -> None:

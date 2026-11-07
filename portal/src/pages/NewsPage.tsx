@@ -13,6 +13,21 @@ export interface NewsEvent {
   release_ts?: number | null; // the publisher's release time, when the calendar names it
   currency?: string | null;
   source?: string | null; // the publisher's schedule page
+  impact?: Impact; // marked by the risk desk; high until marked
+  restricted?: boolean; // every release on this calendar is
+}
+
+export type Impact = "high" | "medium" | "low";
+
+export const IMPACT_LABEL: Record<Impact, string> = {
+  high: "High impact",
+  medium: "Medium impact",
+  low: "Low impact",
+};
+
+/** The impact dot and its words (colour is never the only cue). */
+export function ImpactMark({ impact = "high" }: { impact?: Impact | undefined }) {
+  return <span className={`impact impact-${impact}`} role="img" aria-label={IMPACT_LABEL[impact]} title={IMPACT_LABEL[impact]} />;
 }
 
 const UTC = "UTC";
@@ -115,7 +130,7 @@ export function NewsPage() {
     <div className="page news">
       <h1>News calendar</h1>
       <p className="lead">
-        High-impact releases. On funded accounts no trade opens or closes on the listed symbols from 2 minutes before to 2
+        Restricted releases, each marked high, medium or low impact by our risk desk. On funded accounts no trade opens or closes on the listed symbols from 2 minutes before to 2
         minutes after each one. Evaluations are not bound.
       </p>
       <details className="explain">
@@ -183,9 +198,11 @@ export function NewsPage() {
                   </time>
                   <div className="news-body">
                     <p className="news-title">
-                      <span className="impact" aria-label="High impact" title="High impact" />
+                      <ImpactMark impact={e.impact} />
                       {e.title ?? e.event_id}
                       {e.currency && <span className="badge">{e.currency}</span>}
+                      <span className={`badge impact-label impact-label-${e.impact ?? "high"}`}>{IMPACT_LABEL[e.impact ?? "high"]}</span>
+                      {e.restricted !== false && <span className="badge restricted-label">Restricted</span>}
                     </p>
                     <p className="news-meta">
                       <Clock aria-hidden="true" className="inline-icon" /> Restricted {time.format(e.start_ts)}–

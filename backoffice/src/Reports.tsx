@@ -1,6 +1,7 @@
 import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import { useState } from "react";
 import { Title } from "react-admin";
+import { ActionButton } from "./ActionButton";
 import { when } from "./format";
 import { useGet } from "./useGet";
 import { monthGrid, plainError } from "./work";
@@ -134,8 +135,57 @@ interface SourceAlert {
 }
 export interface NewsPage {
   calendars: Calendar[];
+  impacts: Record<string, Impact>; // marked releases; any other is high
   actions: NewsAction[];
   source_alerts: SourceAlert[];
+}
+
+export type Impact = "high" | "medium" | "low";
+const IMPACTS: Impact[] = ["high", "medium", "low"];
+const IMPACT_WORDS: Record<Impact, string> = { high: "High", medium: "Medium", low: "Low" };
+
+/** The releases still to come, each with its impact and a way to mark it
+(the risk desk, one person; the restriction itself does not change). */
+function ImpactMarks({ n, now, onDone }: { n: NewsPage; now: number; onDone: () => void }) {
+  const coming = n.calendars.flatMap((c) => c.events).filter((e) => e.ts > now).sort((a, b) => a.ts - b.ts);
+  return (
+    <Card>
+      <CardHeader
+        slotProps={{ title: { component: "h2" } }}
+        title="Impact"
+        subheader="Mark each release high, medium or low impact for the traders' calendar. Every release here stays restricted."
+      />
+      <CardContent sx={{ pt: 0 }}>
+        {coming.length === 0 ? (
+          <Typography color="text.secondary">No release to come.</Typography>
+        ) : (
+          <Stack spacing={1}>
+            {coming.map((e) => {
+              const impact = n.impacts[e.event_id] ?? "high";
+              return (
+                <Stack key={e.event_id} direction="row" sx={{ alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                  <Typography sx={{ flex: 1, minWidth: 240 }}>
+                    {when(e.ts)} · {e.title}
+                  </Typography>
+                  <Chip size="small" label={`${IMPACT_WORDS[impact]} impact`} color={impact === "high" ? "error" : impact === "medium" ? "warning" : "default"} />
+                  {IMPACTS.filter((i) => i !== impact).map((i) => (
+                    <ActionButton
+                      key={i}
+                      label={`Mark ${IMPACT_WORDS[i].toLowerCase()}`}
+                      path={`/staff/news/events/${encodeURIComponent(e.event_id)}/impact`}
+                      extra={{ impact: i }}
+                      color="inherit"
+                      onDone={onDone}
+                    />
+                  ))}
+                </Stack>
+              );
+            })}
+          </Stack>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -213,7 +263,7 @@ what to do), each month's releases as a calendar, the desk's latest
 actions. Adding or cancelling an event goes through the API
 (POST /staff/news/events; an admin cancels). */
 export function NewsDesk() {
-  const { result } = useGet<NewsPage>("/staff/news");
+  const { result, reload } = useGet<NewsPage>("/staff/news");
   const [now] = useState(() => Date.now());
   if (result.state === "loading") return <p>Loading…</p>;
   if (result.state === "error") return <p role="alert">{result.message}</p>;
@@ -260,6 +310,7 @@ export function NewsDesk() {
       {n.calendars.map((c) => (
         <MonthGrid key={c.month} calendar={c} now={now} />
       ))}
+      <ImpactMarks n={n} now={now} onDone={reload} />
       <Card>
         <CardHeader slotProps={{ title: { component: "h2" } }} title={`Latest actions (${n.actions.length})`} />
         <CardContent sx={{ pt: 0 }}>
