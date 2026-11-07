@@ -129,6 +129,8 @@ services:
       STAFF_IDP_URL: http://keycloak:8080
       STAFF_IDP_CLIENT_ID: staff-cutoff
       STAFF_IDP_CLIENT_SECRET: ${STAFF_IDP_CLIENT_SECRET:-dev-staff-cutoff-secret}
+      # the client address for the audit trail: the last entry Caddy (web/) adds
+      PROPFIRM_CLIENT_IP_HEADER: X-Forwarded-For
     volumes:
       - ./config:/app/config:ro
     ports:
@@ -149,6 +151,22 @@ services:
     depends_on: *services
     environment: *platform-env
     command: ["/opt/venv/bin/python", "-m", "propfirm.service.scheduler"]
+
+  # The security audit trail (7b): checks the chain, anchors it beside the
+  # journal's anchors, ships it to the SIEM sinks (stdout here: `docker
+  # compose logs auditor`). Check by hand:
+  #   docker compose --profile platform run --rm auditor /opt/venv/bin/python -m propfirm.audit.service --verify
+  auditor:
+    profiles: ["platform"]
+    build: *runtime
+    depends_on: *services
+    environment:
+      <<: *platform-env
+      PROPFIRM_AUDIT_ANCHOR_PATH: /var/lib/propfirm/audit-anchors.jsonl
+      PROPFIRM_SIEM_SINKS: stdout
+    volumes:
+      - anchors:/var/lib/propfirm
+    command: ["/opt/venv/bin/python", "-m", "propfirm.audit.service"]
 
   # Demo data (development only): logins with the password 12345, the staff
   # directory, traders with paid evaluation accounts, a case, pending approvals.

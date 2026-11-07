@@ -8,7 +8,7 @@ import { BackOfficeContext } from "./context";
 import { dataProvider } from "./dataProvider";
 import { Home } from "./Home";
 import { Login } from "./Login";
-import { AnomalyReport, NewsDesk } from "./Reports";
+import { AnomalyReport, AuditTrail, NewsDesk } from "./Reports";
 import { CaseList, CaseShow } from "./resources/cases";
 import { NotificationList } from "./resources/notifications";
 import { PayoutList, PayoutShow } from "./resources/payouts";
@@ -55,6 +55,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
               {screens.has("changes") ? <Resource name="changes" options={{ label: "Setting changes" }} list={ChangeList} /> : null}
               <CustomRoutes>
                 {screens.has("anomalies") ? <Route path="/anomalies" element={<AnomalyReport />} /> : null}
+                {screens.has("audit") ? <Route path="/audit" element={<AuditTrail />} /> : null}
                 {screens.has("news") ? <Route path="/news" element={<NewsDesk />} /> : null}
               </CustomRoutes>
             </>

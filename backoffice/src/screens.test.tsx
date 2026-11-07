@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { type AuditPage, auditVerdict } from "./Reports";
 import userEvent from "@testing-library/user-event";
 import type { UserManager } from "oidc-client-ts";
 import type { ReactNode } from "react";
@@ -40,10 +41,25 @@ describe("screensFor", () => {
     expect(apprentice.has("members")).toBe(false);
     expect(apprentice.has("proposals")).toBe(false);
     const admin = screensFor(["staff.view", "staff.directory", "settings.view", "news.desk"]);
-    for (const s of ["members", "grants", "cutoffs", "proposals", "changes", "anomalies", "news"]) {
+    for (const s of ["members", "grants", "cutoffs", "proposals", "changes", "anomalies", "audit", "news"]) {
       expect(admin.has(s)).toBe(true);
     }
     expect(screensFor([]).has("payouts")).toBe(false);
+    expect(screensFor(["staff.view"]).has("audit")).toBe(false);
+  });
+});
+
+describe("auditVerdict", () => {
+  const page = (status: AuditPage["status"], head = 10): AuditPage => ({ head, status, records: [] });
+  it("says whether the log is intact, unchecked or tampered with", () => {
+    expect(auditVerdict(page(null)).tone).toBe("warning");
+    const ok = auditVerdict(page({ checked_at: 0, verified_seq: 8, anchored_seq: 5, broken_seq: null, broken_reason: null }));
+    expect(ok.tone).toBe("success");
+    expect(ok.text).toContain("8 records checked");
+    expect(ok.text).toContain("2 newer");
+    const bad = auditVerdict(page({ checked_at: 0, verified_seq: 8, anchored_seq: 5, broken_seq: 3, broken_reason: "edited" }));
+    expect(bad.tone).toBe("error");
+    expect(bad.text).toContain("record 3");
   });
 });
 

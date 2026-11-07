@@ -491,6 +491,44 @@ CI job `security`, on every pull request and push to main:
   for the web apps beyond `npm audit` and ESLint, a dynamic scan of the
   running API.
 
+## Security audit trail (P2 step 7b)
+
+Who did what through the API, kept so that nobody, the database's own
+operators included, can change it unnoticed (`src/propfirm/audit/`).
+
+- **Recorded:** every refusal (401, 403) on any route; every request to
+  `/staff/*` and `/admin/*`, reads included (staff reading personal data);
+  every other write (orders, payout requests, wallet changes, webhooks).
+  Not recorded: trading writes (the event journal records them in full)
+  and traders' and the public's reads. Each record: time, login subject,
+  method and route template, path parameters, status, client address,
+  request id (returned as `X-Request-Id`). Never a request or response body.
+- **Append-only and chained:** schema `audit`; each record's hash covers the
+  one before. The database refuses UPDATE, DELETE and TRUNCATE, and any row
+  that does not continue the chain. A failed audit write is logged; it does
+  not fail the request (the action has already happened).
+- **Anchored and checked:** the `auditor` service checks every new record,
+  copies the head outside the database (`PROPFIRM_AUDIT_ANCHOR_PATH`) at
+  most every `PROPFIRM_AUDIT_ANCHOR_MS` (5 minutes), and compares the latest
+  anchor with the log: an edit, removed records or a replaced log is
+  reported (`audit.chain_broken` alert to the SIEM, red banner in the back
+  office) and anchoring stops. One-off check:
+  `python -m propfirm.audit.service --verify` (exit 1 if broken).
+- **SIEM:** records are shipped as Elastic Common Schema JSON lines, with
+  seq and hash, to `PROPFIRM_SIEM_SINKS`: `stdout` (default),
+  `file:/path`, `syslog+tls://host:6514` (RFC 5425) or
+  `syslog+tcp://host:514`. Each sink keeps its own cursor; a sink that is
+  down is retried. Which SIEM the firm runs is an open decision.
+- **Who reads it:** admins and owners, back office → Security log
+  (`GET /staff/audit`).
+- **Client address:** `PROPFIRM_CLIENT_IP_HEADER` (X-Forwarded-For behind
+  Caddy): the last entry, the one the proxy added. Only set it when the API
+  is reachable through the proxy alone.
+- **Open for production (step 7c):** anchors on storage the database's
+  operators cannot write (object storage with a retention lock); separate
+  database roles (the API may only insert, the auditor only read); the SIEM
+  choice and its alert rules (repeated refusals, approvals out of hours).
+
 ## Run the tests without Docker
 
 Needs [uv](https://docs.astral.sh/uv/). Unit tests run anywhere; integration
@@ -916,3 +954,5 @@ or rules uses floating point.
 - [ ] Step 7: staging, backups and restore drill, security scans
   - [x] 7a: security scans in CI (dependencies, code, secrets, image) and a non-root
     runtime image
+  - [x] 7b: security audit trail: hash-chained, anchored, checked, shipped to a SIEM;
+    back-office security log

@@ -8,6 +8,6 @@ export function screensFor(permissions: readonly string[]): Set<string> {
   }
   if (has("news.desk")) out.add("news");
   if (has("staff.directory")) for (const s of ["members", "grants", "cutoffs"]) out.add(s);
-  if (has("settings.view")) for (const s of ["proposals", "changes", "anomalies"]) out.add(s);
+  if (has("settings.view")) for (const s of ["proposals", "changes", "anomalies", "audit"]) out.add(s);
   return out;
 }

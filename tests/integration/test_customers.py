@@ -16,6 +16,8 @@ import pytest
 import valkey.asyncio as avalkey
 
 from propfirm.api.app import Deps, create_app
+from propfirm.audit.store import AuditStore
+from propfirm.audit.store import migrate as migrate_audit
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
@@ -84,6 +86,7 @@ class Platform:
     cutoffs: Cutoffs | None = None
     identity: SandboxIdentity | None = None
     oversight: Oversight | None = None
+    audit: AuditStore | None = None
 
     async def call(
         self,
@@ -119,6 +122,7 @@ async def platform(
     owners: Sequence[Owner] = (),
     legacy_roles: bool = True,
     screening: bool = False,
+    audit: bool = False,
 ) -> AsyncIterator[Platform]:
     """`funded`: funded orders wait for funded onboarding (sandbox identity
     check), as the API process runs it; otherwise they open at payment.
@@ -134,6 +138,7 @@ async def platform(
         customer_schema=f"{schema}_c",
         settings_schema=f"{schema}_s",
         staff_schema=f"{schema}_st",
+        audit_schema=f"{schema}_au",
         stream=f"test:inputs:{uuid.uuid4().hex}",
         block_ms=50,
         publish_ms=1,
@@ -207,6 +212,11 @@ async def platform(
     identity = SandboxIdentity()
     cutoffs = Cutoffs(staff.store, identity, desk)
     oversight = Oversight(pool, config.staff_schema, config.customer_schema, staff.store, desk)
+    trail = None
+    if audit:
+        async with pool.acquire() as conn:
+            await migrate_audit(conn, config.audit_schema)
+        trail = AuditStore(pool, config.audit_schema)
     deps = Deps(
         live=live,
         history=HistoryReader(pool, config.read_schema),
@@ -231,6 +241,8 @@ async def platform(
         didit_webhook_secret=didit_webhook_secret,
         sandbox=sandbox,
         country_header="X-Country",
+        audit=trail,
+        client_ip_header="X-Forwarded-For",
         today=lambda: TODAY,
         clock=clock,
         wait_s=wait_s,
@@ -279,6 +291,7 @@ async def platform(
             cutoffs,
             identity,
             oversight,
+            trail,
         )
     finally:
         await stop_engine()
@@ -289,6 +302,7 @@ async def platform(
                 config.customer_schema,
                 config.settings_schema,
                 config.staff_schema,
+                config.audit_schema,
             )
             for s in schemas:
                 await conn.execute(f"DROP SCHEMA IF EXISTS {s} CASCADE")

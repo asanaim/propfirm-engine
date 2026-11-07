@@ -1,5 +1,6 @@
 import AssessmentIcon from "@mui/icons-material/Assessment";
 import EventIcon from "@mui/icons-material/Event";
+import GppGoodIcon from "@mui/icons-material/GppGood";
 import { Menu as RaMenu, usePermissions } from "react-admin";
 import { screensFor } from "./screens";
 
@@ -15,6 +16,7 @@ export function Menu() {
       {screens.has("anomalies") ? (
         <RaMenu.Item to="/anomalies" primaryText="Anomaly report" leftIcon={<AssessmentIcon />} />
       ) : null}
+      {screens.has("audit") ? <RaMenu.Item to="/audit" primaryText="Security log" leftIcon={<GppGoodIcon />} /> : null}
     </RaMenu>
   );
 }
