@@ -175,7 +175,7 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             assert [
                 (c["id"], c["status"], c["author"], c["approved_by"], c["proposal_id"])
                 for c in history
-            ] == [(1, "applied", "admin-1", "admin-2", 1)]
+            ] == [(1, "applied", "owner-a", "owner-b", 1)]
 
     asyncio.run(scenario())
 
