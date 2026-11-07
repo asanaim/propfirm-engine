@@ -7,15 +7,17 @@
    (checked by src/styles/contrast.test.ts). */
 
 :root {
-  --bg: #f3f4f7;
+  /* the brand: ink #0F2B33, pip amber #F2A93B, paper #F8F7F3 (brand/) */
+  --bg: #f8f7f3;
   --surface: #ffffff;
-  --text: #121317;
-  --muted: #555c6b;
-  --border: #e1e3e9;
-  --accent: #2348e0;
-  --accent-hover: #1a39bd;
-  --summit: #e0902a; /* the summit of the home page's ridge only; never text */
-  --on-accent: #ffffff;
+  --text: #0f2b33;
+  --muted: #4b5d63;
+  --border: #e3e1d9;
+  --accent: #0f2b33;
+  --accent-hover: #1a4651;
+  --summit: #f2a93b; /* the pip: the logo's dot and the ridge's summit; never text */
+  --ridge-start: #1a4651;
+  --on-accent: #f8f7f3;
   --danger: #b42318;
   --danger-bg: #fdecea;
   --ok: #146c43;
@@ -24,7 +26,7 @@
   --on-danger: #ffffff;
   --warn: #9a6700;
   --info-bg: #eaf0fc;
-  --focus: #2952cc;
+  --focus: #1a4651;
   --shadow: 0 1px 2px rgb(16 24 40 / 5%), 0 4px 16px rgb(16 24 40 / 6%);
   --shadow-raised: 0 2px 6px rgb(16 24 40 / 6%), 0 18px 48px rgb(16 24 40 / 10%);
   --glass: rgb(255 255 255 / 72%);
@@ -49,15 +51,16 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #000000;
-  --surface: #16171b;
-  --text: #f2f3f6;
-  --muted: #a4abb8;
-  --border: #2a2c33;
-  --accent: #8ca2ff;
-  --accent-hover: #aebdff;
-  --summit: #f2b25a;
-  --on-accent: #000000;
+  --bg: #061519;
+  --surface: #0f2b33;
+  --text: #f8f7f3;
+  --muted: #a7bbc0;
+  --border: #23434c;
+  --accent: #f2a93b;
+  --accent-hover: #f5bd66;
+  --summit: #f2a93b;
+  --ridge-start: #7cc3cf;
+  --on-accent: #0f2b33;
   --danger: #ff8a80;
   --danger-bg: #3a1916;
   --ok: #6fd49b;
@@ -66,10 +69,10 @@
   --on-danger: #0e1013;
   --warn: #e3b341;
   --info-bg: #18233d;
-  --focus: #8aa8ff;
+  --focus: #f2a93b;
   --shadow: none;
   --shadow-raised: 0 18px 48px rgb(0 0 0 / 50%);
-  --glass: rgb(22 23 27 / 72%);
+  --glass: rgb(15 43 51 / 72%);
 
   color-scheme: dark;
 }
@@ -192,10 +195,19 @@ a {
   text-decoration: none;
 }
 
-.brand-mark {
-  width: 22px;
-  height: 22px;
-  color: var(--accent);
+.brand img {
+  display: block;
+  height: 26px;
+  width: auto;
+}
+
+.brand .logo-on-dark,
+:root[data-theme="dark"] .brand .logo-on-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .brand .logo-on-dark {
+  display: block;
 }
 
 .topbar nav ul {

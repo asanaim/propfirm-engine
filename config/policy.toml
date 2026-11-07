@@ -209,6 +209,13 @@ leaver_cutoff_max_hours = 24
 # (config/staff/courses.toml) passed within the last 12 months.
 training_gate = true
 training_valid_months = 12
+# Pre-employment screening [decided 7 Nov 2026] (config/staff/screening.toml):
+# every check at hire and every year; a lead (T3) records, an admin (T4)
+# approves (not a recorder, not the person); no staff access without a current
+# approval (owners exempt). Rescreening shows on the to-do list 30 days ahead.
+screening_required = true
+screening_valid_months = 12
+screening_due_days = 30
 # Oversight [staff spec 5d]. An urgent alert nobody acknowledged is raised
 # to leads and admins after `escalate_hours`. No sign-in for `dormant_days`:
 # access suspended until an admin reinstates (owners exempt). Leads review

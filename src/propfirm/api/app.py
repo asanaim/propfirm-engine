@@ -127,6 +127,8 @@ from propfirm.staff.masking import mask_pii
 from propfirm.staff.model import PERMISSIONS, TITLES, Access, Tier, legacy_access
 from propfirm.staff.oversight import Oversight, oversight_policy
 from propfirm.staff.records import Grant, Member, StaffRefused, access_of
+from propfirm.staff.screening import Screening
+from propfirm.staff.screening import checks as screening_checks
 from propfirm.staff.training import courses, current, valid_until
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 
@@ -382,6 +384,20 @@ class ReviewBody(_Body):
 class TrainingBody(_Body):
     section: Role
     note: Reason  # what was assessed, e.g. "course and test passed, 86 %"
+
+
+class ScreeningCheckBody(_Body):
+    check: Annotated[str, StringConstraints(pattern=r"^[a-z_]{1,40}$")]
+    result: Literal["pass", "fail"]
+    # the provider's or document's reference: never the report or the document
+    reference: Annotated[
+        str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
+    ]
+
+
+class ScreeningDecisionBody(_Body):
+    decision: Literal["approved", "rejected"]
+    note: Reason
 
 
 class ApprenticeProposalBody(_Body):
@@ -900,6 +916,15 @@ async def _staff_access(deps: Deps, me: Principal) -> Access:
     """The login's staff access; a login with any staff access must have
     signed in with a second factor (`staff.login_needs_mfa`)."""
     access = await _access(deps, me)
+    if access.source == "screening":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "screening_required",
+                "message": "your pre-employment screening is not complete or has expired; "
+                "staff access opens once an admin approves it",
+            },
+        )
     if access.tier is not None and deps.oversight is not None and me.mfa:
         await deps.oversight.signed_in(me.subject, deps.clock())  # dormant accounts (5d)
     if access.tier is not None and not me.mfa and (await _staff_policy(deps)).login_needs_mfa:
@@ -1187,6 +1212,15 @@ async def build_todo(deps: Deps, me: Principal, access: Access) -> list[dict[str
             if not sheet["acknowledged"]:
                 title = f"Read and acknowledge your duties: {sheet['title']} v{sheet['version']}"
                 out.append(_todo("duties", sheet["sheet"], title, now))
+    if deps.staff is not None:
+        for sid, what, sc in await deps.staff.screening_due(_actor(me), now):
+            if what == "approve":
+                title = f"Approve or reject the screening of {sid}"
+                out.append(_todo("screening_approve", sid, title, now))
+            else:
+                missing = ", ".join(sc.missing) or "renewal"
+                title = f"Screen {sid}: {missing}"
+                out.append(_todo("screening_check", sid, title, now, sc.valid_until))
     out.sort(key=lambda t: (t["due_at"] if t["due_at"] is not None else t["since"], t["ref"]))
     return out
 
@@ -2646,6 +2680,78 @@ def create_app(
             "passed_at": passed.passed_at,
             "assessor": passed.assessor,
         }
+
+    # --- pre-employment screening [7 Nov 2026] --------------------------------------------
+
+    def screening_view(sid: str, sc: Screening) -> dict[str, Any]:
+        return {
+            "sid": sid,
+            "status": sc.status,
+            "valid_until": sc.valid_until,
+            "missing": list(sc.missing),
+            "checks": [
+                {
+                    "id": c.id,
+                    "title": c.title,
+                    "text": c.text,
+                    "result": None if c.id not in sc.round else sc.round[c.id].result,
+                    "reference": None if c.id not in sc.round else sc.round[c.id].reference,
+                    "recorded_by": None if c.id not in sc.round else sc.round[c.id].recorded_by,
+                    "recorded_at": None if c.id not in sc.round else sc.round[c.id].ts,
+                }
+                for c in screening_checks()
+            ],
+            "last_decision": None
+            if sc.last_decision is None
+            else {
+                "decision": sc.last_decision.decision,
+                "note": sc.last_decision.note,
+                "decided_by": sc.last_decision.decided_by,
+                "ts": sc.last_decision.ts,
+                "valid_until": sc.last_decision.valid_until,
+            },
+        }
+
+    @app.get("/staff/members/{sid}/screening")
+    async def get_screening(
+        deps: D, me: Employee, sid: Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")]
+    ) -> dict[str, Any]:
+        """Restricted: T3 and above (or the person)."""
+        staff = directory(deps)
+        sc = await staff_step(lambda: staff.screening(_actor(me), sid, deps.clock()))
+        return screening_view(sid, sc)
+
+    @app.post("/staff/members/{sid}/screening/checks", status_code=201)
+    async def record_screening_check(
+        deps: D,
+        me: Employee,
+        sid: Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")],
+        body: ScreeningCheckBody,
+    ) -> dict[str, Any]:
+        """One check, recorded by a lead (T3) or above; never the person."""
+        staff, now = directory(deps), deps.clock()
+        await staff_step(
+            lambda: staff.record_check(
+                _actor(me), sid, body.check, body.result, body.reference, now
+            )
+        )
+        return screening_view(sid, await staff_step(lambda: staff.screening(_actor(me), sid, now)))
+
+    @app.post("/staff/members/{sid}/screening/decide")
+    async def decide_screening(
+        deps: D,
+        me: Employee,
+        sid: Annotated[str, Path(pattern=r"^(STF|APP)[0-9]{8}$")],
+        body: ScreeningDecisionBody,
+    ) -> dict[str, Any]:
+        """An admin (T4) approves (every check passed) or rejects the round;
+        never a recorder of it, never the person. A fresh second factor."""
+        await _step_up(deps, me)
+        staff, now = directory(deps), deps.clock()
+        await staff_step(
+            lambda: staff.decide_screening(_actor(me), sid, body.decision, body.note, now)
+        )
+        return screening_view(sid, await staff_step(lambda: staff.screening(_actor(me), sid, now)))
 
     def apprentices(deps: Deps) -> ApprenticeDesk:
         if deps.apprentices is None:

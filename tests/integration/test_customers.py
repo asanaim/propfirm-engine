@@ -118,10 +118,14 @@ async def platform(
     payout_provider: PayoutProvider | None = None,
     owners: Sequence[Owner] = (),
     legacy_roles: bool = True,
+    screening: bool = False,
 ) -> AsyncIterator[Platform]:
     """`funded`: funded orders wait for funded onboarding (sandbox identity
-    check), as the API process runs it; otherwise they open at payment."""
+    check), as the API process runs it; otherwise they open at payment.
+    `screening`: the pre-employment screening gate (on in the shipped policy;
+    off here unless a test is about it, so staff tests need not screen)."""
     policy = policy or load_policy()
+    policy = replace(policy, staff=replace(policy.staff, screening_required=screening))
     config = ServiceConfig(
         database_url=database_url,
         valkey_url=valkey_url,

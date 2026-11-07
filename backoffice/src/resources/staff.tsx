@@ -13,6 +13,7 @@ import {
 import { ActionButton } from "../ActionButton";
 import { JsonField, TimeField } from "../fields";
 import { when } from "../format";
+import { useGet } from "../useGet";
 import { History } from "./History";
 
 const choices = (xs: string[]) => xs.map((x) => ({ id: x, name: x }));
@@ -122,6 +123,84 @@ function MemberActions() {
   );
 }
 
+interface ScreeningCheck {
+  id: string;
+  title: string;
+  text: string;
+  result: "pass" | "fail" | null;
+  reference: string | null;
+  recorded_by: string | null;
+  recorded_at: number | null;
+}
+interface ScreeningView {
+  status: "approved" | "pending" | "incomplete" | "expired" | "rejected";
+  valid_until: number | null;
+  missing: string[];
+  checks: ScreeningCheck[];
+}
+
+const SCREENING_STATUS: Record<ScreeningView["status"], string> = {
+  approved: "Approved",
+  pending: "Every check passed: waiting for an admin",
+  incomplete: "Incomplete: no staff access until approved",
+  expired: "Expired: no staff access until rescreened",
+  rejected: "Rejected",
+};
+
+/** Pre-employment screening (Restricted, T3+): a lead records each check
+with a reference (never the document); an admin approves the whole round. */
+function Screening() {
+  const record = useRecordContext();
+  const sid = String(record?.sid ?? "");
+  const { result, reload } = useGet<ScreeningView>(`/staff/members/${sid}/screening`);
+  if (result.state === "loading") return <p>Loading screening…</p>;
+  if (result.state === "error") return <p>Screening: {result.message}</p>;
+  const sc = result.data;
+  const base = `/staff/members/${sid}/screening`;
+  return (
+    <section aria-label="Pre-employment screening">
+      <h3 style={{ margin: "16px 0 8px" }}>Pre-employment screening</h3>
+      <p>
+        {SCREENING_STATUS[sc.status]}
+        {sc.valid_until === null ? "" : ` (valid until ${when(sc.valid_until)})`}
+      </p>
+      <Table size="small" aria-label="screening checks">
+        <TableHead>
+          <TableRow>
+            <TableCell>Check</TableCell>
+            <TableCell>Result</TableCell>
+            <TableCell>Reference</TableCell>
+            <TableCell>Recorded</TableCell>
+            <TableCell />
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {sc.checks.map((c) => (
+            <TableRow key={c.id}>
+              <TableCell title={c.text}>{c.title}</TableCell>
+              <TableCell>{c.result ?? "-"}</TableCell>
+              <TableCell>{c.reference ?? "-"}</TableCell>
+              <TableCell>{c.recorded_at === null ? "-" : `${when(c.recorded_at)} by ${c.recorded_by ?? ""}`}</TableCell>
+              <TableCell>
+                <Stack direction="row" spacing={1}>
+                  <ActionButton label="Pass" path={`${base}/checks`} field="reference" fieldLabel="Reference (never the document)" extra={{ check: c.id, result: "pass" }} onDone={reload} />
+                  <ActionButton label="Fail" color="error" path={`${base}/checks`} field="reference" fieldLabel="Reference and finding" extra={{ check: c.id, result: "fail" }} onDone={reload} />
+                </Stack>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {sc.status === "pending" ? (
+        <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+          <ActionButton label="Approve screening" path={`${base}/decide`} field="note" fieldLabel="Note" extra={{ decision: "approved" }} onDone={reload} />
+          <ActionButton label="Reject screening" color="error" path={`${base}/decide`} field="note" fieldLabel="Why" extra={{ decision: "rejected" }} onDone={reload} />
+        </Stack>
+      ) : null}
+    </section>
+  );
+}
+
 export function MemberShow() {
   return (
     <Show>
@@ -139,6 +218,7 @@ export function MemberShow() {
         <TimeField source="starts_at" label="Started" />
         <TimeField source="ends_at" label="Ends" />
         <Grants />
+        <Screening />
         <History />
       </SimpleShowLayout>
     </Show>

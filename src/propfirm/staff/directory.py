@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from propfirm.policy import Policy, PolicySource
-from propfirm.staff.model import ROLES, Access, Tier, legacy_access, no_access
+from propfirm.staff.model import ROLES, Access, Tier, add_months, legacy_access, no_access
 from propfirm.staff.records import (
     SYSTEM,
     Grant,
@@ -28,6 +28,15 @@ from propfirm.staff.records import (
     check_revoke,
     parse_level,
 )
+from propfirm.staff.screening import (
+    DECISIONS,
+    RESULTS,
+    CheckRecord,
+    Decision,
+    Screening,
+    checks,
+)
+from propfirm.staff.screening import status as screening_status
 from propfirm.staff.store import StaffOps, StaffStore
 from propfirm.staff.training import Passed, courses, current
 
@@ -116,6 +125,101 @@ class Directory:
         async with self._store.read() as ops:
             return await ops.training(sid)
 
+    # --- pre-employment screening [7 Nov 2026] ---------------------------------------------
+
+    async def _screening(self, ops: StaffOps, sid: str, now: int) -> Screening:
+        records, decisions = await ops.screening(sid)
+        return screening_status([c.id for c in checks()], records, decisions, now)
+
+    async def screening(self, actor: Actor, sid: str, now: int) -> Screening:
+        """Restricted: a lead (T3) or above, or the person themself."""
+        async with self._store.read() as ops:
+            me = await self._access(ops, actor, now)
+            member = await self._member(ops, sid)
+            if me.subject != member.subject and (me.tier is None or me.tier < Tier.LEAD):
+                raise StaffRefused("forbidden", "screening records are seen by T3 and above")
+            return await self._screening(ops, sid, now)
+
+    async def record_check(
+        self, actor: Actor, sid: str, check: str, result: str, reference: str, now: int
+    ) -> CheckRecord:
+        """A lead (T3) or above, never the person, records one check."""
+        if check not in {c.id for c in checks()}:
+            raise StaffRefused("invalid", f"check must be one of {[c.id for c in checks()]}")
+        if result not in RESULTS:
+            raise StaffRefused("invalid", f"result must be one of {RESULTS}")
+        if not reference.strip():
+            raise StaffRefused("invalid", "a reference is required (never the document itself)")
+        async with self._store.change() as ops:
+            me = await self._access(ops, actor, now)
+            member = await self._member(ops, sid)
+            if me.subject == member.subject:
+                raise StaffRefused("own_access", "nobody records their own screening")
+            if me.tier is None or me.tier < Tier.LEAD:
+                raise StaffRefused("forbidden", "screening checks are recorded by T3 and above")
+            record = CheckRecord(sid, check, result, reference.strip(), actor.subject, now)
+            await ops.record_check(record)
+            return record
+
+    async def decide_screening(
+        self, actor: Actor, sid: str, decision: str, note: str, now: int
+    ) -> Decision:
+        """An admin (T4) or owner approves or rejects the open round: never the
+        person, never one who recorded a check in it; approval needs every
+        check passed and lasts `screening_valid_months`."""
+        if decision not in DECISIONS:
+            raise StaffRefused("invalid", f"decision must be one of {DECISIONS}")
+        staff = (await self._policy.current()).staff
+        async with self._store.change() as ops:
+            me = await self._access(ops, actor, now)
+            member = await self._member(ops, sid)
+            if me.subject == member.subject:
+                raise StaffRefused("own_access", "nobody approves their own screening")
+            if me.tier is None or me.tier < Tier.ADMIN:
+                raise StaffRefused("forbidden", "screening is approved by an admin (T4)")
+            current = await self._screening(ops, sid, now)
+            if not current.round:
+                raise StaffRefused("not_allowed", "no checks recorded since the last decision")
+            if actor.subject in current.recorders:
+                raise StaffRefused("four_eyes", "the approver recorded a check in this round")
+            if decision == "approved" and current.missing:
+                raise StaffRefused(
+                    "not_allowed", f"checks not passed: {', '.join(current.missing)}"
+                )
+            until = (
+                add_months(now, staff.screening_valid_months) if decision == "approved" else None
+            )
+            d = Decision(sid, decision, note, actor.subject, now, until)
+            await ops.record_decision(d)
+            return d
+
+    async def screening_due(self, actor: Actor, now: int) -> list[tuple[str, str, Screening]]:
+        """(sid, what, screening) owed by this login: for T3+, members whose
+        screening is incomplete, expired or expiring within `screening_due_days`
+        ("check"); for T4+, rounds waiting for approval ("approve")."""
+        staff = (await self._policy.current()).staff
+        if not staff.screening_required:
+            return []
+        out: list[tuple[str, str, Screening]] = []
+        async with self._store.read() as ops:
+            me = await self._access(ops, actor, now)
+            if me.tier is None or me.tier < Tier.LEAD:
+                return []
+            soon = now + staff.screening_due_days * 86_400_000
+            for m in await ops.members("active"):
+                if m.subject == actor.subject:
+                    continue
+                access = access_of(m, await ops.grants_of(m.sid), now)
+                if access.tier == Tier.OWNER:
+                    continue
+                sc = await self._screening(ops, m.sid, now)
+                if sc.status == "pending":
+                    if me.tier >= Tier.ADMIN and actor.subject not in sc.recorders:
+                        out.append((m.sid, "approve", sc))
+                elif sc.status != "approved" or (sc.valid_until or 0) <= soon:
+                    out.append((m.sid, "check", sc))
+        return out
+
     # --- access -----------------------------------------------------------------------
 
     async def _access(self, ops: StaffOps, actor: Actor, now: int) -> Access:
@@ -126,7 +230,14 @@ class Directory:
                 if self._legacy
                 else no_access(actor.subject)
             )
-        return access_of(member, await ops.grants_of(member.sid), now)
+        access = access_of(member, await ops.grants_of(member.sid), now)
+        if access.tier is None or access.tier == Tier.OWNER:
+            return access
+        if (await self._policy.current()).staff.screening_required:
+            sc = await self._screening(ops, member.sid, now)
+            if sc.status != "approved":
+                return no_access(actor.subject, "screening", member.sid)
+        return access
 
     async def access(self, actor: Actor, now: int) -> Access:
         async with self._store.read() as ops:

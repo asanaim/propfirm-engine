@@ -250,6 +250,28 @@ npm run typecheck && npm run lint && npm test && npm run build
   "BSD", read by hand as BSD-3-Clause (pinned to that version), and
   `(MPL-2.0 OR Apache-2.0)` packages are taken under Apache-2.0.
 
+## Pre-employment screening [decided 7 Nov 2026]
+
+Every employee (owners exempt) is screened at hire and every year
+(`config/staff/screening.toml`): identity, right to work, address,
+sanctions and PEP, background check (where lawful), references, conflicts
+of interest, personal and household trading accounts (the staff trading
+ban), signed agreements. Restricted data: the result and a reference only,
+never the report or a copy of a document.
+
+- A lead (T3) or above records each check (pass or fail, with a reference);
+  never the person. An admin (T4) or owner approves or rejects the round;
+  never the person, never one who recorded a check in it; approval needs
+  every check passed and lasts `staff.screening_valid_months` (12).
+- **No staff access until approved, and none after it expires**
+  (`staff.screening_required`): the API answers 403 `screening_required`.
+- To-do: T3+ see members to screen (incomplete, expired, or due within
+  `staff.screening_due_days`, 30); T4+ see rounds waiting for approval.
+- API: `GET /staff/members/{sid}/screening` (T3+ or the person),
+  `POST .../screening/checks` `{check, result, reference}`,
+  `POST .../screening/decide` `{decision, note}` (fresh second factor).
+  Back office: the member's page.
+
 ## Who sees what
 
 | View | Role | Sees and does |

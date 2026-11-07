@@ -54,11 +54,9 @@ export function Layout({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <header className="topbar">
-        <Link className="brand" href="/">
-          <svg className="brand-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M2 18 L8 11 L12 14 L17 6 L22 9" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          {config.brand}
+        <Link className="brand" href="/" aria-label={`${config.brand} home`}>
+          <img className="logo-on-light" src="/brand/logo.svg" alt="" width="108" height="26" />
+          <img className="logo-on-dark" src="/brand/logo-on-dark.svg" alt="" width="108" height="26" />
         </Link>
         <nav aria-label="Main">
           <ul>

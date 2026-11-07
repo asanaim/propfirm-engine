@@ -110,6 +110,10 @@ class StaffPolicy:
     # the training gate (5c): a section's course before a level in it
     training_gate: bool = True
     training_valid_months: int = 12
+    # pre-employment screening [7 Nov 2026]: no staff access without it
+    screening_required: bool = True
+    screening_valid_months: int = 12
+    screening_due_days: int = 30  # rescreening on the to-do list this long before
     # oversight (5d)
     escalate_hours: int = 4
     dormant_days: int = 30
@@ -516,6 +520,9 @@ def _staff(t: _Table) -> StaffPolicy:
         leaver_cutoff_max_hours=t.integer("leaver_cutoff_max_hours", 1),
         training_gate=t.boolean("training_gate"),
         training_valid_months=t.integer("training_valid_months", 1),
+        screening_required=t.boolean("screening_required"),
+        screening_valid_months=t.integer("screening_valid_months", 1),
+        screening_due_days=t.integer("screening_due_days", 1),
         escalate_hours=t.integer("escalate_hours", 1),
         dormant_days=t.integer("dormant_days", 1),
         review_days_lead=t.integer("review_days_lead", 1),
