@@ -12,6 +12,7 @@ from propfirm.policy import load_policy
 from propfirm.service.feeder import now_ms
 from propfirm.settings.overlay import CountryGating, apply_changes, stage_limits
 from propfirm.settings.store import ProposalDecided, SettingsStore, migrate, policy_in_force
+from propfirm.staff.directory import Owner
 from tests.integration.test_customers import ADULT, Platform, eventually, platform
 
 pytestmark = pytest.mark.integration
@@ -36,6 +37,19 @@ async def two_admins(p: Platform, url: str, body: object) -> httpx.Response:
     pid = proposed.json()["proposal"]["id"]
     return await p.call(
         "POST", f"/admin/settings/proposals/{pid}/approve", "admin-2", {"reason": "ok"}, ADMIN
+    )
+
+
+OWNERS = (Owner("owner-a", "Owner A"), Owner("owner-b", "Owner B"))
+
+
+async def two_owners(p: Platform, url: str, body: object) -> httpx.Response:
+    """Rule AC01: owner A proposes a product change, owner B approves it."""
+    proposed = await p.call("PUT", url, "owner-a", body, ())
+    assert proposed.json()["status"] == "proposed", proposed.text
+    pid = proposed.json()["proposal"]["id"]
+    return await p.call(
+        "POST", f"/admin/settings/proposals/{pid}/approve", "owner-b", {"reason": "ok"}, ()
     )
 
 
@@ -100,7 +114,7 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
     database_url: str, valkey_url: str, pg_schema: str
 ) -> None:
     async def scenario() -> None:
-        async with platform(database_url, valkey_url, pg_schema) as p:
+        async with platform(database_url, valkey_url, pg_schema, owners=OWNERS) as p:
             await p.call("POST", "/me", body=ADULT)
 
             async def buy() -> str:
@@ -113,7 +127,9 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             before = await buy()
             refused = await p.call("PUT", LIMITS_URL, "u1", NEW_LIMITS)  # a trader
             assert refused.status_code == 403
-            changed = await two_admins(p, LIMITS_URL, NEW_LIMITS)
+            by_admin = await p.call("PUT", LIMITS_URL, "admin-1", NEW_LIMITS, ADMIN)
+            assert by_admin.json()["detail"]["code"] == "owners_only"
+            changed = await two_owners(p, LIMITS_URL, NEW_LIMITS)
             assert changed.status_code == 200, changed.text
             assert changed.json()["rsv_id"] == "one-step-s1-v2-a1"
             after = await buy()
@@ -169,9 +185,9 @@ def test_limits_changed_while_the_engine_is_down_apply_once_it_has_them(
 ) -> None:
     async def scenario() -> None:
         async with platform(
-            database_url, valkey_url, pg_schema, wait_s=0.3, start_engine=False
+            database_url, valkey_url, pg_schema, wait_s=0.3, start_engine=False, owners=OWNERS
         ) as p:
-            pending = await two_admins(p, LIMITS_URL, NEW_LIMITS)
+            pending = await two_owners(p, LIMITS_URL, NEW_LIMITS)
             assert pending.status_code == 202 and pending.json()["status"] == "pending"
             await p.call("POST", "/me", body=ADULT)
             order = (await p.call("POST", "/orders", body=ONE_STEP_25K)).json()

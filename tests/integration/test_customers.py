@@ -474,7 +474,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8]
+            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8, 9]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
