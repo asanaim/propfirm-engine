@@ -43,6 +43,8 @@ from fastapi import FastAPI
 
 from propfirm.api.app import Deps, create_app
 from propfirm.api.auth import JwksKeys, TokenVerifier
+from propfirm.audit.store import AuditStore
+from propfirm.audit.store import migrate as migrate_audit
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
@@ -212,6 +214,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         if fixed:
             log.warning("cached status differed from the history and was rebuilt: %s", fixed)
+        async with pool.acquire() as conn:
+            await migrate_audit(conn, config.audit_schema)
         settings_store = await SettingsStore.open(pool, config.settings_schema)
         settings = Settings(policy, settings_store, gateway, proposals=settings_store)
         news = NewsDesk(
@@ -374,6 +378,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,
             country_header=config.country_header,
+            audit=AuditStore(pool, config.audit_schema),
+            client_ip_header=config.client_ip_header,
             price_source=config.price_source,
         )
         yield

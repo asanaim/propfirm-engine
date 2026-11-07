@@ -65,6 +65,10 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
+from propfirm.audit.chain import AuditEvent
+from propfirm.audit.http import UNMATCHED, audited, clean, client_ip
+from propfirm.audit.http import target as audit_target
+from propfirm.audit.store import AuditStore
 from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
@@ -208,6 +212,8 @@ class Deps:
     cutoffs: Cutoffs | None = None  # leavers' logins disabled at the identity provider
     apprentices: ApprenticeDesk | None = None  # apprentices' proposals to their mentors
     oversight: Oversight | None = None  # sign-ins, dormant accounts, reviews, anomalies
+    audit: AuditStore | None = None  # the security audit trail (7b); None: not recorded
+    client_ip_header: str | None = None  # set by a trusted proxy (X-Forwarded-For), else None
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
@@ -865,13 +871,17 @@ def _deps(request: Request) -> Deps:
 D = Annotated[Deps, Depends(_deps)]
 
 
-async def _principal(deps: D, authorization: Annotated[str | None, Header()] = None) -> Principal:
+async def _principal(
+    request: Request, deps: D, authorization: Annotated[str | None, Header()] = None
+) -> Principal:
     try:
-        return await deps.verifier.verify(bearer_token(authorization))
+        principal = await deps.verifier.verify(bearer_token(authorization))
     except AuthError as exc:
         raise HTTPException(
             status_code=401, detail=str(exc), headers={"WWW-Authenticate": "Bearer"}
         ) from exc
+    request.state.subject = principal.subject  # for the audit trail
+    return principal
 
 
 Me = Annotated[Principal, Depends(_principal)]
@@ -1287,6 +1297,43 @@ def create_app(
         if not response.headers.get("content-type", "").startswith("application/json"):
             return Response(b"", status_code=500)  # never pass an unmasked body on
         return JSONResponse(mask_pii(json.loads(body)), status_code=response.status_code)
+
+    @app.middleware("http")
+    async def audit_trail(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Every audited request (`propfirm.audit.http`) is appended to the
+        hash-chained audit trail after it is answered; the answer carries
+        the record's request id. A failed write is logged, never turned
+        into a failed request (the action has happened by then)."""
+        deps: Deps | None = request.app.state.deps
+        if deps is None or deps.audit is None:
+            return await call_next(request)
+        request_id = deps.new_id()
+        response = await call_next(request)
+        response.headers["X-Request-Id"] = request_id
+        route = getattr(request.scope.get("route"), "path", UNMATCHED)
+        if not audited(request.method, route, response.status_code):
+            return response
+        try:
+            event = AuditEvent(
+                deps.clock(),
+                clean(getattr(request.state, "subject", None) or "anonymous", 200),
+                f"{clean(request.method, 7)} {clean(route, 200)}",
+                audit_target(request.path_params),
+                response.status_code,
+                client_ip(
+                    request.headers.get(deps.client_ip_header) if deps.client_ip_header else None,
+                    request.client.host if request.client else None,
+                ),
+                request_id,
+            )
+            await deps.audit.append(event)
+        except Exception:  # logged; the response stands
+            logging.getLogger(__name__).exception(
+                "audit record not written for %s %s", request.method, route
+            )
+        return response
 
     async def submit(deps: Deps, build: Callable[[int], Input]) -> JSONResponse:
         try:
@@ -2911,5 +2958,60 @@ def create_app(
             raise HTTPException(status_code=403, detail="admins and owners read the report")
         policy = oversight_policy(await _staff_policy(deps))
         return await oversight(deps).anomalies(deps.clock() - days * DAY_MS, policy)
+
+    @app.get("/staff/audit")
+    async def audit_log(
+        deps: D,
+        me: Employee,
+        before: Annotated[int, Query(ge=0)] = 0,
+        actor: Annotated[str | None, Query(max_length=200)] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> dict[str, Any]:
+        """The security audit trail, newest first, and the auditor's last
+        check (admins and owners). `before`: a seq, to page back."""
+        access = await _staff_access(deps, me)
+        if access.tier is None or access.tier < Tier.ADMIN:
+            raise HTTPException(status_code=403, detail="admins and owners read the audit trail")
+        if deps.audit is None:
+            raise HTTPException(status_code=404, detail="no audit trail on this server")
+        head, _ = await deps.audit.head()
+        records = await deps.audit.records(
+            after=before, limit=limit, actor=actor, newest_first=True
+        )
+        names: dict[str, str] = {}
+        if deps.staff is not None:
+            async with deps.staff.store.read() as ops:
+                for subject in {r.event.actor for r in records}:
+                    member = await ops.member_by_subject(subject)
+                    if member is not None:
+                        names[subject] = f"{member.name} ({member.sid})"
+        status = await deps.audit.status()
+        return {
+            "head": head,
+            "status": None
+            if status is None
+            else {
+                "checked_at": status.checked_at,
+                "verified_seq": status.verified_seq,
+                "anchored_seq": status.anchored_seq,
+                "broken_seq": status.broken_seq,
+                "broken_reason": status.broken_reason,
+            },
+            "records": [
+                {
+                    "seq": r.seq,
+                    "ts": r.event.ts,
+                    "actor": r.event.actor,
+                    "actor_name": names.get(r.event.actor),
+                    "action": r.event.action,
+                    "target": r.event.target,
+                    "status": r.event.status,
+                    "ip": r.event.ip,
+                    "request_id": r.event.request_id,
+                    "hash": r.hash,
+                }
+                for r in records
+            ],
+        }
 
     return app
