@@ -241,8 +241,11 @@ def test_an_open_case_holds_funded_reviews_and_contracts(
                 "/staff/cases/CAS00000001/decide",
                 body={"outcome": "warning", "reason": "first time"},
             )
+            # rule AC00: one proposes, another carries it out
+            proposed = await staff(p, "POST", f"{url}/approve", "staff-2", {"reason": "ok"})
+            assert proposed.json()["proposal"]["by"] == "staff-2", proposed.text
             approved = await staff(p, "POST", f"{url}/approve", body={"reason": "ok"})
-            assert approved.status_code == 200
+            assert approved.status_code == 200 and approved.json()["status"] == "approved"
 
             # a case opened during onboarding holds the contract
             assert p.onboarding is not None

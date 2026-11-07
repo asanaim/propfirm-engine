@@ -20,18 +20,22 @@ from propfirm.policy import DEFAULT_POLICY, PolicyError, load_policy, parse_poli
 from propfirm.rules.products import MaxLossKind, Stage
 from propfirm.service.gateway import Outcome
 from propfirm.service.setup import policy_changes, setup_from_policy
+from propfirm.settings.authority import Refused, check_approver
 from propfirm.settings.overlay import (
     CountryGating,
     Setting,
     SettingChange,
+    StandIn,
     apply_changes,
     from_json,
     limits_rule_set,
     stage_limits,
+    stand_in_in_force,
     to_json,
 )
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.store import ChangeStatus, Proposal, ProposalDecided
+from propfirm.staff.model import ROLES, Access, Tier, legacy_access
 from tests.auth_rig import FakeCustomers, bearer, verifier
 
 BASE = load_policy()
@@ -368,9 +372,12 @@ def api(
     signed_in: bool = True,
     proposals: MemoryProposals | None = None,
     user: str = "admin-1",
+    tiers: dict[str, Tier] | None = None,
 ) -> httpx.Response:
     """Without `proposals`, the policy runs without maker-checker (the
-    direct path); with them, as shipped (a second admin approves)."""
+    direct path); with them, as shipped (a second person approves).
+    `tiers`: firm-wide tiers from a staff directory (owners, admins); others
+    keep their Keycloak roles."""
     base = BASE
     if proposals is None:
         staff = dataclasses.replace(BASE.staff, settings_need_second_admin=False)
@@ -386,6 +393,7 @@ def api(
         policy=settings,
         settings=settings,
         clock=lambda: T0,
+        staff=None if tiers is None else TierStaff(tiers),  # type: ignore[arg-type]
     )
     app = create_app(deps)
     headers = bearer(user, roles) if signed_in else {}
@@ -397,6 +405,22 @@ def api(
 
     return asyncio.run(go())
 
+
+class TierStaff:
+    """A staff directory that knows only firm-wide tiers."""
+
+    def __init__(self, tiers: dict[str, Tier]) -> None:
+        self._tiers = tiers
+
+    async def access(self, actor: Any, now: int) -> Access:
+        tier = self._tiers.get(actor.subject)
+        if tier is None:
+            return legacy_access(actor.subject, frozenset(actor.roles))
+        return Access(actor.subject, "directory", tier, frozenset(ROLES))
+
+
+OWNERS = {"owner-a": Tier.OWNER, "owner-b": Tier.OWNER, "admin-1": Tier.ADMIN,
+          "admin-2": Tier.ADMIN}  # fmt: skip
 
 GATING = {"country_gating": True, "blocked_countries": ["BD", "IN"], "reason": "counsel C8"}
 LIMITS = {
@@ -459,7 +483,7 @@ def test_admin_changes_gating_and_the_history_shows_who_and_why() -> None:
 
 def test_admin_changes_stage_limits() -> None:
     records = MemoryRecords()
-    changed = api("PUT", LIMITS_URL, LIMITS, records=records)
+    changed = api("PUT", LIMITS_URL, LIMITS, records=records, tiers=OWNERS, user="owner-a")
     assert changed.status_code == 200, changed.text
     body = changed.json()
     assert (body["status"], body["rsv_id"]) == ("applied", "one-step-s1-v2-a1")
@@ -480,7 +504,8 @@ def test_admin_changes_stage_limits() -> None:
 
 def test_stage_limits_while_the_engine_is_down_answer_202() -> None:
     records = MemoryRecords()
-    pending = api("PUT", LIMITS_URL, LIMITS, records=records, engine=Engine(down=True))
+    pending = api("PUT", LIMITS_URL, LIMITS, records=records, engine=Engine(down=True),
+                  tiers=OWNERS, user="owner-a")  # fmt: skip
     assert pending.status_code == 202
     assert pending.json()["status"] == "pending" and pending.json()["change"]["status"] == "pending"
     (entry,) = api("GET", "/admin/settings/changes", records=records).json()
@@ -509,13 +534,16 @@ def test_stage_limits_while_the_engine_is_down_answer_202() -> None:
 )
 def test_admin_changes_the_api_refuses(url: str, body: Any, status: int) -> None:
     records = MemoryRecords()
-    assert api("PUT", url, body, records=records).status_code == status
+    assert (
+        api("PUT", url, body, records=records, tiers=OWNERS, user="owner-a").status_code == status
+    )
     assert records.changes == []
 
 
 def test_funded_limits_take_no_profit_target() -> None:
     funded = {**LIMITS, "profit_target_percent": None}
-    changed = api("PUT", "/admin/products/one-step/stages/funded/limits", funded)
+    changed = api("PUT", "/admin/products/one-step/stages/funded/limits", funded, tiers=OWNERS,
+                  user="owner-a")  # fmt: skip
     assert changed.status_code == 200, changed.text
     assert changed.json()["rsv_id"] == "one-step-funded-v1-a1"
 
@@ -566,13 +594,13 @@ def test_a_gating_change_waits_for_a_second_admin() -> None:
 def test_stage_limits_are_checked_when_proposed_and_published_when_approved() -> None:
     records = MemoryRecords()
     proposals = MemoryProposals(records)
-    bad = api("PUT", LIMITS_URL, {**LIMITS, "daily_loss_percent": "6"}, records=records,
-              proposals=proposals)  # fmt: skip
+    kw: dict[str, Any] = {"records": records, "proposals": proposals, "tiers": OWNERS}
+    bad = api("PUT", LIMITS_URL, {**LIMITS, "daily_loss_percent": "6"}, user="owner-a", **kw)
     assert bad.status_code == 422 and proposals.items == {}
-    proposed = api("PUT", LIMITS_URL, LIMITS, records=records, proposals=proposals)
+    proposed = api("PUT", LIMITS_URL, LIMITS, user="owner-a", **kw)
     assert proposed.status_code == 202 and proposed.json()["status"] == "proposed"
     approved = api("POST", "/admin/settings/proposals/1/approve", {"reason": "ok"},
-                   records=records, proposals=proposals, user="admin-2")  # fmt: skip
+                   user="owner-b", **kw)  # fmt: skip
     assert approved.status_code == 200, approved.text
     assert (approved.json()["status"], approved.json()["rsv_id"]) == (
         "applied",
@@ -644,3 +672,100 @@ def test_realm_gives_each_app_only_its_roles() -> None:
         "staff1@example.com": {"staff"},
         "admin1@example.com": {"admin"},
     }
+
+
+# --- rule AC00 and AC01: two people for every decision; products are owner level ----------
+
+DAY = 86_400_000
+
+
+def test_the_policy_file_cannot_switch_the_two_person_rule_off() -> None:
+    with DEFAULT_POLICY.open("rb") as fh:
+        raw = tomllib.load(fh)
+    raw["staff"]["settings_need_second_admin"] = False
+    with pytest.raises(PolicyError, match="AC00"):
+        parse_policy(raw)
+    assert BASE.staff.stand_in_max_days == 30
+
+
+def test_only_an_owner_proposes_a_product_change_and_only_the_other_owner_approves() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    kw: dict[str, Any] = {"records": records, "proposals": proposals, "tiers": OWNERS}
+    by_admin = api("PUT", LIMITS_URL, LIMITS, user="admin-1", **kw)
+    assert (by_admin.status_code, by_admin.json()["detail"]["code"]) == (403, "owners_only")
+    assert proposals.items == {}
+    assert api("PUT", LIMITS_URL, LIMITS, user="owner-a", **kw).status_code == 202
+    url = "/admin/settings/proposals/1"
+    for user, code in (("owner-a", "four_eyes"), ("admin-2", "owners_only")):
+        refused = api("POST", f"{url}/approve", {"reason": "x"}, user=user, **kw)
+        assert (refused.status_code, refused.json()["detail"]["code"]) == (403, code)
+    assert records.changes == []
+    by_admin_reject = api("POST", f"{url}/reject", {"reason": "x"}, user="admin-2", **kw)
+    assert by_admin_reject.json()["detail"]["code"] == "owners_only"
+    approved = api("POST", f"{url}/approve", {"reason": "agreed"}, user="owner-b", **kw)
+    assert approved.status_code == 200, approved.text
+    change = approved.json()["change"]
+    assert (change["author"], change["approved_by"]) == ("owner-a", "owner-b")
+
+
+def test_country_gating_stays_with_admins_and_owners() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    kw: dict[str, Any] = {"records": records, "proposals": proposals, "tiers": OWNERS}
+    assert (
+        api("PUT", "/admin/access/country-gating", GATING, user="admin-1", **kw).status_code == 200
+    )
+    approved = api("POST", "/admin/settings/proposals/1/approve", {"reason": "ok"},
+                   user="owner-b", **kw)  # fmt: skip
+    assert approved.status_code == 200, approved.text
+
+
+def stand_in(user: str, subject: str | None, until: int, **kw: Any) -> httpx.Response:
+    body = {"subject": subject, "until": until, "reason": "owner B travelling"}
+    return api("PUT", "/admin/owners/stand-in", body, user=user, **kw)
+
+
+def test_both_owners_appoint_a_stand_in_who_approves_a_product_change() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    kw: dict[str, Any] = {"records": records, "proposals": proposals, "tiers": OWNERS}
+    # an admin cannot appoint; the stand-in must be an admin, for a limited time
+    assert stand_in("admin-1", "admin-2", T0 + DAY, **kw).json()["detail"]["code"] == "owners_only"
+    for subject, until in (("owner-b", T0 + DAY), ("nobody", T0 + DAY), ("admin-2", T0 + 31 * DAY),
+                           ("admin-2", T0)):  # fmt: skip
+        refused = stand_in("owner-a", subject, until, **kw)
+        assert (refused.status_code, refused.json()["detail"]["code"]) == (422, "invalid")
+    assert stand_in("owner-a", "admin-2", T0 + 7 * DAY, **kw).status_code == 200
+    # the appointment itself needs the other owner; the stand-in never approves it
+    own = api("POST", "/admin/settings/proposals/1/approve", {"reason": "x"}, user="admin-2", **kw)
+    assert own.json()["detail"]["code"] == "owners_only"
+    assert api("GET", "/admin/owners/stand-in", **kw).json()["stand_in"] is None
+    ok = api("POST", "/admin/settings/proposals/1/approve", {"reason": "ok"}, user="owner-b", **kw)
+    assert ok.status_code == 200, ok.text
+    view = api("GET", "/admin/owners/stand-in", **kw).json()
+    assert view == {"stand_in": {"subject": "admin-2", "until": T0 + 7 * DAY}, "max_days": 30}
+    # owner A proposes a product change; owner B is away: the stand-in approves
+    assert api("PUT", LIMITS_URL, LIMITS, user="owner-a", **kw).status_code == 202
+    other_admin = api("POST", "/admin/settings/proposals/2/approve", {"reason": "x"},
+                      user="admin-1", **kw)  # fmt: skip
+    assert other_admin.json()["detail"]["code"] == "owners_only"
+    approved = api("POST", "/admin/settings/proposals/2/approve", {"reason": "checked"},
+                   user="admin-2", **kw)  # fmt: skip
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["change"]["approved_by"] == "admin-2"
+
+
+def test_a_stand_in_runs_out_and_never_approves_a_stand_in_change() -> None:
+    later = SettingChange(1, StandIn("admin-2", T0 + DAY), "owner-a", None, "r", T0, "owner-b", 1)
+    assert stand_in_in_force([later], T0) == StandIn("admin-2", T0 + DAY)
+    assert stand_in_in_force([later], T0 + DAY) is None
+    ended = SettingChange(2, StandIn(None, 0), "owner-b", None, "back", T0, "owner-a", 2)
+    assert stand_in_in_force([later, ended], T0) is None
+    with pytest.raises(Refused) as exc:
+        check_approver(StandIn(None, 0), "owner-a", "admin-2", Tier.ADMIN,
+                       StandIn("admin-2", T0 + DAY))  # fmt: skip
+    assert exc.value.code == "owners_only"
+    kind, value = to_json(StandIn("admin-2", 5))
+    assert from_json(kind, json.loads(json.dumps(value))) == StandIn("admin-2", 5)
+    assert apply_changes(BASE, [later]) == BASE  # not part of the policy

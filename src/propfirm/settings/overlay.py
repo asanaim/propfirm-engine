@@ -1,11 +1,15 @@
 """Admin settings layered over the policy file.
 
-Admins (only) change two kinds of setting at run time; the policy file
-holds their starting values:
+Three kinds of setting change at run time; the policy file holds the
+starting values of the first two:
 
-- country gating: the switch and the list of blocked countries;
-- stage limits: a product stage's profit target, daily loss limit and
-  drawdown (maximum loss) limit with its kind, static or trailing.
+- country gating (admins): the switch and the list of blocked countries;
+- stage limits (owners only, rule AC01): a product stage's profit target,
+  daily loss limit and drawdown (maximum loss) limit with its kind, static
+  or trailing;
+- the owners' stand-in approver (owners only, rule AC00): an admin who may
+  approve an owner-level proposal while an owner is unavailable, until a
+  set time. It has no starting value: by default there is none.
 
 Each change is a numbered, append-only record with its author and reason;
 the latest change of a setting wins. A stage-limits change makes a new
@@ -35,6 +39,7 @@ from propfirm.rules.products import MaxLossKind, RuleSet, Stage
 
 COUNTRY_GATING = "country_gating"
 STAGE_LIMITS = "stage_limits"
+STAND_IN = "stand_in"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +58,18 @@ class StageLimits:
     max_loss_kind: MaxLossKind
 
 
-type Setting = CountryGating | StageLimits
+@dataclass(frozen=True, slots=True)
+class StandIn:
+    """The owners' stand-in approver: `subject` (an admin, never an owner)
+    may approve owner-level proposals (stage limits) until `until` (UTC
+    milliseconds). Never a proposal of their own, never a stand-in change.
+    `subject` None ends the appointment."""
+
+    subject: str | None
+    until: int  # 0 when ended
+
+
+type Setting = CountryGating | StageLimits | StandIn
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +108,8 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
                 gating = value
             case StageLimits() as value:
                 limits[(value.product_id, value.stage)] = change
+            case StandIn():
+                pass  # not part of the policy: `stand_in_in_force`
     access = base.access
     if gating is not None:
         access = replace(
@@ -110,6 +128,18 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
             rule_sets.append(rule_set)
         products.append(replace(product, rule_sets=tuple(rule_sets)))
     return replace(base, access=access, products=tuple(products))
+
+
+def stand_in_in_force(changes: Iterable[SettingChange], now: int) -> StandIn | None:
+    """The owners' stand-in approver at `now`: the latest stand-in change,
+    if it names someone and has not run out."""
+    latest: StandIn | None = None
+    for change in sorted(changes, key=lambda c: c.id):
+        if isinstance(change.setting, StandIn):
+            latest = change.setting
+    if latest is None or latest.subject is None or now >= latest.until:
+        return None
+    return latest
 
 
 # --- stored form (JSON; percentages as exact text, as in the policy file) -------------
@@ -132,6 +162,8 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
                 "max_loss_percent": percent_text(setting.max_loss),
                 "max_loss_kind": setting.max_loss_kind.value,
             }
+        case StandIn():
+            return STAND_IN, {"subject": setting.subject, "until": setting.until}
 
 
 def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
@@ -151,6 +183,13 @@ def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
             value["max_loss_percent"],
             value["max_loss_kind"],
         )
+    if kind == STAND_IN:
+        subject, until = value["subject"], value["until"]
+        if subject is not None and not isinstance(subject, str):
+            raise PolicyError("stand-in subject must be text or null")
+        if not isinstance(until, int) or isinstance(until, bool) or until < 0:
+            raise PolicyError("stand-in until must be milliseconds")
+        return StandIn(subject, until)
     raise PolicyError(f"unknown setting kind {kind!r}")
 
 

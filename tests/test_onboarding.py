@@ -133,7 +133,10 @@ def test_histories_no_valid_onboarding_has_are_refused(steps: tuple[Step, ...]) 
 
 def test_the_migration_allows_exactly_the_kinds_and_statuses() -> None:
     sql = dict(_MIGRATIONS)[4]
-    kinds = re.search(r"kind IN \(([^)]*)\)", sql)
+    # the kinds as widened last (migration 9, rule AC00)
+    kinds = re.search(
+        r"onboarding_events_kind_check\s+CHECK \(kind IN \(([^)]*)\)", dict(_MIGRATIONS)[9]
+    )
     statuses = re.search(r"status IN \(([^)]*)\)", sql)
     assert kinds is not None and statuses is not None
     assert tuple(re.findall(r"'([a-z_]+)'", kinds.group(1))) == ONBOARDING_KINDS

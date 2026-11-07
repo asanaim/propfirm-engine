@@ -16,6 +16,7 @@ from typing import Any
 
 import asyncpg
 
+from propfirm.customers.four_eyes import SameProposer, next_event, open_proposal
 from propfirm.customers.kyc import KycDecision
 from propfirm.customers.onboarding import (
     ONBOARDING_KINDS,
@@ -444,8 +445,12 @@ class OnboardingStore:
             own = await conn.fetchval(f"SELECT cif FROM {s}.cif WHERE subject = $1", subject)
             if own == record.cif:
                 raise OnboardingStateError("own_onboarding", "nobody decides their own review")
-            kind = "approved" if approve else "denied"
-            detail = {"by": subject, "by_email": email, "reason": reason}
+            # rule AC00: the first decision is a proposal; a second person decides
+            proposal = open_proposal(await self._events(conn, onb))
+            try:
+                kind, detail = next_event(proposal, approve, subject, email, reason)
+            except SameProposer as exc:
+                raise OnboardingStateError("four_eyes", str(exc)) from exc
             return await self._append(conn, onb, kind, ts, detail)
 
     # --- cache --------------------------------------------------------------------

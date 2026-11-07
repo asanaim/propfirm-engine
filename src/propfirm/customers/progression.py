@@ -36,6 +36,8 @@ PROGRESSION_KINDS = (
     "failed",
     "approved",
     "denied",
+    "proposed",  # rule AC00: the first of two people
+    "proposal_rejected",  # the second disagreed: the review stays open
 )
 EVALUATION_STAGES = (Stage.S1, Stage.S2)
 
@@ -106,6 +108,9 @@ def progression_state(prg: str, events: Iterable[ProgressionEvent]) -> Progressi
                 if status != "provisioning" or to_acc is not None:
                     raise refuse(event)
                 to_acc = str(detail["acc"])
+            case "proposed" | "proposal_rejected":
+                if status != "review":
+                    raise refuse(event)
             case "provision_attempted":
                 if status != "provisioning" or to_acc is None:
                     raise refuse(event)

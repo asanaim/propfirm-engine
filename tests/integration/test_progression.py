@@ -125,6 +125,12 @@ def test_a_pass_opens_the_next_stage_and_the_last_waits_for_review(
             assert (await p.call("POST", f"{url}/approve", body=decision)).status_code == 403
             own = await p.call("POST", f"{url}/approve", "u1", decision, ("trader", "staff"))
             assert own.status_code == 403 and own.json()["detail"]["code"] == "own_progression"
+            # rule AC00: staff-2 proposes; the proposer cannot carry it out; staff-1 does
+            proposed = await p.call("POST", f"{url}/approve", "staff-2", decision, STAFF)
+            assert proposed.json()["status"] == "review", proposed.text
+            assert proposed.json()["proposal"]["decision"] == "approve"
+            own_prop = await p.call("POST", f"{url}/approve", "staff-2", decision, STAFF)
+            assert own_prop.json()["detail"]["code"] == "four_eyes"
             approved = await p.call("POST", f"{url}/approve", "staff-1", decision, STAFF)
             assert approved.status_code == 200, approved.text
             assert (approved.json()["status"], approved.json()["decided_by"]) == (
@@ -135,7 +141,7 @@ def test_a_pass_opens_the_next_stage_and_the_last_waits_for_review(
             assert again.status_code == 409
 
             detail = (await p.call("GET", url, "staff-1", roles=STAFF)).json()
-            assert [h["kind"] for h in detail["history"]] == ["created", "approved"]
+            assert [h["kind"] for h in detail["history"]] == ["created", "proposed", "approved"]
             created = detail["history"][0]["detail"]
             assert (created["from_rsv_id"], created["trading_days"], created["to_stage"]) == (
                 "lite-s2-v2",

@@ -1,16 +1,9 @@
-import AssignmentIcon from "@mui/icons-material/Assignment";
-import BadgeIcon from "@mui/icons-material/Badge";
-import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import EventIcon from "@mui/icons-material/Event";
-import FactCheckIcon from "@mui/icons-material/FactCheck";
-import GavelIcon from "@mui/icons-material/Gavel";
-import PaymentsIcon from "@mui/icons-material/Payments";
-import SchoolIcon from "@mui/icons-material/School";
-import TuneIcon from "@mui/icons-material/Tune";
 import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, Stack, Typography } from "@mui/material";
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Title } from "react-admin";
 import { ApiError } from "./api";
+import { ICONS, SIZE, STROKE } from "./icons";
 import type { Me } from "./auth";
 import { useBackOffice } from "./context";
 import { when } from "./format";
@@ -71,15 +64,15 @@ export function linkFor(t: Pick<Todo, "kind" | "ref">): string | null {
   return null;
 }
 
-const AREA_ICON: Record<string, typeof PaymentsIcon> = {
-  Payouts: PaymentsIcon,
-  Cases: GavelIcon,
-  Reviews: FactCheckIcon,
-  News: EventIcon,
-  Settings: TuneIcon,
-  Staff: BadgeIcon,
-  Training: SchoolIcon,
-  Duties: AssignmentIcon,
+const AREA_ICON: Record<string, LucideIcon> = {
+  Payouts: ICONS.payouts,
+  Cases: ICONS.cases,
+  Reviews: ICONS.progressions,
+  News: ICONS.news,
+  Settings: ICONS.settings,
+  Staff: ICONS.staff,
+  Training: ICONS.training,
+  Duties: ICONS.duties,
 };
 
 function useNow(): number {
@@ -114,14 +107,14 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "def
 function TodoRow({ t, now }: { t: Todo; now: number }) {
   const to = linkFor(t);
   const area = areaOf(t.kind);
-  const Icon = AREA_ICON[area] ?? BadgeIcon;
+  const Icon = AREA_ICON[area] ?? ICONS.staff;
   const u = urgency(t, now);
   const due =
     t.due_at === null ? null : u === "overdue" ? `overdue ${age(now - t.due_at)}` : `due in ${age(t.due_at - now)}`;
   const body = (
     <Box className={`todo todo-${u}`}>
       <Box className="todo-icon" aria-hidden="true">
-        <Icon fontSize="small" />
+        <Icon size={SIZE} strokeWidth={STROKE} />
       </Box>
       <Box sx={{ minWidth: 0, flex: 1 }}>
         <Typography sx={{ fontWeight: 600 }}>{t.title}</Typography>
@@ -130,7 +123,7 @@ function TodoRow({ t, now }: { t: Todo; now: number }) {
         </Typography>
       </Box>
       {due === null ? null : <Chip size="small" label={due} color={u === "overdue" ? "error" : "warning"} variant={u === "overdue" ? "filled" : "outlined"} />}
-      {to === null ? null : <ChevronRightIcon aria-hidden="true" color="action" />}
+      {to === null ? null : <ICONS.next aria-hidden="true" size={SIZE} strokeWidth={STROKE} className="todo-next" />}
     </Box>
   );
   return <li>{to === null ? body : <Link to={to} className="todo-link">{body}</Link>}</li>;

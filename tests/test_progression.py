@@ -140,7 +140,7 @@ def test_histories_no_valid_progression_has_are_refused(steps: tuple[Step, ...])
 
 
 def test_the_migration_allows_exactly_the_progression_event_kinds() -> None:
-    sql = dict(_MIGRATIONS)[3]
+    sql = dict(_MIGRATIONS)[9]  # the kinds as widened last (rule AC00)
     found = re.search(r"kind IN \(([^)]*)\)", sql)
     assert found is not None
     assert tuple(re.findall(r"'([a-z_]+)'", found.group(1))) == PROGRESSION_KINDS

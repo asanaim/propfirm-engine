@@ -193,11 +193,21 @@ login_needs_mfa = true
 # accounts [decided 6 Nov 2026]: a login with staff access gets no trader
 # view. Households are declared (conflict-of-interest register, 5d).
 staff_may_trade = false
-# Maker-checker on admin settings (stage limits, country gating) [staff spec,
-# outline M07, M25]: a change is a proposal until a second admin, never its
-# maker, approves it. Not approved within the expiry: proposed again.
+# Maker-checker on settings [staff spec, outline M07, M25; rule AC00,
+# decided 8 Nov 2026: every decision needs two people, one proposes and the
+# other approves]: a change is a proposal until a second person, never its
+# maker, approves it. It cannot be switched off here (false is refused).
+# Product changes (stage limits) are owner level (rule AC01): one owner
+# proposes, the other owner approves. Country gating: admins or owners.
+# Not approved within the expiry: proposed again.
 settings_need_second_admin = true
 proposal_expiry_hours = 72
+# The owners' stand-in approver [decided 8 Nov 2026]: an admin (T4) whom
+# both owners appoint (one proposes, the other approves) for at most this
+# many days; while appointed, they may approve a product change in place
+# of an unavailable owner, never one of their own and never a stand-in
+# change. Ended early by the same two-owner decision.
+stand_in_max_days = 30
 # A leaver loses every login [decided 6 Nov 2026]: access in the platform
 # ends at once; the identity provider disables the login and its sessions
 # within the minute. Not done after the alert time: leads and admins are

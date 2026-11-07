@@ -73,6 +73,7 @@ from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
+from propfirm.customers.four_eyes import open_proposal, proposal_json
 from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
 from propfirm.customers.lifecycle import Lifecycle
@@ -113,8 +114,15 @@ from propfirm.rules.news import EventScope
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.service.projector import INTERVALS
+from propfirm.settings.authority import Refused, check_appointment, owner_level
 from propfirm.settings.newsdesk import Author, NewsDesk, NewsRefused, action_view
-from propfirm.settings.overlay import CountryGating, StageLimits, stage_limits, to_json
+from propfirm.settings.overlay import (
+    CountryGating,
+    Setting,
+    StandIn,
+    stage_limits,
+    to_json,
+)
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.store import ChangeStatus, Proposal
 from propfirm.staff.cutoff import Cutoffs, IdentityError, cutoff_view
@@ -472,6 +480,12 @@ class CountryGatingBody(_Body):
     reason: Reason
 
 
+class StandInBody(_Body):
+    subject: Login | None  # the admin's Keycloak id; null ends the appointment
+    until: Annotated[int, Field(ge=0)]  # UTC milliseconds
+    reason: Reason
+
+
 class StageLimitsBody(_Body):
     profit_target_percent: Percent | None  # null: no target (funded stages)
     daily_loss_percent: Percent
@@ -638,6 +652,8 @@ SETTINGS_ERRORS = {
     "unknown": 404,
     "engine_refused": 502,
     "four_eyes": 403,
+    "owners_only": 403,
+    "forbidden": 403,
     "not_maker": 403,
     "decided": 409,
     "expired": 409,
@@ -750,6 +766,7 @@ ONBOARDING_ERRORS = {
     "not_signer": 403,
     "blocked": 403,
     "own_onboarding": 403,
+    "four_eyes": 403,
     "other_text": 422,
     "name": 422,
 }
@@ -1874,7 +1891,8 @@ def create_app(
         history = [
             {"kind": e.kind, "ts": e.ts, "detail": dict(e.detail)} for e in await store.history(prg)
         ]
-        return {**progression_view(record), "history": history}
+        waiting = proposal_json(open_proposal(await store.history(prg)))
+        return {**progression_view(record), "proposal": waiting, "history": history}
 
     async def decide(deps: Deps, me: Principal, prg: str, approve: bool, reason: str) -> Any:
         try:
@@ -1886,16 +1904,20 @@ def create_app(
                 "unknown": 404,
                 "not_in_review": 409,
                 "own_progression": 403,
+                "four_eyes": 403,
                 "open_case": 409,
             }[exc.code]
             raise HTTPException(
                 status_code=status, detail={"code": exc.code, "message": str(exc)}
             ) from exc
-        return progression_view(record)
+        waiting = open_proposal(await _lifecycle(deps).store.history(prg))
+        return {**progression_view(record), "proposal": proposal_json(waiting)}
 
     @app.post("/staff/progressions/{prg}/approve")
     async def approve(deps: D, me: Approver, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
-        """Approve a funded review: funded onboarding follows (step 3b)."""
+        """Approve a funded review: funded onboarding follows (step 3b). Rule
+        AC00: the first decision is a proposal; a second person, never the
+        proposer, carries it out (the same decision) or rejects it."""
         result: dict[str, Any] = await decide(deps, me, prg, True, body.reason)
         return result
 
@@ -1940,7 +1962,13 @@ def create_app(
                     else None,
                     "document_country": result.document_country,
                 }
-        return {**onboarding_view(record), "verified": verified, "history": history}
+        waiting = proposal_json(open_proposal(await store.history(onb)))
+        return {
+            **onboarding_view(record),
+            "verified": verified,
+            "proposal": waiting,
+            "history": history,
+        }
 
     async def decide_onboarding(
         deps: Deps, me: Principal, onb: str, approve: bool, reason: str
@@ -1951,13 +1979,15 @@ def create_app(
             )
         except OnboardingStateError as exc:
             raise _onboarding_refused(exc) from exc
-        return onboarding_view(record)
+        waiting = open_proposal(await _onboarding(deps).store.history(onb))
+        return {**onboarding_view(record), "proposal": proposal_json(waiting)}
 
     @app.post("/staff/onboardings/{onb}/approve")
     async def approve_onboarding(
         deps: D, me: IdentityReviewer, onb: OnbId, body: DecisionBody
     ) -> dict[str, Any]:
-        """Accept a verified identity that differs from the customer record."""
+        """Accept a verified identity that differs from the customer record.
+        Rule AC00: two people, as a funded review."""
         return await decide_onboarding(deps, me, onb, True, body.reason)
 
     @app.post("/staff/onboardings/{onb}/deny")
@@ -2178,21 +2208,26 @@ def create_app(
         return (await _staff_policy(deps)).proposal_expiry_hours * 3_600_000
 
     async def propose_setting(
-        deps: Deps, me: Principal, setting: CountryGating | StageLimits, reason: str
+        deps: Deps, me: Principal, setting: Setting, reason: str
     ) -> dict[str, Any]:
-        """The change waits for a second admin; they are notified."""
+        """The change waits for a second person (rule AC00); they are
+        notified. Owner-level changes (AC01) wait for the other owner."""
         now = deps.clock()
+        tier = (await _access(deps, me)).tier
         try:
-            proposal = await _settings(deps).propose(me.subject, me.email, setting, reason, now)
+            proposal = await _settings(deps).propose(
+                me.subject, me.email, setting, reason, now, tier=tier
+            )
         except SettingsError as exc:
             raise _settings_refused(exc) from exc
         if deps.desk is not None:
             kind, _ = to_json(setting)
+            who = "the other owner" if owner_level(setting) else "a second admin"
             await deps.desk.notify(
                 "settings.change",
                 "settings_proposal",
                 f"setting-proposal:{proposal.id}",
-                f"A {kind.replace('_', ' ')} change waits for a second admin",
+                f"A {kind.replace('_', ' ')} change waits for {who}",
                 f"Proposal {proposal.id} by {me.email or me.subject}: {reason}",
                 now,
             )
@@ -2216,17 +2251,15 @@ def create_app(
     async def approve_setting(
         deps: D, me: Me, pid: Annotated[int, Path(ge=1)], body: DecisionBody
     ) -> JSONResponse:
-        """The second admin (T4 or above, never the maker): the change takes
-        effect. 200 when in force, 202 while the engine has not answered."""
+        """The second person, never the maker (rule AC00): an admin or owner
+        for country gating; the other owner, or the owners' stand-in, for a
+        product change; the other owner for a stand-in appointment. The
+        change takes effect: 200 when in force, 202 while the engine has
+        not answered."""
         access = await _need(deps, me, "settings.change")
-        if access.tier is None or access.tier < Tier.ADMIN:
-            raise HTTPException(
-                status_code=403,
-                detail={"code": "forbidden", "message": "a second admin (T4) approves settings"},
-            )
         try:
             status, rule_set = await _settings(deps).approve(
-                pid, me.subject, body.reason, deps.clock(), await expiry_ms(deps)
+                pid, me.subject, body.reason, deps.clock(), await expiry_ms(deps), tier=access.tier
             )
         except SettingsError as exc:
             raise _settings_refused(exc) from exc
@@ -2241,8 +2274,11 @@ def create_app(
     async def reject_setting(
         deps: D, me: SettingsChanger, pid: Annotated[int, Path(ge=1)], body: DecisionBody
     ) -> dict[str, Any]:
+        tier = (await _access(deps, me)).tier
         try:
-            found = await _settings(deps).reject(pid, me.subject, body.reason, deps.clock())
+            found = await _settings(deps).reject(
+                pid, me.subject, body.reason, deps.clock(), tier=tier
+            )
         except SettingsError as exc:
             raise _settings_refused(exc) from exc
         await close_proposal(deps, pid, "rejected")
@@ -2300,16 +2336,15 @@ def create_app(
                 return JSONResponse(
                     await propose_setting(deps, me, setting, body.reason), status_code=202
                 )
+            if (await _access(deps, me)).tier != Tier.OWNER:
+                raise SettingsError("owners_only", "an owner changes a product (rule AC01)")
             status, rule_set = await settings.set_stage_limits(
                 me.subject, me.email, setting, body.reason, deps.clock()
             )
         except PolicyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except SettingsError as exc:
-            http_status = {"unknown": 404, "engine_refused": 502}.get(exc.code, 422)
-            raise HTTPException(
-                status_code=http_status, detail={"code": exc.code, "message": str(exc)}
-            ) from exc
+            raise _settings_refused(exc) from exc
         applied = status.applied_at is not None
         return JSONResponse(
             {
@@ -2319,6 +2354,33 @@ def create_app(
             },
             status_code=200 if applied else 202,
         )
+
+    # --- the owners' stand-in approver (rule AC00, decided 8 Nov 2026) -----------------
+
+    @app.get("/admin/owners/stand-in")
+    async def get_stand_in(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """The stand-in in force now (null: none) and the longest appointment."""
+        found = await _settings(deps).stand_in(deps.clock())
+        return {
+            "stand_in": None if found is None else {"subject": found.subject, "until": found.until},
+            "max_days": (await _staff_policy(deps)).stand_in_max_days,
+        }
+
+    @app.put("/admin/owners/stand-in")
+    async def propose_stand_in(deps: D, me: SettingsChanger, body: StandInBody) -> dict[str, Any]:
+        """One owner proposes appointing (or, with a null subject, ending) the
+        stand-in; the other owner approves it. The stand-in must be an admin
+        (T4), for at most `stand_in_max_days`."""
+        now = deps.clock()
+        setting = StandIn(body.subject, body.until if body.subject is not None else 0)
+        target = None
+        if body.subject is not None:
+            target = (await _access(deps, Principal(body.subject, None, frozenset()))).tier
+        try:
+            check_appointment(setting, now, (await _staff_policy(deps)).stand_in_max_days, target)
+        except Refused as exc:
+            raise _settings_refused(SettingsError(exc.code, str(exc))) from exc
+        return await propose_setting(deps, me, setting, body.reason)
 
     # --- the risk desk: restricted news events (M13) ----------------------------------
 

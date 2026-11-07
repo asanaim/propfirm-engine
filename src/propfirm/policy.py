@@ -101,9 +101,12 @@ class StaffPolicy:
     limits: Limits = field(default_factory=Limits)
     login_needs_mfa: bool = True  # every staff and admin login: a second factor
     staff_may_trade: bool = False  # staff and apprentices never buy or trade
-    # maker-checker on admin settings: a second admin approves each change
+    # maker-checker on settings: a second person approves each change; the
+    # policy file cannot switch it off (rule AC00, 8 Nov 2026)
     settings_need_second_admin: bool = True
     proposal_expiry_hours: int = 72
+    # the owners' stand-in approver: the longest one appointment lasts
+    stand_in_max_days: int = 30
     # a leaver's login disabled at the identity provider: alert after, hard limit
     leaver_cutoff_alert_minutes: int = 60
     leaver_cutoff_max_hours: int = 24
@@ -516,6 +519,7 @@ def _staff(t: _Table) -> StaffPolicy:
         staff_may_trade=t.boolean("staff_may_trade"),
         settings_need_second_admin=t.boolean("settings_need_second_admin"),
         proposal_expiry_hours=t.integer("proposal_expiry_hours", 1),
+        stand_in_max_days=t.integer("stand_in_max_days", 1),
         leaver_cutoff_alert_minutes=t.integer("leaver_cutoff_alert_minutes", 1),
         leaver_cutoff_max_hours=t.integer("leaver_cutoff_max_hours", 1),
         training_gate=t.boolean("training_gate"),
@@ -534,6 +538,9 @@ def _staff(t: _Table) -> StaffPolicy:
         pair_threshold=t.integer("pair_threshold", 2),
     )
     t.done()
+    if not policy.settings_need_second_admin:
+        # rule AC00 [decided 8 Nov 2026]: every decision needs two people
+        raise PolicyError(f"{t.name('settings_need_second_admin')} cannot be false (rule AC00)")
     if limits.apprentice_min_months > limits.apprentice_max_months:
         raise PolicyError(f"{t.name('apprentice_min_months')} must not exceed the maximum")
     try:
