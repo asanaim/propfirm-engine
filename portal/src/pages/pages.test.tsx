@@ -167,3 +167,15 @@ it("offers the way through a step-up refusal", async () => {
   await user.click(screen.getByRole("button", { name: "Set up authenticator" }));
   expect(auth.setUpAuthenticator).toHaveBeenCalled();
 });
+
+it("shows a visitor what a challenge is, what it costs and how it works", async () => {
+  const auth = fakeAuth({ status: "anonymous", session: null });
+  renderWith(<OverviewPage />, auth, fakeFetch([["GET", "/catalogue", 200, [LITE]]]));
+  expect(await screen.findByRole("heading", { level: 1, name: /Keep 80 % of the profit/ })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 3, name: "Lite" })).toBeInTheDocument();
+  expect(screen.getByText("From $24.00")).toBeInTheDocument();
+  expect(screen.getByText(/Profit target \+8 %/)).toBeInTheDocument();
+  const steps = screen.getByRole("heading", { name: "How it works" }).nextElementSibling;
+  expect(steps?.querySelectorAll("li")).toHaveLength(4);
+  expect(screen.getByRole("link", { name: "Choose a challenge" })).toHaveAttribute("href", "/shop");
+});
