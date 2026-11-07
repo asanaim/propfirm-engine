@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useApi, useMe } from "../api/ApiProvider";
 import type { Product } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Card, Loading, Notice } from "../components/ui";
 import { Ridge } from "../components/Ridge";
 import { formatCents, formatPercent } from "../lib/money";
+import { useReveal, useTilt } from "../lib/motion";
 import { Link } from "../router";
 import { RegisterForm } from "./RegisterForm";
 
@@ -56,6 +57,17 @@ function cheapest(p: Product): number | undefined {
   return prices.length === 0 ? undefined : Math.min(...prices);
 }
 
+/** A challenge card that tilts under the pointer, with a sheen that follows it. */
+function Tile({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLLIElement>(null);
+  useTilt(ref, 7);
+  return (
+    <li ref={ref} className="tile" data-reveal="">
+      {children}
+    </li>
+  );
+}
+
 /** The signed-out home page: what a challenge is, what it costs, how it works. */
 function Landing({ onSignIn }: { onSignIn: () => void }) {
   const api = useApi();
@@ -66,10 +78,13 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
     });
   }, [api]);
   const first = products?.[0]?.stages[0];
+  const page = useRef<HTMLDivElement>(null);
+  const hero = useRef<HTMLElement>(null);
+  useReveal(page, [products]);
   const split = products?.reduce((best, p) => Math.max(best, Number(p.profit_split_percent)), 0);
   return (
-    <div className="landing">
-      <section className="hero" aria-labelledby="hero-title">
+    <div className="landing" ref={page}>
+      <section className="hero" aria-labelledby="hero-title" ref={hero}>
         <h1 id="hero-title">
           Trade the evaluation.
           <br />
@@ -89,18 +104,21 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
         <Ridge
           target={first?.profit_target_percent === null || first === undefined ? undefined : formatPercent(first.profit_target_percent)}
           maxLoss={first === undefined ? undefined : formatPercent(first.max_loss_percent)}
+          area={hero}
         />
       </section>
 
       {products !== null && products.length > 0 && (
         <section className="tiles" aria-labelledby="tiles-title">
-          <h2 id="tiles-title">Challenges</h2>
+          <h2 id="tiles-title" data-reveal="">
+            Challenges
+          </h2>
           <ul className="tile-list">
             {products.map((p) => {
               const from = cheapest(p);
               const evaluations = p.stages.filter((st) => st.stage !== "funded").length;
               return (
-                <li key={p.id} className="tile">
+                <Tile key={p.id}>
                   <h3>{p.name}</h3>
                   <p className="tile-split">{p.profit_split_percent} % profit split</p>
                   <p className="muted">
@@ -114,7 +132,7 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
                   <Link className="button button-primary" href="/shop">
                     Choose {p.name}
                   </Link>
-                </li>
+                </Tile>
               );
             })}
           </ul>
@@ -122,10 +140,12 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
       )}
 
       <section className="how" aria-labelledby="how-title">
-        <h2 id="how-title">How it works</h2>
+        <h2 id="how-title" data-reveal="">
+          How it works
+        </h2>
         <ol className="how-steps">
           {STEPS.map((s) => (
-            <li key={s.title}>
+            <li key={s.title} data-reveal="">
               <h3>{s.title}</h3>
               <p className="muted">{s.text}</p>
             </li>

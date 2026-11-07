@@ -197,7 +197,7 @@ a {
 
 .brand img {
   display: block;
-  height: 26px;
+  height: 34px;
   width: auto;
 }
 
@@ -596,7 +596,8 @@ tbody th {
   font-weight: 600;
 }
 
-@media (max-width: 720px) {
+/* below this the logo, seven links and the actions do not fit one row */
+@media (max-width: 1023px) {
   .topbar {
     flex-wrap: wrap;
     gap: var(--space-2);
@@ -888,6 +889,11 @@ code {
 
 /* --- home page (signed out) --------------------------------------------------- */
 
+/* the 3D ridges reach past the column; never a sideways scroll */
+.landing {
+  overflow-x: clip;
+}
+
 .landing .hero {
   max-width: none;
   padding: var(--space-7) 0 var(--space-6);
@@ -906,17 +912,116 @@ code {
   font-size: clamp(1.125rem, 1rem + 0.4vw, 1.3125rem);
 }
 
-/* the ridge: an equity line climbing to the target above the loss floor */
+.landing h2 {
+  font-size: clamp(2rem, 1.3rem + 2.4vw, 3rem);
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+  margin-bottom: var(--space-6);
+}
+
+/* the ridge: an equity line climbing to the target above the loss floor,
+standing in 3D on two ridges; turns with the pointer (--rx, --ry) */
 .ridge {
   position: relative;
   margin: var(--space-7) 0 0;
   height: clamp(220px, 30vw, 380px);
+  perspective: 1400px;
+  perspective-origin: 50% 0%;
+}
+
+.ridge-scene {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(calc(12deg + var(--rx, 0deg))) rotateY(var(--ry, 0deg));
+  transition: transform 700ms var(--ease-out);
+  animation: ridge-rise 1.6s var(--ease-out) both;
+}
+
+.ridge-scene[data-tilt="on"] {
+  transition: transform 160ms linear;
 }
 
 .ridge svg {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
+}
+
+.ridge-chart {
+  transform: translateZ(40px);
+}
+
+.ridge-range path {
+  fill: var(--ridge-start);
+}
+
+/* fade the ridges out at the sides and toward the ground: no hard edges */
+.ridge-range {
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, #000 18%, #000 82%, transparent),
+    linear-gradient(to bottom, #000 35%, transparent 92%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, transparent, #000 18%, #000 82%, transparent),
+    linear-gradient(to bottom, #000 35%, transparent 92%);
+  mask-composite: intersect;
+}
+
+.ridge-far {
+  transform: translateZ(-220px) translateY(-6%) scale(1.16);
+  opacity: 0.09;
+  animation: ridge-fade 1.4s ease 0.3s both;
+}
+
+.ridge-near {
+  transform: translateZ(-90px) translateY(-2%) scale(1.06);
+  opacity: 0.12;
+  animation: ridge-fade 1.4s ease 0.6s both;
+}
+
+:root[data-theme="dark"] .ridge-far {
+  opacity: 0.14;
+}
+
+:root[data-theme="dark"] .ridge-near {
+  opacity: 0.2;
+}
+
+@keyframes ridge-rise {
+  from {
+    opacity: 0;
+    transform: rotateX(48deg) translateY(12%);
+  }
+}
+
+/* sections rise in when scrolled into view (lib/motion useReveal) */
+[data-reveal] {
+  transition:
+    opacity 800ms var(--ease-out),
+    transform 900ms var(--ease-out);
+}
+
+[data-reveal="wait"] {
+  opacity: 0;
+  transform: perspective(900px) translateY(32px) rotateX(10deg);
+}
+
+.tile-list > [data-reveal]:nth-child(2),
+.how-steps > [data-reveal]:nth-child(2) {
+  transition-delay: 80ms;
+}
+
+.tile-list > [data-reveal]:nth-child(3),
+.how-steps > [data-reveal]:nth-child(3) {
+  transition-delay: 160ms;
+}
+
+.tile-list > [data-reveal]:nth-child(4),
+.how-steps > [data-reveal]:nth-child(4) {
+  transition-delay: 240ms;
 }
 
 .ridge-rule {
@@ -948,7 +1053,7 @@ code {
 .ridge-label {
   position: absolute;
   left: 0;
-  transform: translateY(-130%);
+  transform: translateZ(40px) translateY(-130%);
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--muted);
@@ -956,7 +1061,7 @@ code {
 }
 
 .ridge-label-floor {
-  transform: translateY(35%);
+  transform: translateZ(40px) translateY(35%);
 }
 
 /* the label sits left of the dot, so it never runs off a narrow screen */
@@ -966,7 +1071,7 @@ code {
   flex-direction: row-reverse;
   align-items: center;
   gap: var(--space-2);
-  transform: translate(calc(-100% + 7px), -50%);
+  transform: translateZ(40px) translate(calc(-100% + 7px), -50%);
   font-weight: 700;
   font-size: 0.9375rem;
   color: var(--text);
@@ -998,7 +1103,7 @@ code {
 @keyframes summit-in {
   from {
     opacity: 0;
-    transform: translate(calc(-100% + 7px), -50%) scale(0.6);
+    transform: translateZ(40px) translate(calc(-100% + 7px), -50%) scale(0.6);
   }
 }
 
@@ -1017,14 +1122,17 @@ code {
 }
 
 .tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   padding: var(--space-6);
+  transform-style: preserve-3d;
   background: var(--surface);
   border-radius: var(--radius-large);
   box-shadow: var(--shadow);
   border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   transition:
+    opacity 800ms var(--ease-out),
     box-shadow 260ms var(--ease-out),
     transform 320ms var(--ease-spring);
 }
@@ -1032,6 +1140,35 @@ code {
 .tile:hover {
   box-shadow: var(--shadow-raised);
   transform: translateY(-3px);
+}
+
+/* 3D tilt under a fine pointer (lib/motion useTilt sets --rx, --ry, --mx, --my) */
+.tile[data-tilt="on"] {
+  transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry)) translateZ(0) translateY(-3px);
+  transition:
+    box-shadow 260ms var(--ease-out),
+    transform 120ms linear;
+}
+
+.tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at var(--mx, 50%) var(--my, 0%), rgb(255 255 255 / 55%), transparent 55%);
+  mix-blend-mode: soft-light;
+  transition: opacity 260ms var(--ease-out);
+}
+
+.tile[data-tilt="on"]::after {
+  opacity: 1;
+}
+
+.tile[data-tilt="on"] .tile-price,
+.tile[data-tilt="on"] h3 {
+  transform: translateZ(28px);
 }
 
 .tile h3 {
