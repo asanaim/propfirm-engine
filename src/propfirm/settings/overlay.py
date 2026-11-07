@@ -23,6 +23,7 @@ A change naming a product or stage the file no longer has is kept in the
 history and has no effect.
 """
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -40,6 +41,9 @@ from propfirm.rules.products import MaxLossKind, RuleSet, Stage
 COUNTRY_GATING = "country_gating"
 STAGE_LIMITS = "stage_limits"
 STAND_IN = "stand_in"
+POLICY_PAGE = "policy_page"
+PAGE_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+MAX_PAGE_CHARS = 100_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +73,37 @@ class StandIn:
     until: int  # 0 when ended
 
 
-type Setting = CountryGating | StageLimits | StandIn
+@dataclass(frozen=True, slots=True)
+class PolicyPage:
+    """A new version of a policy page (rule AC10): terms, privacy, trade
+    policy or another. Plain text, shown as written (never as HTML)."""
+
+    slug: str
+    title: str
+    body: str
+
+    def __post_init__(self) -> None:
+        if not PAGE_SLUG.fullmatch(self.slug):
+            raise PolicyError("slug: lowercase letters, digits and dashes, up to 40")
+        if not 1 <= len(self.title.strip()) <= 120:
+            raise PolicyError("title: 1 to 120 characters")
+        if not 1 <= len(self.body.strip()) <= MAX_PAGE_CHARS:
+            raise PolicyError(f"body: 1 to {MAX_PAGE_CHARS} characters")
+
+
+@dataclass(frozen=True, slots=True)
+class PageVersion:
+    slug: str
+    version: int  # 1, 2, ... per page, in the order published
+    title: str
+    body: str
+    published_at: int
+    change_id: int
+    author: str
+    approved_by: str | None
+
+
+type Setting = CountryGating | StageLimits | StandIn | PolicyPage
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,8 +142,8 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
                 gating = value
             case StageLimits() as value:
                 limits[(value.product_id, value.stage)] = change
-            case StandIn():
-                pass  # not part of the policy: `stand_in_in_force`
+            case StandIn() | PolicyPage():
+                pass  # not part of the policy: `stand_in_in_force`, `policy_pages`
     access = base.access
     if gating is not None:
         access = replace(
@@ -128,6 +162,28 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
             rule_sets.append(rule_set)
         products.append(replace(product, rule_sets=tuple(rule_sets)))
     return replace(base, access=access, products=tuple(products))
+
+
+def policy_pages(changes: Iterable[SettingChange]) -> dict[str, list[PageVersion]]:
+    """Every published version of every page, oldest first, by slug."""
+    out: dict[str, list[PageVersion]] = {}
+    for change in sorted(changes, key=lambda c: c.id):
+        page = change.setting
+        if isinstance(page, PolicyPage):
+            versions = out.setdefault(page.slug, [])
+            versions.append(
+                PageVersion(
+                    page.slug,
+                    len(versions) + 1,
+                    page.title,
+                    page.body,
+                    change.ts,
+                    change.id,
+                    change.author,
+                    change.approved_by,
+                )
+            )
+    return out
 
 
 def stand_in_in_force(changes: Iterable[SettingChange], now: int) -> StandIn | None:
@@ -164,6 +220,8 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
             }
         case StandIn():
             return STAND_IN, {"subject": setting.subject, "until": setting.until}
+        case PolicyPage():
+            return POLICY_PAGE, {"slug": setting.slug, "title": setting.title, "body": setting.body}
 
 
 def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
@@ -190,6 +248,11 @@ def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
         if not isinstance(until, int) or isinstance(until, bool) or until < 0:
             raise PolicyError("stand-in until must be milliseconds")
         return StandIn(subject, until)
+    if kind == POLICY_PAGE:
+        slug, title, body = value["slug"], value["title"], value["body"]
+        if not all(isinstance(v, str) for v in (slug, title, body)):
+            raise PolicyError("a policy page is text")
+        return PolicyPage(slug, title, body)
     raise PolicyError(f"unknown setting kind {kind!r}")
 
 

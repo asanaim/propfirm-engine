@@ -119,7 +119,10 @@ from propfirm.service.projector import INTERVALS
 from propfirm.settings.authority import Refused, check_appointment, owner_level
 from propfirm.settings.newsdesk import Author, NewsDesk, NewsRefused, action_view
 from propfirm.settings.overlay import (
+    PAGE_SLUG,
     CountryGating,
+    PageVersion,
+    PolicyPage,
     Setting,
     StandIn,
     stage_limits,
@@ -482,6 +485,16 @@ class CountryGatingBody(_Body):
     reason: Reason
 
 
+class PolicyPageBody(_Body):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    body: Annotated[str, StringConstraints(min_length=1, max_length=100_000)]
+    reason: Reason
+
+
+class AcceptPolicyBody(_Body):
+    version: Annotated[int, Field(ge=1)]
+
+
 class StandInBody(_Body):
     subject: Login | None  # the admin's Keycloak id; null ends the appointment
     until: Annotated[int, Field(ge=0)]  # UTC milliseconds
@@ -630,6 +643,18 @@ def change_view(status: ChangeStatus) -> dict[str, Any]:
     }
 
 
+def page_view(p: PageVersion, *, body: bool) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "slug": p.slug,
+        "version": p.version,
+        "title": p.title,
+        "published_at": p.published_at,
+    }
+    if body:
+        out["body"] = p.body
+    return out
+
+
 def proposal_view(p: Proposal, now: int, expiry_ms: int) -> dict[str, Any]:
     kind, value = to_json(p.setting)
     status = p.decision or ("expired" if expiry_ms and now - p.ts > expiry_ms else "open")
@@ -659,6 +684,7 @@ SETTINGS_ERRORS = {
     "not_maker": 403,
     "decided": 409,
     "expired": 409,
+    "stale": 409,
 }
 
 
@@ -1579,6 +1605,11 @@ def create_app(
     @app.post("/orders", status_code=201)
     async def purchase(deps: D, me: Trader, body: PurchaseBody) -> dict[str, Any]:
         cif = await _cif(deps, me)
+        if deps.settings is not None and await deps.settings.pending_pages(me.subject):
+            raise HTTPException(  # rule AC10: accept the policies in force first
+                status_code=409,
+                detail={"code": "policies_pending", "message": "accept the updated policies"},
+            )
         try:
             order, pay_url = await _checkout(deps).place_order(
                 cif, body.product_id, body.size_cents, body.code, deps.clock()
@@ -2373,6 +2404,60 @@ def create_app(
         )
 
     # --- the owners' stand-in approver (rule AC00, decided 8 Nov 2026) -----------------
+
+    # --- policy pages (rule AC10) ------------------------------------------------------
+
+    @app.get("/policies")
+    async def policies(deps: D) -> list[dict[str, Any]]:
+        """The policy pages in force (public): their latest versions."""
+        return [page_view(p, body=False) for p in await _settings(deps).latest_pages()]
+
+    @app.get("/policies/{slug}")
+    async def policy_page(
+        deps: D,
+        slug: Annotated[str, Path(pattern=PAGE_SLUG.pattern)],
+        version: Annotated[int | None, Query(ge=1)] = None,
+    ) -> dict[str, Any]:
+        """One page: the version in force, or an earlier one (public)."""
+        versions = (await _settings(deps).pages()).get(slug, [])
+        if version is not None:
+            versions = [v for v in versions if v.version == version]
+        if not versions:
+            raise HTTPException(status_code=404, detail="unknown policy page")
+        return page_view(versions[-1], body=True)
+
+    @app.put("/admin/policies/{slug}")
+    async def propose_policy(
+        deps: D,
+        me: SettingsChanger,
+        slug: Annotated[str, Path(pattern=PAGE_SLUG.pattern)],
+        body: PolicyPageBody,
+    ) -> dict[str, Any]:
+        """A new version of a page: one owner proposes, the other approves;
+        traders then accept it again before their next purchase."""
+        try:
+            page = PolicyPage(slug, body.title, body.body)
+        except PolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await propose_setting(deps, me, page, body.reason)
+
+    @app.get("/me/policies/pending")
+    async def pending_policies(deps: D, me: Trader) -> list[dict[str, Any]]:
+        """The pages in force this login has not accepted yet."""
+        return [page_view(p, body=False) for p in await _settings(deps).pending_pages(me.subject)]
+
+    @app.post("/me/policies/{slug}/accept")
+    async def accept_policy(
+        deps: D,
+        me: Trader,
+        slug: Annotated[str, Path(pattern=PAGE_SLUG.pattern)],
+        body: AcceptPolicyBody,
+    ) -> dict[str, Any]:
+        try:
+            page = await _settings(deps).accept_page(me.subject, slug, body.version, deps.clock())
+        except SettingsError as exc:
+            raise _settings_refused(exc) from exc
+        return {**page_view(page, body=False), "accepted": True}
 
     @app.get("/admin/owners/stand-in")
     async def get_stand_in(deps: D, me: SettingsReader) -> dict[str, Any]:

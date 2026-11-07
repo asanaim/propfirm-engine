@@ -217,7 +217,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with pool.acquire() as conn:
             await migrate_audit(conn, config.audit_schema)
         settings_store = await SettingsStore.open(pool, config.settings_schema)
-        settings = Settings(policy, settings_store, gateway, proposals=settings_store)
+        settings = Settings(
+            policy, settings_store, gateway, proposals=settings_store, acceptances=settings_store
+        )
         news = NewsDesk(
             load_calendars(config.news_dir), NewsStore(pool, config.settings_schema), gateway
         )

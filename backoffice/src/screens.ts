@@ -9,5 +9,6 @@ export function screensFor(permissions: readonly string[]): Set<string> {
   if (has("news.desk")) out.add("news");
   if (has("staff.directory")) for (const s of ["members", "grants", "cutoffs"]) out.add(s);
   if (has("settings.view")) for (const s of ["proposals", "changes", "anomalies", "audit"]) out.add(s);
+  if (has("settings.change")) out.add("policies"); // owners propose; the API checks the tier
   return out;
 }

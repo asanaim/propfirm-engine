@@ -66,6 +66,17 @@ brute-force lockout and SSL for external requests (tested). KYC before
 money out holds by design: a funded account opens only after an approved
 identity review.
 
+AC10, versioned policy pages. In place: a new version of a page (terms,
+privacy, trade policy or any other) is proposed by one owner and approved
+by the other (no stand-in); every version is kept and dated
+(`GET /policies`, `GET /policies/{slug}?version=n`). A trader must accept
+the version in force of every page before buying (`/me/policies/pending`,
+`POST /me/policies/{slug}/accept`; `POST /orders` answers 409
+`policies_pending`); each acceptance is recorded per trader per version.
+The portal shows the pages (plain text, never HTML), links them in the
+footer and asks for acceptance on every page until given; the back office
+has a "Policy pages" editor. Settings migration 7.
+
 ## Exceptions to AC00 decided by the owners (8 Nov 2026)
 
 Two decisions stay with one person: confirming a customer block on a case
@@ -77,8 +88,7 @@ only add restrictions; cancelling a news window still needs an admin.
 AC02 payment and withdrawal methods as attachable plugins with owner
 approval (today the providers are fixed in code and environment). AC05
 settings hub, AC06 Ctrl+K search, AC07 website content manager, AC08
-figures bound to product data, AC09 evidence for claims, AC10 versioned
-policy pages with re-acceptance, AC11 SEO and generated sitemap, AC12
+figures bound to product data, AC09 evidence for claims, AC11 SEO and generated sitemap, AC12
 editable notification templates (notifications exist; templates are
 code), AC13 method plugins, AC14 write-only secrets in the console, AC17
 maintenance mode, AC18 language manager, AC19 to AC22 console lists and

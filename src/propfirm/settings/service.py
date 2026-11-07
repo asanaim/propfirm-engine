@@ -35,12 +35,15 @@ from propfirm.service.gateway import Outcome
 from propfirm.settings.authority import Refused, check_approver, check_proposer
 from propfirm.settings.overlay import (
     CountryGating,
+    PageVersion,
+    PolicyPage,
     Setting,
     SettingChange,
     StageLimits,
     StandIn,
     apply_changes,
     limits_rule_set,
+    policy_pages,
     stand_in_in_force,
 )
 from propfirm.settings.store import ChangeStatus, Proposal, ProposalDecided
@@ -88,6 +91,14 @@ class Proposals(Protocol):
     ) -> SettingChange: ...
 
 
+class Acceptances(Protocol):
+    """Who accepted which version of which policy page (rule AC10)."""
+
+    async def accept(self, subject: str, slug: str, version: int, ts: int) -> None: ...
+
+    async def accepted(self, subject: str) -> set[tuple[str, int]]: ...
+
+
 class Submitter(Protocol):
     async def submit(self, item: Input, wait_s: float = 5.0) -> Outcome: ...
 
@@ -109,8 +120,10 @@ class Settings:
         gateway: Submitter,
         wait_s: float = 5.0,
         proposals: Proposals | None = None,
+        acceptances: Acceptances | None = None,
     ) -> None:
         self._base = base
+        self._acceptances = acceptances
         self._records = records
         self._proposals = proposals
         self._gateway = gateway
@@ -131,6 +144,39 @@ class Settings:
 
     async def history(self, limit: int = 100) -> Sequence[ChangeStatus]:
         return await self._records.history(limit)
+
+    # --- policy pages (rule AC10) ---------------------------------------------------
+
+    async def pages(self) -> dict[str, list[PageVersion]]:
+        """Every published version of every policy page, by slug."""
+        return policy_pages(await self._records.applied_changes())
+
+    async def latest_pages(self) -> list[PageVersion]:
+        return [versions[-1] for _, versions in sorted((await self.pages()).items())]
+
+    def _accepts(self) -> Acceptances:
+        if self._acceptances is None:
+            raise SettingsError("unknown", "policy acceptances are not available")
+        return self._acceptances
+
+    async def pending_pages(self, subject: str) -> list[PageVersion]:
+        """The latest version of each page that `subject` has not accepted:
+        a new version asks again."""
+        latest = await self.latest_pages()
+        if not latest:
+            return []
+        done = await self._accepts().accepted(subject)
+        return [p for p in latest if (p.slug, p.version) not in done]
+
+    async def accept_page(self, subject: str, slug: str, version: int, ts: int) -> PageVersion:
+        """Record acceptance of the page's latest version (only the latest)."""
+        versions = (await self.pages()).get(slug)
+        if not versions:
+            raise SettingsError("unknown", f"no policy page {slug!r}")
+        if versions[-1].version != version:
+            raise SettingsError("stale", f"version {versions[-1].version} is the one in force")
+        await self._accepts().accept(subject, slug, version, ts)
+        return versions[-1]
 
     async def stand_in(self, now: int) -> StandIn | None:
         """The owners' stand-in approver in force at `now`, if any."""
@@ -227,7 +273,7 @@ class Settings:
         if expiry_ms and ts - proposal.ts > expiry_ms:
             raise SettingsError("expired", f"proposal {pid} has expired; propose it again")
         self._check(proposal.setting)
-        at_once = isinstance(proposal.setting, CountryGating | StandIn)
+        at_once = isinstance(proposal.setting, CountryGating | StandIn | PolicyPage)
         try:
             change = await self._store().approve(proposal, approver, reason, ts, applied=at_once)
         except ProposalDecided as exc:
