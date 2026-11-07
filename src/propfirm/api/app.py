@@ -100,6 +100,7 @@ from propfirm.journal.inputs import (
 )
 from propfirm.newsfeed.alerts import SourceAlerts, alert_view
 from propfirm.policy import (
+    LOCKED_SWITCHES,
     Policy,
     PolicyError,
     PolicySource,
@@ -108,6 +109,7 @@ from propfirm.policy import (
     parse_countries,
     percent_text,
     rule_set_view,
+    switch_value,
 )
 from propfirm.rules.calendar import Calendar
 from propfirm.rules.news import EventScope
@@ -2191,6 +2193,21 @@ def create_app(
     ) -> dict[str, Any]:
         payouts = _payouts(deps)
         return await payout_step(lambda: payouts.deny(po, me.subject, body.reason, deps.clock()))
+
+    @app.get("/admin/security")
+    async def admin_security(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        """The security switches (rule AC16), each with what it does; all are
+        locked in the policy file and cannot be changed from the console."""
+        policy = await _policy(deps)
+        return [
+            {
+                "name": s.name,
+                "value": switch_value(policy, s.name),
+                "locked": True,
+                "explains": s.explains,
+            }
+            for s in LOCKED_SWITCHES
+        ]
 
     @app.get("/admin/access")
     async def admin_access(deps: D, me: SettingsReader) -> dict[str, Any]:

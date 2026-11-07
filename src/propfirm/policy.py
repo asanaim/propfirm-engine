@@ -419,6 +419,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             raise
         raise PolicyError(str(exc)) from exc
     root.done()
+    _check_locked(policy)
     ids = [p.id for p in policy.products]
     if len(set(ids)) != len(ids):
         raise PolicyError("product ids must be unique")
@@ -427,6 +428,68 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
         # the fee refund is paid with a payout and counts towards its maximum
         raise PolicyError("payouts.maximum_cents must be 0 or at least every refundable fee")
     return policy
+
+
+@dataclass(frozen=True, slots=True)
+class Switch:
+    """A security switch (rule AC16): its place in the policy file, the
+    value it is locked at, and what it does in plain words."""
+
+    name: str
+    locked_at: bool
+    explains: str
+
+
+# Rule AC16 [decided 8 Nov 2026]: in production these cannot be switched off
+# (or, for staff trading, on); the policy file refuses any other value. The
+# two-person rule on settings (AC00) is locked the same way, in `_staff`.
+LOCKED_SWITCHES: tuple[Switch, ...] = (
+    Switch(
+        "payouts.require_mfa",
+        True,
+        "A trader must have signed in with a second factor to set a payout wallet or ask "
+        "for a payout.",
+    ),
+    Switch(
+        "staff.login_needs_mfa",
+        True,
+        "Every staff and admin login needs a second factor (one-time code or passkey).",
+    ),
+    Switch(
+        "staff.approvals_need_mfa",
+        True,
+        "Every approval needs a second factor entered a few minutes before.",
+    ),
+    Switch(
+        "staff.screening_required",
+        True,
+        "No staff access without a current pre-employment screening approval.",
+    ),
+    Switch(
+        "staff.settings_need_second_admin",
+        True,
+        "Every settings change is a proposal until a second person approves it.",
+    ),
+    Switch(
+        "staff.staff_may_trade",
+        False,
+        "Staff and their households never buy challenges or trade.",
+    ),
+)
+
+
+def switch_value(policy: Policy, name: str) -> bool:
+    table, field_name = name.split(".")
+    value = getattr(getattr(policy, table), field_name)
+    assert isinstance(value, bool)
+    return value
+
+
+def _check_locked(policy: Policy) -> None:
+    for switch in LOCKED_SWITCHES:
+        if switch_value(policy, switch.name) is not switch.locked_at:
+            wanted = "true" if switch.locked_at else "false"
+            raise PolicyError(f"{switch.name} is locked at {wanted} (rule AC16)")
 
 
 def _cases(t: _Table) -> CasePolicy:
