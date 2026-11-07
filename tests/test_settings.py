@@ -769,3 +769,11 @@ def test_a_stand_in_runs_out_and_never_approves_a_stand_in_change() -> None:
     kind, value = to_json(StandIn("admin-2", 5))
     assert from_json(kind, json.loads(json.dumps(value))) == StandIn("admin-2", 5)
     assert apply_changes(BASE, [later]) == BASE  # not part of the policy
+
+
+def test_admins_see_the_locked_security_switches() -> None:
+    switches = api("GET", "/admin/security").json()
+    assert [s["name"] for s in switches][:2] == ["payouts.require_mfa", "staff.login_needs_mfa"]
+    assert all(s["locked"] for s in switches)
+    staff = api("GET", "/admin/security", roles=("staff",), user="staff-1")
+    assert staff.status_code == 403

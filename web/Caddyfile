@@ -25,6 +25,9 @@
 
 	header {
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' {$OIDC_ORIGIN}; frame-src 'self' {$OIDC_ORIGIN}; form-action 'self' {$OIDC_ORIGIN}; frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
+		# rule AC16: browsers keep to HTTPS once they have seen the site over it
+		# (ignored over plain HTTP, so local development is unaffected)
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 		# SAMEORIGIN: the silent sign-in renewal frames the app's own /silent page

@@ -57,11 +57,20 @@ AC28 icons. In place: the back office uses Lucide (`lucide-react`, ISC),
 one distinct icon for every menu item and resource, at one size and line
 weight, always beside its label; Material icons are removed.
 
-## Gaps against AC00 found in the code
+AC16, locked security switches. In place: the policy file refuses to
+turn off a trader's MFA for payouts, staff login MFA, approval step-up,
+pre-employment screening and the two-person rule, or to let staff trade.
+`GET /admin/security` lists each switch, its value and what it does. The
+web server sends HSTS; the realm keeps a 12-character password policy,
+brute-force lockout and SSL for external requests (tested). KYC before
+money out holds by design: a funded account opens only after an approved
+identity review.
 
-Still made by one person: case block confirmation (`case.confirm`) and
-the risk desk's news windows (`news.desk`; cancelling already needs an
-admin).
+## Exceptions to AC00 decided by the owners (8 Nov 2026)
+
+Two decisions stay with one person: confirming a customer block on a case
+(`case.confirm`) and adding a restricted news window (`news.desk`). Both
+only add restrictions; cancelling a news window still needs an admin.
 
 ## Not started
 
