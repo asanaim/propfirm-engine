@@ -1607,6 +1607,33 @@ def create_app(
         titles = await deps.news.titles() if deps.news is not None else {}
         return [{**e, "title": titles.get(e["event_id"])} for e in await deps.live.news()]
 
+    @app.get("/calendar")
+    async def calendar(deps: D) -> list[dict[str, Any]]:
+        """The restricted-events calendar, public (it is the firm's published
+        rule, as other firms publish theirs): the events not over yet, as the
+        engine holds them, with `release_ts` (ms UTC), the window
+        [`start_ts`, `end_ts`), the symbols, a title, the currency and the
+        publisher's schedule page where the firm's calendar files name them."""
+        titles = await deps.news.titles() if deps.news is not None else {}
+        listed = {
+            e.event.event_id: e
+            for c in (deps.news.calendars if deps.news is not None else ())
+            for e in c.events
+        }
+        out = []
+        for e in await deps.live.news():
+            item = listed.get(e["event_id"])
+            out.append(
+                {
+                    **e,
+                    "title": titles.get(e["event_id"]),
+                    "release_ts": item.event.ts if item else None,
+                    "currency": item.event.currency if item else None,
+                    "source": item.source if item else None,
+                }
+            )
+        return sorted(out, key=lambda x: (x["start_ts"], x["event_id"]))
+
     @app.get("/market")
     async def market(deps: D, me: Me) -> dict[str, Any]:
         """Where prices come from (to name beside every chart and price

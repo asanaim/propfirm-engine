@@ -358,7 +358,11 @@ No trade opens or closes on an affected symbol from 2 minutes before to
   the window starts.
 - Every action is logged with who, why, the input sent and the engine's
   answer (`GET /staff/news`, append-only `news_actions`). Traders see the
-  windows with their titles (`GET /news`, the portal's News page).
+  windows with their titles (`GET /news`). The calendar is also public,
+  as other firms publish theirs: `GET /calendar` (no sign-in; adds the
+  release time, currency and the publisher's schedule page), the portal's
+  News page, by day in the viewer's time zone or UTC, with a countdown to
+  the next release.
 - Until the back office (step 5) these are API calls.
 
 ### The news collector (FTMO's list, read from the publishers)
