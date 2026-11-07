@@ -494,11 +494,15 @@ main:focus {
 .field {
   display: grid;
   gap: var(--space-1);
+  min-width: 0; /* a grid item may shrink below its input's natural width */
   font-weight: 550;
 }
 
 .field input,
 .field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   font: inherit;
   font-weight: 400;
   min-height: 44px;
@@ -1798,4 +1802,106 @@ the headline (left) and toward the next section (bottom) */
 
 .mini-news .impact {
   margin-top: 6px;
+}
+
+/* impact: one to three bars, light red (low) to red (high); restricted rows red */
+.impact-mark {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  flex: none;
+}
+
+.impact-mark i {
+  display: block;
+  width: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+}
+
+.impact-mark i:nth-child(1) {
+  height: 6px;
+}
+
+.impact-mark i:nth-child(2) {
+  height: 10px;
+}
+
+.impact-mark i:nth-child(3) {
+  height: 14px;
+}
+
+.impact-low i.on {
+  background: #f2a7a0;
+}
+
+.impact-medium i.on {
+  background: #e8665b;
+}
+
+.impact-high i.on {
+  background: #c62828;
+}
+
+.news-item.restricted {
+  background: color-mix(in srgb, #d32f2f 7%, var(--surface));
+  border-color: color-mix(in srgb, #d32f2f 35%, transparent);
+  border-left: 4px solid #c62828;
+}
+
+.restricted-badge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  background: #c62828;
+}
+
+.impact-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 160ms ease;
+}
+
+.chip-toggle.on {
+  opacity: 1;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.chip-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chip-toggle:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.restricted-toggle.on {
+  color: #fff;
+  background: #c62828;
+  border-color: #c62828;
 }

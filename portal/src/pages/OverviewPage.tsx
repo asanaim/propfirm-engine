@@ -7,7 +7,7 @@ import { Ridge } from "../components/Ridge";
 import { Terrain } from "../components/Terrain";
 import { formatCents, formatPercent, formatSize } from "../lib/money";
 import { Ring } from "../components/Gauges";
-import { countdown, type NewsEvent } from "./NewsPage";
+import { countdown, isRestricted, type NewsEvent } from "./NewsPage";
 import { useReveal, useTilt } from "../lib/motion";
 import { Link } from "../router";
 import { RegisterForm } from "./RegisterForm";
@@ -123,7 +123,7 @@ function UpcomingNews() {
       window.clearInterval(t);
     };
   }, [api]);
-  const next = (events ?? []).filter((e) => e.end_ts > now).slice(0, 3);
+  const next = (events ?? []).filter((e) => isRestricted(e) && e.end_ts > now).slice(0, 3);
   return (
     <Card title="Restricted news next" actions={<Link href="/news">Full calendar</Link>}>
       {events === null ? (

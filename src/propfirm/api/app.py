@@ -519,6 +519,19 @@ def calendar_view(calendar: Calendar, scheduled: set[str]) -> dict[str, Any]:
             {"date": u.date, "title": u.title, "currency": u.currency, "source": u.source}
             for u in calendar.unscheduled
         ],
+        "watched": [
+            {
+                "event_id": w.event_id,
+                "title": w.title,
+                "ts": w.ts,
+                "local": w.local,
+                "zone": w.zone,
+                "currency": w.currency,
+                "impact": w.impact,
+                "source": w.source,
+            }
+            for w in calendar.watched
+        ],
     }
 
 
@@ -1609,11 +1622,13 @@ def create_app(
 
     @app.get("/calendar")
     async def calendar(deps: D) -> list[dict[str, Any]]:
-        """The restricted-events calendar, public (it is the firm's published
-        rule, as other firms publish theirs): the events not over yet, as the
-        engine holds them, with `release_ts` (ms UTC), the window
-        [`start_ts`, `end_ts`), the symbols, a title, the currency and the
-        publisher's schedule page where the firm's calendar files name them."""
+        """The economic calendar, public (the restricted list is the firm's
+        published rule, as other firms publish theirs): the restricted events
+        not over yet, as the engine holds them (`impact` high, `restricted`,
+        the window [`start_ts`, `end_ts`), the symbols), and the calendar
+        files' medium- and low-impact releases (`restricted` false, no
+        window), each with `release_ts` (ms UTC), title, currency and the
+        publisher's schedule page where the files name them."""
         titles = await deps.news.titles() if deps.news is not None else {}
         listed = {
             e.event.event_id: e
@@ -1630,8 +1645,29 @@ def create_app(
                     "release_ts": item.event.ts if item else None,
                     "currency": item.event.currency if item else None,
                     "source": item.source if item else None,
+                    "impact": "high",  # every restricted event (FTMO's list)
+                    "restricted": True,
                 }
             )
+        # medium- and low-impact releases (information only: no window)
+        now = deps.clock()
+        for c in deps.news.calendars if deps.news is not None else ():
+            for w in c.watched:
+                if w.ts >= now - 3_600_000:
+                    out.append(
+                        {
+                            "event_id": w.event_id,
+                            "start_ts": w.ts,
+                            "end_ts": w.ts,
+                            "symbols": [],
+                            "title": w.title,
+                            "release_ts": w.ts,
+                            "currency": w.currency,
+                            "source": w.source,
+                            "impact": w.impact,
+                            "restricted": False,
+                        }
+                    )
         return sorted(out, key=lambda x: (x["start_ts"], x["event_id"]))
 
     @app.get("/market")

@@ -20,10 +20,11 @@ from propfirm.journal.inputs import (
     PlaceTrailingEntry,
     SetTrailingStop,
 )
+from propfirm.market.synthetic import SyntheticConfig, generate
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import FixedPolicy, load_policy
 from propfirm.service.config import ConfigError, ServiceConfig
-from propfirm.service.feeder import feed
+from propfirm.service.feeder import continued, feed, resume
 from propfirm.service.gateway import Outcome
 from propfirm.service.jsonview import view
 from propfirm.service.scheduler import schedule
@@ -483,3 +484,53 @@ def test_a_token_with_no_role_sees_only_public_data_and_quotes() -> None:
     assert call(g, "GET", "/quotes", roles=()).status_code == 200
     for url in ("/me", "/accounts/A", "/accounts/A/history", "/inputs/5-0", "/admin/access"):
         assert call(g, "GET", url, roles=()).status_code == 403, url
+
+
+def test_feeder_continues_numbers_and_prices_after_a_restart() -> None:
+    # the engine dedupes by sequence number: a feed starting again at 1 froze the quotes
+    seqs, prices = resume(
+        {"EUR/USD": "5165 109373", "GBP/USD": "10 126000"},
+        {
+            "EUR/USD": {"seq": 900, "mid": 100_000},
+            "USD/JPY": {"seq": 42, "mid": 15_100_000},
+            "X": {"seq": None},
+        },
+    )
+    assert seqs == {"EUR/USD": 5165, "GBP/USD": 10, "USD/JPY": 42}
+    assert prices == {"EUR/USD": 109373, "GBP/USD": 126000, "USD/JPY": 15_100_000}
+    # the feeder's own record loses to a later engine quote (first start after the change)
+    assert resume({"EUR/USD": "3 1"}, {"EUR/USD": {"seq": 7, "mid": 2}}) == (
+        {"EUR/USD": 7},
+        {"EUR/USD": 2},
+    )
+    generated = generate(
+        SyntheticConfig(seed="t", symbols=("EUR/USD", "GBP/USD")), NOW, NOW + 3_000
+    )
+    out = list(continued(generated, {"EUR/USD": 5165}))
+    eur = [u.seq for u in out if u.symbol == "EUR/USD"]
+    gbp = [u.seq for u in out if u.symbol == "GBP/USD"]
+    assert eur[:3] == [5166, 5167, 5168] and gbp[:2] == [1, 2]
+
+
+def test_feeder_records_each_update_before_sending_it() -> None:
+    updates = list(generate(SyntheticConfig(seed="t", symbols=("EUR/USD",)), NOW, NOW + 2_000))[:3]
+    log: list[str] = []
+
+    async def go() -> int:
+        stop = asyncio.Event()
+        writer = Recorder(stop, after=10)
+
+        async def record(u: PriceUpdate) -> None:
+            log.append(f"record {u.seq}")
+
+        orig = writer.publish
+
+        async def publish(item: Input, entry_id: str = "*") -> str:
+            log.append(f"send {getattr(item, 'seq', '?')}")
+            return await orig(item)
+
+        writer.publish = publish  # type: ignore[method-assign]
+        return await feed(writer, iter(updates), stop, clock=lambda: NOW + 10_000, record=record)  # type: ignore[arg-type]
+
+    assert asyncio.run(go()) == 3
+    assert log == ["record 1", "send 1", "record 2", "send 2", "record 3", "send 3"]

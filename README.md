@@ -362,7 +362,12 @@ No trade opens or closes on an affected symbol from 2 minutes before to
   as other firms publish theirs: `GET /calendar` (no sign-in; adds the
   release time, currency and the publisher's schedule page), the portal's
   News page, by day in the viewer's time zone or UTC, with a countdown to
-  the next release.
+  the next release. Impact is marked with one to three bars, light red
+  (low) to red (high); restricted releases (all high impact) have the whole
+  row in red. Medium- and low-impact releases are `[[watch]]` entries in the
+  monthly files (`impact = "medium"` or `"low"`): shown only, no window,
+  never sent to the engine. Which source supplies them is open (the risk
+  desk by hand, or a licensed economic-calendar feed).
 - Until the back office (step 5) these are API calls.
 
 ### The news collector (FTMO's list, read from the publishers)

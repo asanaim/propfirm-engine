@@ -112,6 +112,65 @@ def test_bad_calendars_are_refused(change: tuple[str, str], message: str) -> Non
         parse_calendar(GOOD.replace(*change))
 
 
+WATCH = """
+[[watch]]
+id = "w"
+title = "US retail sales"
+currency = "USD"
+impact = "medium"
+local = "2026-11-17T08:30"
+zone = "America/New_York"
+source = "https://example.org/w"
+"""
+
+
+def test_medium_and_low_impact_releases_are_shown_not_restricted() -> None:
+    calendar = parse_calendar(GOOD + WATCH)
+    (w,) = calendar.watched
+    assert (w.event_id, w.impact, w.currency) == ("w", "medium", "USD")
+    assert w.ts == utc_ms("2026-11-17T08:30", "America/New_York")
+    assert [e.event.event_id for e in calendar.events] == ["a"]  # the engine gets only "a"
+    for change, message in (
+        (('impact = "medium"', 'impact = "high"'), "restricted events are high"),
+        (('impact = "medium"', 'impact = "low"\nscope = "currency"'), "unknown keys"),
+        (('local = "2026-11-17T08:30"', 'local = "2026-12-17T08:30"'), "not in 2026-11"),
+        (('source = "https://example.org/w"', 'source = "ftp://x"'), "https"),
+        (('id = "w"', 'id = "a"'), "unique"),
+    ):
+        with pytest.raises(CalendarError, match=message):
+            parse_calendar(GOOD + WATCH.replace(*change))
+
+
+def test_the_public_calendar_adds_watched_releases_without_a_window() -> None:
+    calendar = parse_calendar(GOOD + WATCH)
+    news = NewsDesk((calendar,), MemoryLog(), EngineGateway())
+
+    async def go() -> httpx.Response:
+        deps = Deps(
+            Live(), History(), EngineGateway(), verifier(), FakeCustomers(), news=news,
+            clock=lambda: NOV_6_NFP,
+        )  # fmt: skip
+        transport = httpx.ASGITransport(app=create_app(deps))
+        async with httpx.AsyncClient(transport=transport, base_url="http://api") as client:
+            return await client.get("/calendar")
+
+    watched = [e for e in asyncio.run(go()).json() if e["event_id"] == "w"]
+    assert watched == [
+        {
+            "event_id": "w",
+            "start_ts": calendar.watched[0].ts,
+            "end_ts": calendar.watched[0].ts,
+            "symbols": [],
+            "title": "US retail sales",
+            "release_ts": calendar.watched[0].ts,
+            "currency": "USD",
+            "source": "https://example.org/w",
+            "impact": "medium",
+            "restricted": False,
+        }
+    ]
+
+
 def test_ids_are_unique_within_and_across_files(tmp_path: Path) -> None:
     second = GOOD.split("[[event]]")[1]
     with pytest.raises(CalendarError, match="unique"):
@@ -348,6 +407,7 @@ def test_the_calendar_is_public_with_publisher_and_currency() -> None:
     assert (cpi["title"], cpi["currency"], cpi["symbols"]) == ("US CPI y/y", "USD", ["EUR/USD"])
     assert cpi["source"].startswith("https://www.bls.gov/")
     assert isinstance(cpi["release_ts"], int)
+    assert cpi["impact"] == "high" and cpi["restricted"] is True
     assert unnamed == {
         "event_id": "unnamed",
         "start_ts": 3,
@@ -357,6 +417,8 @@ def test_the_calendar_is_public_with_publisher_and_currency() -> None:
         "release_ts": None,
         "currency": None,
         "source": None,
+        "impact": "high",
+        "restricted": True,
     }
 
 

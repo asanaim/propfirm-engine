@@ -13,6 +13,27 @@ export interface NewsEvent {
   release_ts?: number | null; // the publisher's release time, when the calendar names it
   currency?: string | null;
   source?: string | null; // the publisher's schedule page
+  impact?: Impact; // restricted events are high
+  restricted?: boolean; // true when absent (older API)
+}
+
+export type Impact = "high" | "medium" | "low";
+export const IMPACTS: Impact[] = ["high", "medium", "low"];
+const IMPACT_LABEL: Record<Impact, string> = { high: "High impact", medium: "Medium impact", low: "Low impact" };
+
+export const isRestricted = (e: NewsEvent): boolean => e.restricted ?? true;
+export const impactOf = (e: NewsEvent): Impact => e.impact ?? "high";
+
+/** An impact mark: one to three bars, light red (low) to red (high). */
+export function ImpactMark({ impact }: { impact: Impact }) {
+  const bars = impact === "high" ? 3 : impact === "medium" ? 2 : 1;
+  return (
+    <span className={`impact-mark impact-${impact}`} role="img" aria-label={IMPACT_LABEL[impact]} title={IMPACT_LABEL[impact]}>
+      {[1, 2, 3].map((n) => (
+        <i key={n} className={n <= bars ? "on" : ""} />
+      ))}
+    </span>
+  );
 }
 
 const UTC = "UTC";
@@ -98,6 +119,8 @@ export function NewsPage() {
   const [error, setError] = useState<unknown>(null);
   const [zone, setZone] = useState(localZone);
   const [symbol, setSymbol] = useState<string | null>(null);
+  const [impacts, setImpacts] = useState<Set<Impact>>(() => new Set(IMPACTS));
+  const [onlyRestricted, setOnlyRestricted] = useState(false);
   const now = useTick(30_000);
   useEffect(() => {
     api.get<NewsEvent[]>("/calendar").then(setEvents, setError);
@@ -105,8 +128,14 @@ export function NewsPage() {
   const symbols = useMemo(() => [...new Set((events ?? []).flatMap((e) => e.symbols))].sort(), [events]);
   if (error !== null) return <Problem error={error} />;
   if (events === null) return <Loading />;
-  const shown = events.filter((e) => e.end_ts > now && (symbol === null || e.symbols.includes(symbol)));
-  const next = shown[0];
+  const shown = events.filter(
+    (e) =>
+      Math.max(e.end_ts, (e.release_ts ?? e.start_ts) + 60_000) > now &&
+      (symbol === null || e.symbols.includes(symbol)) &&
+      impacts.has(impactOf(e)) &&
+      (!onlyRestricted || isRestricted(e)),
+  );
+  const next = shown.find(isRestricted);
   const mine = localZone();
   const time = new Intl.DateTimeFormat(undefined, { timeZone: zone, hour: "2-digit", minute: "2-digit" });
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
@@ -115,8 +144,8 @@ export function NewsPage() {
     <div className="page news">
       <h1>News calendar</h1>
       <p className="lead">
-        High-impact releases. On funded accounts no trade opens or closes on the listed symbols from 2 minutes before to 2
-        minutes after each one. Evaluations are not bound.
+        Economic releases by impact. The restricted ones, marked in red, are high impact: on funded accounts no trade opens
+        or closes on the listed symbols from 2 minutes before to 2 minutes after each one. Evaluations are not bound.
       </p>
       <details className="explain">
         <summary>Which releases are on it</summary>
@@ -144,6 +173,37 @@ export function NewsPage() {
             </label>
           ))}
         </fieldset>
+        <fieldset className="impact-filter" aria-label="Impact">
+          <legend className="visually-hidden">Impact</legend>
+          {IMPACTS.map((i) => (
+            <label key={i} className={`chip-toggle${impacts.has(i) ? " on" : ""}`}>
+              <input
+                type="checkbox"
+                checked={impacts.has(i)}
+                onChange={() => {
+                  setImpacts((cur) => {
+                    const next = new Set(cur);
+                    if (next.has(i)) next.delete(i);
+                    else next.add(i);
+                    return next;
+                  });
+                }}
+              />
+              <ImpactMark impact={i} /> {i[0]?.toUpperCase()}
+              {i.slice(1)}
+            </label>
+          ))}
+          <label className={`chip-toggle restricted-toggle${onlyRestricted ? " on" : ""}`}>
+            <input
+              type="checkbox"
+              checked={onlyRestricted}
+              onChange={() => {
+                setOnlyRestricted((v) => !v);
+              }}
+            />
+            Restricted only
+          </label>
+        </fieldset>
         {symbols.length > 1 && (
           <label className="field symbol-filter">
             <span>Symbol</span>
@@ -165,7 +225,7 @@ export function NewsPage() {
       </div>
       {shown.length === 0 ? (
         <Card>
-          <p>No restricted releases are scheduled{symbol === null ? "" : ` for ${symbol}`}.</p>
+          <p>No releases match{symbol === null ? "" : ` for ${symbol}`}.</p>
         </Card>
       ) : (
         byDay(shown, zone).map((g) => (
@@ -177,19 +237,29 @@ export function NewsPage() {
             </h2>
             <ul className="news-list">
               {g.events.map((e) => (
-                <li key={e.event_id} className={now >= e.start_ts && now < e.end_ts ? "news-item live" : "news-item"}>
+                <li
+                  key={e.event_id}
+                  className={`news-item${isRestricted(e) ? " restricted" : ""}${now >= e.start_ts && now < e.end_ts ? " live" : ""}`}
+                >
                   <time className="news-time" dateTime={new Date(e.release_ts ?? e.start_ts).toISOString()}>
                     {time.format(e.release_ts ?? e.start_ts)}
                   </time>
                   <div className="news-body">
                     <p className="news-title">
-                      <span className="impact" aria-label="High impact" title="High impact" />
+                      <ImpactMark impact={impactOf(e)} />
                       {e.title ?? e.event_id}
                       {e.currency && <span className="badge">{e.currency}</span>}
+                      {isRestricted(e) && <span className="restricted-badge">Restricted</span>}
                     </p>
                     <p className="news-meta">
-                      <Clock aria-hidden="true" className="inline-icon" /> Restricted {time.format(e.start_ts)}–
-                      {time.format(e.end_ts)}
+                      {isRestricted(e) ? (
+                        <>
+                          <Clock aria-hidden="true" className="inline-icon" /> No trading on funded accounts{" "}
+                          {time.format(e.start_ts)}–{time.format(e.end_ts)}
+                        </>
+                      ) : (
+                        "Not restricted"
+                      )}
                       {e.source && (
                         <>
                           {" · "}
@@ -199,11 +269,13 @@ export function NewsPage() {
                         </>
                       )}
                     </p>
-                    <ul className="symbol-chips" aria-label="Symbols">
-                      {e.symbols.map((s) => (
-                        <li key={s}>{s}</li>
-                      ))}
-                    </ul>
+                    {e.symbols.length > 0 && (
+                      <ul className="symbol-chips" aria-label="Symbols">
+                        {e.symbols.map((s) => (
+                          <li key={s}>{s}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </li>
               ))}

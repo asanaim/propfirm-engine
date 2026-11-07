@@ -288,3 +288,26 @@ it("lists restricted news windows by day, public, with the next one counted down
   expect(screen.getAllByText("2026-11-07-snb").length).toBeGreaterThan(0);
   expect(screen.queryAllByText("US employment situation (October)").every((n) => n.closest(".next-up") === null)).toBe(true);
 });
+
+it("marks impact and restricted releases, and filters them", async () => {
+  const soon = Date.now() + 3 * 3_600_000;
+  const news = [
+    { event_id: "cpi", title: "US CPI y/y", start_ts: soon, end_ts: soon + 240_001, release_ts: soon + 120_000, symbols: ["EUR/USD"], impact: "high", restricted: true },
+    { event_id: "retail", title: "US retail sales", start_ts: soon + 3_600_000, end_ts: soon + 3_600_000, release_ts: soon + 3_600_000, symbols: [], impact: "medium", restricted: false },
+    { event_id: "ifo", title: "German Ifo", start_ts: soon + 7_200_000, end_ts: soon + 7_200_000, symbols: [], impact: "low", restricted: false },
+  ];
+  const { fetcher } = recorder(() => [200, news]);
+  renderWith(<NewsPage />, fakeAuth({ status: "anonymous" }), fetcher);
+  const retail = (await screen.findByText("US retail sales")).closest("li");
+  expect(retail).not.toHaveClass("restricted");
+  expect(retail).toHaveTextContent("Not restricted");
+  expect(within(retail as HTMLElement).getByRole("img", { name: "Medium impact" })).toBeInTheDocument();
+  const cpi = screen.getAllByText("US CPI y/y").map((n) => n.closest("li")).find((li) => li !== null);
+  expect(cpi).toHaveClass("restricted");
+  expect(cpi).toHaveTextContent("Restricted");
+  fireEvent.click(screen.getByRole("checkbox", { name: /Low/ }));
+  expect(screen.queryByText("German Ifo")).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Restricted only" }));
+  expect(screen.queryByText("US retail sales")).toBeNull();
+  expect(screen.getAllByText("US CPI y/y").length).toBeGreaterThan(0);
+});

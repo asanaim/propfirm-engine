@@ -16,6 +16,15 @@ publishers' own schedules and updates it monthly; git keeps every version):
     zone = "America/New_York"
     source = "https://..."          # where the date and time come from
 
+    [[watch]]                       # shown on the calendar, not restricted:
+    id = "2026-11-17-us-retail"     # a medium- or low-impact release
+    title = "US retail sales"
+    currency = "USD"
+    impact = "medium"               # or "low" (every [[event]] is high)
+    local = "2026-11-17T08:30"
+    zone = "America/New_York"
+    source = "https://..."
+
     [[unscheduled]]                 # no fixed time (Bank of Japan): shown to
     date = "2026-12-18"             # staff; the window opens when the risk
     title = "Bank of Japan rate decision"  # desk marks it published
@@ -69,12 +78,31 @@ class Unscheduled:
 
 
 @dataclass(frozen=True, slots=True)
+class Watched:
+    """A release shown on the calendar for traders' information only: no
+    window, nothing restricted. The restricted events are high impact."""
+
+    event_id: str
+    title: str
+    ts: int  # ms UTC
+    local: str
+    zone: str
+    currency: str
+    impact: str  # medium or low
+    source: str
+
+
+IMPACTS = ("medium", "low")
+
+
+@dataclass(frozen=True, slots=True)
 class Calendar:
     version: str
     month: str
     checked: str
     events: tuple[CalendarEvent, ...]  # by time, then id
     unscheduled: tuple[Unscheduled, ...]
+    watched: tuple[Watched, ...] = ()  # by time, then id
 
 
 def utc_ms(local: str, zone: str) -> int:
@@ -156,12 +184,38 @@ def _unscheduled(table: Mapping[str, Any], month: str, n: int) -> Unscheduled:
     )
 
 
+def _watched(table: Mapping[str, Any], month: str, n: int) -> Watched:
+    where = f"watch {n}"
+    _keys(table, {"id", "title", "currency", "impact", "local", "zone", "source"}, where)
+    event_id = _text(table, "id", where)
+    if not EVENT_ID.fullmatch(event_id):
+        raise CalendarError(f"{where}: id must be lowercase letters, digits and dashes")
+    impact = _text(table, "impact", where)
+    if impact not in IMPACTS:
+        raise CalendarError(f"{where}: impact must be medium or low (restricted events are high)")
+    local, zone = _text(table, "local", where), _text(table, "zone", where)
+    if not local.startswith(month):
+        raise CalendarError(f"{where}: {local} is not in {month}")
+    if not _text(table, "source", where).startswith("https://"):
+        raise CalendarError(f"{where}: source must be an https:// page")
+    return Watched(
+        event_id,
+        _text(table, "title", where),
+        utc_ms(local, zone),
+        local,
+        zone,
+        _currency(table, where),
+        impact,
+        _text(table, "source", where),
+    )
+
+
 def parse_calendar(text: str) -> Calendar:
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise CalendarError(f"not TOML: {exc}") from exc
-    _keys(data, {"version", "month", "checked", "event", "unscheduled"}, "calendar")
+    _keys(data, {"version", "month", "checked", "event", "unscheduled", "watch"}, "calendar")
     version, month = _text(data, "version", "calendar"), _text(data, "month", "calendar")
     if not _VERSION.fullmatch(version) or not version.startswith(f"news-{month}-"):
         raise CalendarError("version must be news-<month>-v<n>")
@@ -173,15 +227,18 @@ def parse_calendar(text: str) -> Calendar:
     except ValueError as exc:
         raise CalendarError("checked must be YYYY-MM-DD") from exc
     raw_events, raw_unscheduled = data.get("event", []), data.get("unscheduled", [])
-    if not isinstance(raw_events, list) or not isinstance(raw_unscheduled, list):
-        raise CalendarError("event and unscheduled must be arrays of tables")
+    raw_watch = data.get("watch", [])
+    if not all(isinstance(x, list) for x in (raw_events, raw_unscheduled, raw_watch)):
+        raise CalendarError("event, watch and unscheduled must be arrays of tables")
     events = [_event(t, month, n) for n, t in enumerate(raw_events, start=1)]
-    ids = [e.event.event_id for e in events]
+    watched = [_watched(t, month, n) for n, t in enumerate(raw_watch, start=1)]
+    ids = [e.event.event_id for e in events] + [w.event_id for w in watched]
     if len(set(ids)) != len(ids):
         raise CalendarError("event ids must be unique")
     unscheduled = [_unscheduled(t, month, n) for n, t in enumerate(raw_unscheduled, start=1)]
     events.sort(key=lambda e: (e.event.ts, e.event.event_id))
-    return Calendar(version, month, checked, tuple(events), tuple(unscheduled))
+    watched.sort(key=lambda w: (w.ts, w.event_id))
+    return Calendar(version, month, checked, tuple(events), tuple(unscheduled), tuple(watched))
 
 
 def load_calendars(directory: Path) -> tuple[Calendar, ...]:
@@ -205,7 +262,8 @@ def load_calendars(directory: Path) -> tuple[Calendar, ...]:
 def _unique(calendars: Iterable[Calendar]) -> None:
     seen: set[str] = set()
     for calendar in calendars:
-        for item in calendar.events:
-            if item.event.event_id in seen:
-                raise CalendarError(f"event id {item.event.event_id} is in two files")
-            seen.add(item.event.event_id)
+        ids = [i.event.event_id for i in calendar.events] + [w.event_id for w in calendar.watched]
+        for event_id in ids:
+            if event_id in seen:
+                raise CalendarError(f"event id {event_id} is in two files")
+            seen.add(event_id)
