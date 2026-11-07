@@ -18,6 +18,7 @@ from typing import Any
 
 import asyncpg
 
+from propfirm.customers.four_eyes import SameProposer, next_event, open_proposal
 from propfirm.customers.progression import (
     PROGRESSION_KINDS,
     ProgressionEvent,
@@ -289,8 +290,12 @@ class ProgressionStore:
             own = await conn.fetchval(f"SELECT cif FROM {s}.cif WHERE subject = $1", subject)
             if own == record.cif:
                 raise DecisionError("own_progression", "nobody decides their own review")
-            kind = "approved" if approve else "denied"
-            detail = {"by": subject, "by_email": email, "reason": reason}
+            # rule AC00: the first decision is a proposal; a second person decides
+            proposal = open_proposal(await self._events(conn, prg))
+            try:
+                kind, detail = next_event(proposal, approve, subject, email, reason)
+            except SameProposer as exc:
+                raise DecisionError("four_eyes", str(exc)) from exc
             return await self._append(conn, prg, kind, ts, detail)
 
     # --- cache --------------------------------------------------------------------

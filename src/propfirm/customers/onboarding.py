@@ -56,6 +56,8 @@ ONBOARDING_KINDS = (
     "review_required",
     "approved",
     "denied",
+    "proposed",  # rule AC00: the first of two people
+    "proposal_rejected",  # the second disagreed: the review stays open
     "rejected",
     "cleared",
     "account_assigned",
@@ -150,6 +152,8 @@ def onboarding_state(onb: str, events: Iterable[OnboardingEvent]) -> OnboardingS
             case "review_required":
                 need(event, "checks")
                 status = "review"
+            case "proposed" | "proposal_rejected":
+                need(event, "review")
             case "approved":
                 need(event, "review")
                 status = "contract"

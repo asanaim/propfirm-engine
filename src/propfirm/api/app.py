@@ -73,6 +73,7 @@ from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
+from propfirm.customers.four_eyes import open_proposal, proposal_json
 from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
 from propfirm.customers.lifecycle import Lifecycle
@@ -765,6 +766,7 @@ ONBOARDING_ERRORS = {
     "not_signer": 403,
     "blocked": 403,
     "own_onboarding": 403,
+    "four_eyes": 403,
     "other_text": 422,
     "name": 422,
 }
@@ -1889,7 +1891,8 @@ def create_app(
         history = [
             {"kind": e.kind, "ts": e.ts, "detail": dict(e.detail)} for e in await store.history(prg)
         ]
-        return {**progression_view(record), "history": history}
+        waiting = proposal_json(open_proposal(await store.history(prg)))
+        return {**progression_view(record), "proposal": waiting, "history": history}
 
     async def decide(deps: Deps, me: Principal, prg: str, approve: bool, reason: str) -> Any:
         try:
@@ -1901,16 +1904,20 @@ def create_app(
                 "unknown": 404,
                 "not_in_review": 409,
                 "own_progression": 403,
+                "four_eyes": 403,
                 "open_case": 409,
             }[exc.code]
             raise HTTPException(
                 status_code=status, detail={"code": exc.code, "message": str(exc)}
             ) from exc
-        return progression_view(record)
+        waiting = open_proposal(await _lifecycle(deps).store.history(prg))
+        return {**progression_view(record), "proposal": proposal_json(waiting)}
 
     @app.post("/staff/progressions/{prg}/approve")
     async def approve(deps: D, me: Approver, prg: PrgId, body: DecisionBody) -> dict[str, Any]:
-        """Approve a funded review: funded onboarding follows (step 3b)."""
+        """Approve a funded review: funded onboarding follows (step 3b). Rule
+        AC00: the first decision is a proposal; a second person, never the
+        proposer, carries it out (the same decision) or rejects it."""
         result: dict[str, Any] = await decide(deps, me, prg, True, body.reason)
         return result
 
@@ -1955,7 +1962,13 @@ def create_app(
                     else None,
                     "document_country": result.document_country,
                 }
-        return {**onboarding_view(record), "verified": verified, "history": history}
+        waiting = proposal_json(open_proposal(await store.history(onb)))
+        return {
+            **onboarding_view(record),
+            "verified": verified,
+            "proposal": waiting,
+            "history": history,
+        }
 
     async def decide_onboarding(
         deps: Deps, me: Principal, onb: str, approve: bool, reason: str
@@ -1966,13 +1979,15 @@ def create_app(
             )
         except OnboardingStateError as exc:
             raise _onboarding_refused(exc) from exc
-        return onboarding_view(record)
+        waiting = open_proposal(await _onboarding(deps).store.history(onb))
+        return {**onboarding_view(record), "proposal": proposal_json(waiting)}
 
     @app.post("/staff/onboardings/{onb}/approve")
     async def approve_onboarding(
         deps: D, me: IdentityReviewer, onb: OnbId, body: DecisionBody
     ) -> dict[str, Any]:
-        """Accept a verified identity that differs from the customer record."""
+        """Accept a verified identity that differs from the customer record.
+        Rule AC00: two people, as a funded review."""
         return await decide_onboarding(deps, me, onb, True, body.reason)
 
     @app.post("/staff/onboardings/{onb}/deny")

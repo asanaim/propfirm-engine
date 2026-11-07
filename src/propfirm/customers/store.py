@@ -526,6 +526,24 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         INSERT INTO {s}.news_cursor (id, seq) VALUES (1, 0);
         """,
     ),
+    (
+        9,
+        """
+        -- rule AC00 (8 Nov 2026): a review decision needs two people; the first
+        -- is a proposal, a second person carries it out or rejects it
+        ALTER TABLE {s}.progression_events DROP CONSTRAINT progression_events_kind_check;
+        ALTER TABLE {s}.progression_events ADD CONSTRAINT progression_events_kind_check
+            CHECK (kind IN ('created', 'account_assigned', 'provision_attempted',
+                'provisioned', 'failed', 'approved', 'denied', 'proposed',
+                'proposal_rejected'));
+        ALTER TABLE {s}.onboarding_events DROP CONSTRAINT onboarding_events_kind_check;
+        ALTER TABLE {s}.onboarding_events ADD CONSTRAINT onboarding_events_kind_check
+            CHECK (kind IN ('created', 'kyc_requested', 'kyc_declined', 'kyc_approved',
+                'screened', 'review_required', 'approved', 'denied', 'proposed',
+                'proposal_rejected', 'rejected', 'cleared', 'account_assigned',
+                'contract_issued', 'signed', 'provision_attempted', 'provisioned', 'failed'));
+        """,
+    ),
 )
 
 

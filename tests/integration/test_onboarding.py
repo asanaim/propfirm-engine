@@ -36,6 +36,7 @@ async def funded_review_approved(p: Platform) -> None:
     await market.pass_stage("ACC00000002")
     await p.lifecycle.poll(now_ms())
     decision = {"reason": "clean record"}
+    await p.call("POST", "/staff/progressions/PRG00000002/approve", "staff-2", decision, STAFF)
     approved = await p.call(
         "POST", "/staff/progressions/PRG00000002/approve", "staff-1", decision, STAFF
     )
@@ -248,6 +249,7 @@ def test_a_different_identity_goes_to_an_employee(
                 None,
                 sandbox=False,
             )
+            await production.decide("ONB00000001", True, "staff-2", None, "ok", now_ms())
             held = await production.decide("ONB00000001", True, "staff-1", None, "ok", now_ms())
             assert (held.status, held.contract) == ("contract", None)
             await p.onboarding.advance(now_ms())  # the sandbox issues it, as a draft
@@ -260,10 +262,12 @@ def test_a_different_identity_goes_to_an_employee(
             for onb in ("ONB00000002", "ONB00000003"):
                 reused = await p.call("POST", f"/me/onboardings/{onb}/verification")
                 assert reused.json()["status"] == "review"
+            await p.call("POST", "/staff/onboardings/ONB00000002/approve", "staff-2", reason, STAFF)
             approved = await p.call(
                 "POST", "/staff/onboardings/ONB00000002/approve", "staff-1", reason, STAFF
             )
             assert approved.json()["status"] == "signature", approved.text
+            await p.call("POST", "/staff/onboardings/ONB00000003/deny", "staff-1", reason, STAFF)
             denied = await p.call(
                 "POST", "/staff/onboardings/ONB00000003/deny", "staff-2", reason, STAFF
             )
