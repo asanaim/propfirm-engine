@@ -1,9 +1,10 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useApi, useMe } from "../api/ApiProvider";
 import type { Product } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Card, Loading, Notice } from "../components/ui";
 import { Ridge } from "../components/Ridge";
+import { Terrain } from "../components/Terrain";
 import { formatCents, formatPercent } from "../lib/money";
 import { useReveal, useTilt } from "../lib/motion";
 import { Link } from "../router";
@@ -81,10 +82,15 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
   const page = useRef<HTMLDivElement>(null);
   const hero = useRef<HTMLElement>(null);
   useReveal(page, [products]);
+  const [webgl, setWebgl] = useState(true);
+  const noWebgl = useCallback(() => {
+    setWebgl(false);
+  }, []);
   const split = products?.reduce((best, p) => Math.max(best, Number(p.profit_split_percent)), 0);
   return (
     <div className="landing" ref={page}>
       <section className="hero" aria-labelledby="hero-title" ref={hero}>
+        {webgl ? <Terrain area={hero} onUnavailable={noWebgl} /> : null}
         <h1 id="hero-title">
           Trade the evaluation.
           <br />
@@ -105,6 +111,7 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
           target={first?.profit_target_percent === null || first === undefined ? undefined : formatPercent(first.profit_target_percent)}
           maxLoss={first === undefined ? undefined : formatPercent(first.max_loss_percent)}
           area={hero}
+          layers={!webgl}
         />
       </section>
 

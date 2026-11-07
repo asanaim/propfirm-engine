@@ -4,6 +4,7 @@ import { createApi } from "./api";
 import { App } from "./App";
 import { completeSignIn, createManager, tokenSource } from "./auth";
 import { config } from "./config";
+import "@fontsource-variable/inter";
 import "./backoffice.css";
 
 const manager = createManager(config.authority, config.clientId, window.location.origin);
