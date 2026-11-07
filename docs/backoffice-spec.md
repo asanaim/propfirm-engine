@@ -48,13 +48,20 @@ step-up for approvals are in the policy; locking them on in production
 Payouts, voids and profit removals: two people already (pass and
 authorise, 31 Oct 2026). Staff grants and screening: two people already.
 
+AC00 for reviews. In place: an identity (KYC) review and a funded review
+are decided by two people. The first approve or deny is a proposal; a
+second person, never the proposer, carries it out with the same decision
+or rejects the proposal, and the review stays open. Customers migration 9.
+
+AC28 icons. In place: the back office uses Lucide (`lucide-react`, ISC),
+one distinct icon for every menu item and resource, at one size and line
+weight, always beside its label; Material icons are removed.
+
 ## Gaps against AC00 found in the code
 
-These decisions are still made by one person and must become proposal
-and approval: identity (KYC) accept or reject (`onboarding.decide`),
-funded review approve or deny (`progression.decide`), case block
-confirmation (`case.confirm`), and the risk desk's news windows
-(`news.desk`; cancelling already needs an admin).
+Still made by one person: case block confirmation (`case.confirm`) and
+the risk desk's news windows (`news.desk`; cancelling already needs an
+admin).
 
 ## Not started
 
@@ -70,7 +77,3 @@ reports (partly present: not checked), AC23 system pages, AC24 price feed
 failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.
 
-AC28 icons: the back office uses Material icons (`@mui/icons-material`,
-Apache 2.0), one distinct icon per menu item with its label; the portal
-uses Lucide. Moving the back office to Lucide is a design choice for the
-owners, not started.

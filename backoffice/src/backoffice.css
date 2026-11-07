@@ -208,3 +208,8 @@ pre.json {
     min-height: 0;
   }
 }
+
+.todo-next {
+  flex: none;
+  opacity: 0.6;
+}

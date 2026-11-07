@@ -7,6 +7,7 @@ import { config } from "./config";
 import { BackOfficeContext } from "./context";
 import { dataProvider } from "./dataProvider";
 import { Home } from "./Home";
+import { ICONS, icon } from "./icons";
 import { Login } from "./Login";
 import { AnomalyReport, AuditTrail, NewsDesk } from "./Reports";
 import { CaseList, CaseShow } from "./resources/cases";
@@ -38,21 +39,21 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
           const screens = screensFor(permissions ?? []);
           return (
             <>
-              {screens.has("payouts") ? <Resource name="payouts" list={PayoutList} show={PayoutShow} /> : null}
-              {screens.has("cases") ? <Resource name="cases" list={CaseList} show={CaseShow} /> : null}
+              {screens.has("payouts") ? <Resource name="payouts" icon={icon(ICONS.payouts)} list={PayoutList} show={PayoutShow} /> : null}
+              {screens.has("cases") ? <Resource name="cases" icon={icon(ICONS.cases)} list={CaseList} show={CaseShow} /> : null}
               {screens.has("onboardings") ? (
-                <Resource name="onboardings" options={{ label: "Identity reviews" }} list={OnboardingList} show={OnboardingShow} />
+                <Resource name="onboardings" icon={icon(ICONS.onboardings)} options={{ label: "Identity reviews" }} list={OnboardingList} show={OnboardingShow} />
               ) : null}
               {screens.has("progressions") ? (
-                <Resource name="progressions" options={{ label: "Funded reviews" }} list={ProgressionList} show={ProgressionShow} />
+                <Resource name="progressions" icon={icon(ICONS.progressions)} options={{ label: "Funded reviews" }} list={ProgressionList} show={ProgressionShow} />
               ) : null}
-              <Resource name="apprentice-proposals" options={{ label: "Apprentice proposals" }} list={ApprenticeProposalList} />
-              <Resource name="notifications" list={NotificationList} />
-              {screens.has("members") ? <Resource name="members" options={{ label: "Staff" }} list={MemberList} show={MemberShow} /> : null}
-              {screens.has("grants") ? <Resource name="grants" options={{ label: "Access requests" }} list={GrantList} /> : null}
-              {screens.has("cutoffs") ? <Resource name="cutoffs" options={{ label: "Leaver cut-offs" }} list={CutoffList} /> : null}
-              {screens.has("proposals") ? <Resource name="proposals" options={{ label: "Setting proposals" }} list={ProposalList} /> : null}
-              {screens.has("changes") ? <Resource name="changes" options={{ label: "Setting changes" }} list={ChangeList} /> : null}
+              <Resource name="apprentice-proposals" icon={icon(ICONS.apprenticeProposals)} options={{ label: "Apprentice proposals" }} list={ApprenticeProposalList} />
+              <Resource name="notifications" icon={icon(ICONS.notifications)} list={NotificationList} />
+              {screens.has("members") ? <Resource name="members" icon={icon(ICONS.members)} options={{ label: "Staff" }} list={MemberList} show={MemberShow} /> : null}
+              {screens.has("grants") ? <Resource name="grants" icon={icon(ICONS.grants)} options={{ label: "Access requests" }} list={GrantList} /> : null}
+              {screens.has("cutoffs") ? <Resource name="cutoffs" icon={icon(ICONS.cutoffs)} options={{ label: "Leaver cut-offs" }} list={CutoffList} /> : null}
+              {screens.has("proposals") ? <Resource name="proposals" icon={icon(ICONS.proposals)} options={{ label: "Setting proposals" }} list={ProposalList} /> : null}
+              {screens.has("changes") ? <Resource name="changes" icon={icon(ICONS.changes)} options={{ label: "Setting changes" }} list={ChangeList} /> : null}
               <CustomRoutes>
                 {screens.has("anomalies") ? <Route path="/anomalies" element={<AnomalyReport />} /> : null}
                 {screens.has("audit") ? <Route path="/audit" element={<AuditTrail />} /> : null}
