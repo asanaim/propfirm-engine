@@ -13,13 +13,15 @@ A stage-limits change, in order:
 4. no answer in time leaves it waiting: `publish_pending` retries, and
    until then the previous limits stay in force.
 
-Maker-checker [staff spec 5a-2; outline M07, M25]: with
-`staff.settings_need_second_admin`, a change is first a proposal
-(`propose`); it takes effect only when a second admin approves it
-(`approve`: never its maker, within `proposal_expiry_hours`), and is then
-recorded in the maker's name with the approver's. Another admin may reject
-it; the maker may withdraw it. The limits are checked when proposed and
-again when approved.
+Maker-checker [staff spec 5a-2; outline M07, M25; rule AC00]: a change
+is first a proposal (`propose`); it takes effect only when a second
+person approves it (`approve`: never its maker, within
+`proposal_expiry_hours`), and is then recorded in the maker's name with
+the approver's. Who may propose and approve each kind is
+`propfirm.settings.authority`: stage limits and the stand-in are owner
+level (AC01), country gating admin level. Another approver may reject it;
+the maker may withdraw it. The limits are checked when proposed and again
+when approved.
 """
 
 import logging
@@ -30,15 +32,19 @@ from propfirm.journal.inputs import AddRuleSet, Input
 from propfirm.policy import Policy
 from propfirm.rules.products import RuleSet
 from propfirm.service.gateway import Outcome
+from propfirm.settings.authority import Refused, check_approver, check_proposer
 from propfirm.settings.overlay import (
     CountryGating,
     Setting,
     SettingChange,
     StageLimits,
+    StandIn,
     apply_changes,
     limits_rule_set,
+    stand_in_in_force,
 )
 from propfirm.settings.store import ChangeStatus, Proposal, ProposalDecided
+from propfirm.staff.model import Tier
 
 log = logging.getLogger(__name__)
 
@@ -126,6 +132,10 @@ class Settings:
     async def history(self, limit: int = 100) -> Sequence[ChangeStatus]:
         return await self._records.history(limit)
 
+    async def stand_in(self, now: int) -> StandIn | None:
+        """The owners' stand-in approver in force at `now`, if any."""
+        return stand_in_in_force(await self._records.applied_changes(), now)
+
     async def set_country_gating(
         self, author: str, email: str | None, setting: CountryGating, reason: str, ts: int
     ) -> ChangeStatus:
@@ -173,8 +183,20 @@ class Settings:
                 raise SettingsError("invalid", str(exc)) from exc
 
     async def propose(
-        self, author: str, email: str | None, setting: Setting, reason: str, ts: int
+        self,
+        author: str,
+        email: str | None,
+        setting: Setting,
+        reason: str,
+        ts: int,
+        *,
+        tier: Tier | None,
     ) -> Proposal:
+        """`tier`: the maker's firm-wide tier (owner-level changes need T5)."""
+        try:
+            check_proposer(setting, tier)
+        except Refused as exc:
+            raise SettingsError(exc.code, str(exc)) from exc
         self._check(setting)
         return await self._store().propose(setting, author, email, reason, ts)
 
@@ -190,22 +212,27 @@ class Settings:
         return found
 
     async def approve(
-        self, pid: int, approver: str, reason: str, ts: int, expiry_ms: int
+        self, pid: int, approver: str, reason: str, ts: int, expiry_ms: int, *, tier: Tier | None
     ) -> tuple[ChangeStatus, RuleSet | None]:
-        """The second admin's approval: the change takes effect (gating at
-        once; limits when the engine has the new rule set)."""
+        """The second person's approval: the change takes effect (gating and
+        the stand-in at once; limits when the engine has the new rule set).
+        `tier`: the approver's firm-wide tier."""
         proposal = await self._open(pid)
-        if approver == proposal.author:
-            raise SettingsError("four_eyes", "the maker of a change does not approve it")
+        try:
+            check_approver(
+                proposal.setting, proposal.author, approver, tier, await self.stand_in(ts)
+            )
+        except Refused as exc:
+            raise SettingsError(exc.code, str(exc)) from exc
         if expiry_ms and ts - proposal.ts > expiry_ms:
             raise SettingsError("expired", f"proposal {pid} has expired; propose it again")
         self._check(proposal.setting)
-        gating = isinstance(proposal.setting, CountryGating)
+        at_once = isinstance(proposal.setting, CountryGating | StandIn)
         try:
-            change = await self._store().approve(proposal, approver, reason, ts, applied=gating)
+            change = await self._store().approve(proposal, approver, reason, ts, applied=at_once)
         except ProposalDecided as exc:
             raise SettingsError("decided", str(exc)) from exc
-        if gating:
+        if at_once:
             return ChangeStatus(change, ts, None), None
         setting = proposal.setting
         assert isinstance(setting, StageLimits)
@@ -215,10 +242,17 @@ class Settings:
         seq = await self._publish(change.id, rule_set, ts)
         return ChangeStatus(change, None if seq is None else ts, seq), rule_set
 
-    async def reject(self, pid: int, by: str, reason: str, ts: int) -> Proposal:
+    async def reject(
+        self, pid: int, by: str, reason: str, ts: int, *, tier: Tier | None
+    ) -> Proposal:
+        """Another person who could approve it rejects it."""
         proposal = await self._open(pid)
         if by == proposal.author:
             raise SettingsError("four_eyes", "the maker withdraws, another admin rejects")
+        try:
+            check_approver(proposal.setting, proposal.author, by, tier, await self.stand_in(ts))
+        except Refused as exc:
+            raise SettingsError(exc.code, str(exc)) from exc
         return await self._decide(proposal, "rejected", by, reason, ts)
 
     async def withdraw(self, pid: int, by: str, reason: str, ts: int) -> Proposal:

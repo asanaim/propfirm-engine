@@ -137,6 +137,18 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        6,
+        """
+        -- the owners' stand-in approver (rules AC00, AC01, 8 Nov 2026)
+        ALTER TABLE {s}.changes DROP CONSTRAINT changes_kind_check;
+        ALTER TABLE {s}.changes ADD CONSTRAINT changes_kind_check
+            CHECK (kind IN ('country_gating', 'stage_limits', 'stand_in'));
+        ALTER TABLE {s}.proposals DROP CONSTRAINT proposals_kind_check;
+        ALTER TABLE {s}.proposals ADD CONSTRAINT proposals_kind_check
+            CHECK (kind IN ('country_gating', 'stage_limits', 'stand_in'));
+        """,
+    ),
 )
 
 
