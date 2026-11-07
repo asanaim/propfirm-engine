@@ -16,6 +16,7 @@ export function ActionButton({
   field = "reason",
   fieldLabel = "Reason (kept with the record)",
   maxLength = 500, // the API's Reason
+  onDone,
 }: {
   label: string;
   path: string;
@@ -25,6 +26,7 @@ export function ActionButton({
   field?: string;
   fieldLabel?: string;
   maxLength?: number;
+  onDone?: () => void;
 }) {
   const { api, manager } = useBackOffice();
   const notify = useNotify();
@@ -42,6 +44,7 @@ export function ActionButton({
       setOpen(false);
       setReason("");
       refresh();
+      onDone?.();
     } catch (e) {
       if (e instanceof StepUpRequired) {
         setNeedsStepUp(true);

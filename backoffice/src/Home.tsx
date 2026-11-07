@@ -50,7 +50,9 @@ export function linkFor(t: Pick<Todo, "kind" | "ref">): string | null {
   if (t.kind === "identity_review") return `/onboardings/${t.ref}/show`;
   if (t.kind === "funded_review") return `/progressions/${t.ref}/show`;
   if (t.kind === "grant" || t.kind === "grant_ending") return "/grants";
-  if (t.kind === "access_review" || t.kind === "graduation") return `/members/${t.ref}/show`;
+  if (["access_review", "graduation", "screening_check", "screening_approve"].includes(t.kind)) {
+    return `/members/${t.ref}/show`;
+  }
   if (t.kind === "apprentice_proposal") return "/apprentice-proposals";
   if (t.kind === "settings_proposal") return "/proposals";
   if (t.kind === "news_gap") return "/news";

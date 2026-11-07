@@ -1,0 +1,53 @@
+# Pre-employment screening [decided 7 Nov 2026]: every check at hire and again
+# every year (`staff.screening_valid_months`). A lead (T3) or above records each
+# check; an admin (T4) or owner, not a recorder and not the person, approves the
+# whole screening. No staff access until it is approved, or once it expires
+# (owners exempt: they hold the break-glass duties).
+#
+# Store the result and a reference only (the provider's or the document's), never
+# the report or a copy of the document: the data class is Restricted.
+
+[[check]]
+id = "identity"
+title = "Identity verified"
+text = "Government ID checked against the person (reference: document type and last four characters)."
+
+[[check]]
+id = "right_to_work"
+title = "Right to work"
+text = "Permitted to work in the country of employment."
+
+[[check]]
+id = "address"
+title = "Address verified"
+text = "Proof of address dated within three months."
+
+[[check]]
+id = "sanctions_pep"
+title = "Sanctions and PEP screening"
+text = "Not on a sanctions list; politically exposed status declared and assessed."
+
+[[check]]
+id = "background"
+title = "Background check"
+text = "Criminal-record or equivalent check where the law of the country allows it."
+
+[[check]]
+id = "references"
+title = "References"
+text = "Two references from previous employers or, for a first job, from education."
+
+[[check]]
+id = "conflicts"
+title = "Conflicts of interest"
+text = "Outside business interests and relationships with traders or competitors declared."
+
+[[check]]
+id = "trading_accounts"
+title = "Trading accounts declared"
+text = "Every personal and household trading or prop-firm account declared (the staff trading ban)."
+
+[[check]]
+id = "agreements"
+title = "Agreements signed"
+text = "Confidentiality agreement and code of conduct signed, with the version."

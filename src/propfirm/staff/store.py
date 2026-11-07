@@ -28,6 +28,7 @@ from propfirm.staff.records import (
     grant_state,
     member_state,
 )
+from propfirm.staff.screening import CheckRecord, Decision
 from propfirm.staff.training import Passed
 
 _LOCK_CLASS = 0x73746166  # "staf"
@@ -271,6 +272,36 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        7,
+        """
+        -- pre-employment screening (Restricted)
+        CREATE TABLE {s}.screening_checks (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            sid text NOT NULL,
+            check_id text NOT NULL,
+            result text NOT NULL CHECK (result IN ('pass', 'fail')),
+            reference text NOT NULL,
+            recorded_by text NOT NULL,
+            ts bigint NOT NULL
+        );
+        CREATE INDEX screening_checks_sid ON {s}.screening_checks (sid);
+        CREATE TABLE {s}.screening_decisions (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            sid text NOT NULL,
+            decision text NOT NULL CHECK (decision IN ('approved', 'rejected')),
+            note text NOT NULL,
+            decided_by text NOT NULL,
+            ts bigint NOT NULL,
+            valid_until bigint
+        );
+        CREATE INDEX screening_decisions_sid ON {s}.screening_decisions (sid);
+        CREATE TRIGGER screening_checks_append_only BEFORE UPDATE OR DELETE
+            ON {s}.screening_checks FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER screening_decisions_append_only BEFORE UPDATE OR DELETE
+            ON {s}.screening_decisions FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 
@@ -403,6 +434,49 @@ class StaffOps:
             p.passed_at,
             p.assessor,
             p.note,
+        )
+
+    async def screening(self, sid: str) -> tuple[list[CheckRecord], list[Decision]]:
+        recs = await self._c.fetch(
+            f"SELECT * FROM {self._s}.screening_checks WHERE sid = $1 ORDER BY id", sid
+        )
+        decs = await self._c.fetch(
+            f"SELECT * FROM {self._s}.screening_decisions WHERE sid = $1 ORDER BY id", sid
+        )
+        records = [
+            CheckRecord(
+                r["sid"], r["check_id"], r["result"], r["reference"], r["recorded_by"], r["ts"]
+            )
+            for r in recs
+        ]
+        decisions = [
+            Decision(r["sid"], r["decision"], r["note"], r["decided_by"], r["ts"], r["valid_until"])
+            for r in decs
+        ]
+        return records, decisions
+
+    async def record_check(self, r: CheckRecord) -> None:
+        await self._c.execute(
+            f"INSERT INTO {self._s}.screening_checks (sid, check_id, result, reference, "
+            f"recorded_by, ts) VALUES ($1, $2, $3, $4, $5, $6)",
+            r.sid,
+            r.check,
+            r.result,
+            r.reference,
+            r.recorded_by,
+            r.ts,
+        )
+
+    async def record_decision(self, d: Decision) -> None:
+        await self._c.execute(
+            f"INSERT INTO {self._s}.screening_decisions (sid, decision, note, decided_by, ts, "
+            f"valid_until) VALUES ($1, $2, $3, $4, $5, $6)",
+            d.sid,
+            d.decision,
+            d.note,
+            d.decided_by,
+            d.ts,
+            d.valid_until,
         )
 
     async def cutoffs(self) -> list[Cutoff]:

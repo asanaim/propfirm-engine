@@ -17,7 +17,8 @@ What it adds:
    Every employee login has the same authenticator secret (one entry in an
    authenticator app serves all of them; `DEMO_TOTP_BASE32`).
 2. The staff directory, through the directory's own rules (four eyes, the
-   training gate): the owners as T5; the admins joined by owner A and
+   training gate, pre-employment screening: every check recorded by owner A
+   and approved by owner B for each employee): the owners as T5; the admins joined by owner A and
    approved by owner B; each section's lead, specialist and associate joined
    by admin A, trained and approved by admin B; each section's apprentice
    (mentor: the section's lead, a four-month term).
@@ -54,6 +55,7 @@ from propfirm.settings.store import SettingsStore
 from propfirm.staff.directory import Actor, Directory, Owner
 from propfirm.staff.model import ROLES, add_months
 from propfirm.staff.records import StaffRefused
+from propfirm.staff.screening import checks as screening_checks
 from propfirm.staff.store import StaffStore
 
 log = logging.getLogger("propfirm.demo")
@@ -244,9 +246,20 @@ async def directory(config: ServiceConfig, pool: asyncpg.Pool, now: int) -> dict
             await staff.approve(approver, g.grt, "demo data", now)
         return member.sid
 
+    async def screen(sid: str) -> None:
+        """Every check recorded by owner A, approved by owner B (four eyes)."""
+        async with staff._store.read() as ops:  # the seed reads its own rows
+            current = await staff._screening(ops, sid, now)
+        if current.status == "approved":
+            return
+        for c in screening_checks():
+            await staff.record_check(owner_a, sid, c.id, "pass", f"demo: {c.id}", now)
+        await staff.decide_screening(owner_b, sid, "approved", "demo data", now)
+
     for x in "ab":
         email = f"admin-{x}@example.com"
         sids[email] = await join(owner_a, owner_b, email, f"Admin {x.upper()}", tier=4)
+        await screen(sids[email])
     for section in ROLES:
         lead_email = f"{section}-lead@example.com"
         lead = await join(
@@ -283,6 +296,10 @@ async def directory(config: ServiceConfig, pool: asyncpg.Pool, now: int) -> dict
             sections={section: 0},
             ends_at=add_months(now, 4),
         )
+
+    # pre-employment screening: no staff access without it
+    for sid in sids.values():
+        await screen(sid)
 
     # waiting for an owner: a level in another section for the KYC associate
     kyc_associate = sids["kyc-associate@example.com"]

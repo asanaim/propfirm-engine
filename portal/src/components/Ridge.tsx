@@ -38,11 +38,11 @@ export function Ridge({ target, maxLoss }: { target?: string | undefined; maxLos
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="presentation" focusable="false">
         <defs>
           <linearGradient id="ridge-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.22" />
-            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--summit)" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="var(--ridge-start)" stopOpacity="0" />
           </linearGradient>
           <linearGradient id="ridge-stroke" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="var(--accent)" />
+            <stop offset="0%" stopColor="var(--ridge-start)" />
             <stop offset="100%" stopColor="var(--summit)" />
           </linearGradient>
         </defs>
