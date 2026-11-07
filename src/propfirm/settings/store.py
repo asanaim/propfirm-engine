@@ -149,6 +149,28 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             CHECK (kind IN ('country_gating', 'stage_limits', 'stand_in'));
         """,
     ),
+    (
+        7,
+        """
+        -- rule AC10 (8 Nov 2026): versioned policy pages, and who accepted which
+        ALTER TABLE {s}.changes DROP CONSTRAINT changes_kind_check;
+        ALTER TABLE {s}.changes ADD CONSTRAINT changes_kind_check
+            CHECK (kind IN ('country_gating', 'stage_limits', 'stand_in', 'policy_page'));
+        ALTER TABLE {s}.proposals DROP CONSTRAINT proposals_kind_check;
+        ALTER TABLE {s}.proposals ADD CONSTRAINT proposals_kind_check
+            CHECK (kind IN ('country_gating', 'stage_limits', 'stand_in', 'policy_page'));
+        CREATE TABLE {s}.policy_acceptances (
+            subject text NOT NULL,
+            slug text NOT NULL,
+            version int NOT NULL CHECK (version >= 1),
+            accepted_at bigint NOT NULL,
+            PRIMARY KEY (subject, slug, version)
+        );
+        CREATE TRIGGER policy_acceptances_append_only
+            BEFORE UPDATE OR DELETE ON {s}.policy_acceptances
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 
@@ -279,6 +301,23 @@ class SettingsStore:
             f"ON a.change_id = c.id ORDER BY c.id"
         )
         return [_change(r) for r in rows]
+
+    async def accept(self, subject: str, slug: str, version: int, ts: int) -> None:
+        """Record a policy acceptance; a repeat keeps the first."""
+        await self._pool.execute(
+            f"INSERT INTO {self._s}.policy_acceptances (subject, slug, version, accepted_at) "
+            f"VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+            subject,
+            slug,
+            version,
+            ts,
+        )
+
+    async def accepted(self, subject: str) -> set[tuple[str, int]]:
+        rows = await self._pool.fetch(
+            f"SELECT slug, version FROM {self._s}.policy_acceptances WHERE subject = $1", subject
+        )
+        return {(r["slug"], r["version"]) for r in rows}
 
     async def unapplied_changes(self) -> Sequence[SettingChange]:
         rows = await self._pool.fetch(

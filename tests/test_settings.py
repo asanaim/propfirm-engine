@@ -23,6 +23,7 @@ from propfirm.service.setup import policy_changes, setup_from_policy
 from propfirm.settings.authority import Refused, check_approver
 from propfirm.settings.overlay import (
     CountryGating,
+    PolicyPage,
     Setting,
     SettingChange,
     StandIn,
@@ -373,6 +374,8 @@ def api(
     proposals: MemoryProposals | None = None,
     user: str = "admin-1",
     tiers: dict[str, Tier] | None = None,
+    acceptances: MemoryAcceptances | None = None,
+    customers: FakeCustomers | None = None,
 ) -> httpx.Response:
     """Without `proposals`, the policy runs without maker-checker (the
     direct path); with them, as shipped (a second person approves).
@@ -383,13 +386,19 @@ def api(
         staff = dataclasses.replace(BASE.staff, settings_need_second_admin=False)
         base = dataclasses.replace(BASE, staff=staff)
     records = records if records is not None else MemoryRecords()
-    settings = Settings(base, records, engine or Engine(), proposals=proposals)
+    settings = Settings(
+        base,
+        records,
+        engine or Engine(),
+        proposals=proposals,
+        acceptances=acceptances if acceptances is not None else MemoryAcceptances(),
+    )
     deps = Deps(
         None,  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
         engine or Engine(),
         verifier(),
-        FakeCustomers(),
+        customers or FakeCustomers(),
         policy=settings,
         settings=settings,
         clock=lambda: T0,
@@ -404,6 +413,17 @@ def api(
             return await client.request(method, url, json=body, headers=headers)
 
     return asyncio.run(go())
+
+
+class MemoryAcceptances:
+    def __init__(self) -> None:
+        self.rows: dict[tuple[str, str, int], int] = {}
+
+    async def accept(self, subject: str, slug: str, version: int, ts: int) -> None:
+        self.rows.setdefault((subject, slug, version), ts)
+
+    async def accepted(self, subject: str) -> set[tuple[str, int]]:
+        return {(slug, v) for (who, slug, v) in self.rows if who == subject}
 
 
 class TierStaff:
@@ -777,3 +797,65 @@ def test_admins_see_the_locked_security_switches() -> None:
     assert all(s["locked"] for s in switches)
     staff = api("GET", "/admin/security", roles=("staff",), user="staff-1")
     assert staff.status_code == 403
+
+
+# --- rule AC10: versioned policy pages, accepted again after every new version ---------
+
+TERMS = {"title": "Terms of Service", "body": "1. Simulated accounts only.", "reason": "launch"}
+
+
+def test_owners_publish_a_policy_page_and_traders_accept_each_new_version() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    accepts = MemoryAcceptances()
+    kw: dict[str, Any] = {"records": records, "proposals": proposals, "tiers": OWNERS,
+                          "acceptances": accepts}  # fmt: skip
+    trader: dict[str, Any] = {**kw, "roles": ("trader",), "user": "u1"}
+    assert api("GET", "/policies", signed_in=False, **kw).json() == []
+    assert api("GET", "/me/policies/pending", **trader).json() == []
+    by_admin = api("PUT", "/admin/policies/terms", TERMS, user="admin-1", **kw)
+    assert by_admin.json()["detail"]["code"] == "owners_only"
+    assert api("PUT", "/admin/policies/terms", TERMS, user="owner-a", **kw).status_code == 200
+    assert api("GET", "/policies", signed_in=False, **kw).json() == []  # not yet approved
+    ok = api("POST", "/admin/settings/proposals/1/approve", {"reason": "ok"}, user="owner-b", **kw)
+    assert ok.status_code == 200, ok.text
+    listed = api("GET", "/policies", signed_in=False, **kw).json()
+    assert listed == [{"slug": "terms", "version": 1, "title": "Terms of Service",
+                       "published_at": T0}]  # fmt: skip
+    page = api("GET", "/policies/terms", signed_in=False, **kw).json()
+    assert page["body"] == "1. Simulated accounts only."
+    assert [p["version"] for p in api("GET", "/me/policies/pending", **trader).json()] == [1]
+    accepted = api("POST", "/me/policies/terms/accept", {"version": 1}, **trader)
+    assert accepted.status_code == 200, accepted.text
+    assert api("GET", "/me/policies/pending", **trader).json() == []
+    # a new version: asked again; only the version in force can be accepted
+    v2 = {**TERMS, "body": "1. Simulated accounts only.\n2. One account per person."}
+    api("PUT", "/admin/policies/terms", v2, user="owner-b", **kw)
+    api("POST", "/admin/settings/proposals/2/approve", {"reason": "ok"}, user="owner-a", **kw)
+    assert [p["version"] for p in api("GET", "/me/policies/pending", **trader).json()] == [2]
+    stale = api("POST", "/me/policies/terms/accept", {"version": 1}, **trader)
+    assert (stale.status_code, stale.json()["detail"]["code"]) == (409, "stale")
+    old = api("GET", "/policies/terms?version=1", signed_in=False, **kw).json()
+    assert old["version"] == 1 and "One account" not in old["body"]
+    assert api("GET", "/policies/privacy", signed_in=False, **kw).status_code == 404
+
+
+def test_a_trader_with_policies_to_accept_cannot_buy() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    kw: dict[str, Any] = {"records": records, "proposals": proposals, "tiers": OWNERS,
+                          "acceptances": MemoryAcceptances()}  # fmt: skip
+    api("PUT", "/admin/policies/terms", TERMS, user="owner-a", **kw)
+    api("POST", "/admin/settings/proposals/1/approve", {"reason": "ok"}, user="owner-b", **kw)
+    order = {"product_id": "one-step", "size_cents": 2_500_000}
+    refused = api("POST", "/orders", order, roles=("trader",), user="u1",
+                  customers=FakeCustomers(cifs={"u1": "CIF00000001"}), **kw)  # fmt: skip
+    assert (refused.status_code, refused.json()["detail"]["code"]) == (409, "policies_pending")
+
+
+def test_a_policy_page_is_checked() -> None:
+    for slug, title, body in (("Terms", "t", "b"), ("terms", " ", "b"), ("terms", "t", "")):
+        with pytest.raises(PolicyError):
+            PolicyPage(slug, title, body)
+    kind, value = to_json(PolicyPage("terms", "T", "B"))
+    assert from_json(kind, value) == PolicyPage("terms", "T", "B")

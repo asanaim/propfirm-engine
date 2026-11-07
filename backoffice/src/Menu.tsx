@@ -15,6 +15,9 @@ export function Menu() {
         <RaMenu.Item to="/anomalies" primaryText="Anomaly report" leftIcon={<ICONS.anomalies size={SIZE} strokeWidth={STROKE} />} />
       ) : null}
       {screens.has("audit") ? <RaMenu.Item to="/audit" primaryText="Security log" leftIcon={<ICONS.audit size={SIZE} strokeWidth={STROKE} />} /> : null}
+      {screens.has("policies") ? (
+        <RaMenu.Item to="/policies" primaryText="Policy pages" leftIcon={<ICONS.policies size={SIZE} strokeWidth={STROKE} />} />
+      ) : null}
     </RaMenu>
   );
 }

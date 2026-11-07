@@ -2,6 +2,7 @@ import { LogIn, LogOut, Moon, Sun } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { config } from "../config";
+import { PolicyGate, PolicyLinks } from "../pages/PolicyPages";
 import { Link, usePath } from "../router";
 
 type Theme = "light" | "dark";
@@ -90,11 +91,13 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main id="main" tabIndex={-1}>
+        <PolicyGate />
         {children}
       </main>
       <footer className="footer">
         <p>Trading on this platform is simulated. Nothing here is investment advice.</p>
         <p>
+          <PolicyLinks />
           <Link href="/notices">Open-source notices</Link>
         </p>
       </footer>

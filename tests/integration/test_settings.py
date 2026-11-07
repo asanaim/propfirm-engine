@@ -10,7 +10,7 @@ import pytest
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import load_policy
 from propfirm.service.feeder import now_ms
-from propfirm.settings.overlay import CountryGating, apply_changes, stage_limits
+from propfirm.settings.overlay import CountryGating, PolicyPage, apply_changes, stage_limits
 from propfirm.settings.store import ProposalDecided, SettingsStore, migrate, policy_in_force
 from propfirm.staff.directory import Owner
 from tests.integration.test_customers import ADULT, Platform, eventually, platform
@@ -91,6 +91,14 @@ def test_store_is_append_only_and_gives_the_policy_in_force(
             found = await store.proposal(prop.id)
             assert found is not None and (found.decision, found.change_id) == ("approved", 3)
             assert await store.proposals(open_only=True) == []
+            # rule AC10: policy pages are settings changes; acceptances kept once
+            page = PolicyPage("terms", "Terms", "Simulated accounts only.")
+            published = await store.record(page, "o-1", None, "launch", 50, applied=True)
+            assert published.setting == page
+            await store.accept("u1", "terms", 1, 60)
+            await store.accept("u1", "terms", 1, 61)  # a repeat keeps the first
+            assert await store.accepted("u1") == {("terms", 1)}
+            assert await store.accepted("u2") == set()
             for sql in (
                 f"UPDATE {schema}.changes SET reason = 'edited'",
                 f"DELETE FROM {schema}.changes",
@@ -98,6 +106,7 @@ def test_store_is_append_only_and_gives_the_policy_in_force(
                 f"DELETE FROM {schema}.applied",
                 f"DELETE FROM {schema}.proposals",
                 f"UPDATE {schema}.proposal_decisions SET decision = 'approved'",
+                f"DELETE FROM {schema}.policy_acceptances",
             ):
                 with pytest.raises(asyncpg.RaiseError, match="append-only"):
                     await pool.execute(sql)

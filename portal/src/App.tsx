@@ -10,6 +10,7 @@ import { NoticesPage } from "./pages/NoticesPage";
 import { RulesPage } from "./pages/RulesPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PayoutsPage } from "./pages/PayoutsPage";
+import { PolicyPage } from "./pages/PolicyPages";
 import { SecurityPage } from "./pages/SecurityPage";
 import { ShopPage } from "./pages/ShopPage";
 import { usePath } from "./router";
@@ -27,6 +28,7 @@ const PAGES: Record<string, () => React.JSX.Element> = {
 
 const ACCOUNT = /^\/accounts\/(ACC[0-9]{8})(\/history|\/rules)?$/;
 const ONBOARDING = /^\/funded\/(ONB[0-9]{8})$/;
+const LEGAL = /^\/legal\/([a-z0-9][a-z0-9-]{0,39})$/;
 
 export function App() {
   const auth = useAuth();
@@ -36,6 +38,15 @@ export function App() {
   const account = found?.[1];
   const view = found?.[2];
   const onb = ONBOARDING.exec(path)?.[1];
+  const legal = LEGAL.exec(path)?.[1];
+  if (legal !== undefined) {
+    // policy pages are public: shown signed in or not
+    return (
+      <Layout>
+        <PolicyPage key={legal} slug={legal} />
+      </Layout>
+    );
+  }
   let content: React.JSX.Element;
   if ((path.startsWith("/accounts/") && account === undefined) || (path.startsWith("/funded/") && onb === undefined)) {
     return (

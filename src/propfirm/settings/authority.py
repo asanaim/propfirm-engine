@@ -16,10 +16,11 @@ Country gating stays with admins: an admin (or an owner) proposes, another
 admin or owner approves.
 """
 
-from propfirm.settings.overlay import CountryGating, Setting, StageLimits, StandIn
+from propfirm.settings.overlay import CountryGating, PolicyPage, Setting, StageLimits, StandIn
 from propfirm.staff.model import Tier
 
-OWNER_LEVEL = (StageLimits, StandIn)
+# AC10: a new version of a policy page is owner level too (no stand-in)
+OWNER_LEVEL = (StageLimits, StandIn, PolicyPage)
 
 
 class Refused(Exception):
@@ -36,7 +37,7 @@ def check_proposer(setting: Setting, tier: Tier | None) -> None:
     """Refuse a proposal its maker may not make."""
     if owner_level(setting):
         if tier != Tier.OWNER:
-            raise Refused("owners_only", "an owner proposes a product or stand-in change")
+            raise Refused("owners_only", "an owner proposes a product, stand-in or policy change")
         return
     assert isinstance(setting, CountryGating)
     if tier is None or tier < Tier.ADMIN:
