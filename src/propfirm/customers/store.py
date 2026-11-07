@@ -687,6 +687,43 @@ class CustomerStore:
         row = await self._pool.fetchrow(f"SELECT * FROM {self._s}.cif WHERE cif = $1", cif)
         return None if row is None else _cif(row)
 
+    async def customers(
+        self, search: str | None = None, status: str | None = None, limit: int = 200
+    ) -> list[CifRecord]:
+        """Newest first; `search` matches the CIF, the email or the name
+        (case-insensitive, as a substring)."""
+        pattern = (
+            None
+            if not search
+            else "%" + search.replace("\\", "").replace("%", "\\%").replace("_", "\\_") + "%"
+        )
+        rows = await self._pool.fetch(
+            f"SELECT * FROM {self._s}.cif WHERE ($1::text IS NULL OR status = $1)"
+            f" AND ($2::text IS NULL OR cif ILIKE $2 OR email ILIKE $2 OR full_name ILIKE $2)"
+            f" ORDER BY created_at DESC, cif DESC LIMIT $3",
+            status,
+            pattern,
+            limit,
+        )
+        return [_cif(r) for r in rows]
+
+    async def account_counts(self) -> dict[str, int]:
+        """Accounts per CIF."""
+        rows = await self._pool.fetch(
+            f"SELECT cif, count(*) AS n FROM {self._s}.accounts GROUP BY cif"
+        )
+        return {r["cif"]: int(r["n"]) for r in rows}
+
+    async def all_accounts(self, stage: str | None = None, limit: int = 500) -> list[AccountRecord]:
+        """Every account, newest first, of one stage (s1, s2, funded) or all."""
+        rows = await self._pool.fetch(
+            f"SELECT * FROM {self._s}.accounts WHERE ($1::text IS NULL OR stage = $1)"
+            f" ORDER BY created_at DESC, acc DESC LIMIT $2",
+            stage,
+            limit,
+        )
+        return [AccountRecord(**dict(r)) for r in rows]
+
     async def cif_by_subject(self, subject: str) -> CifRecord | None:
         row = await self._pool.fetchrow(f"SELECT * FROM {self._s}.cif WHERE subject = $1", subject)
         return None if row is None else _cif(row)

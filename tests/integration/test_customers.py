@@ -223,6 +223,7 @@ async def platform(
         gateway=gateway,
         verifier=verifier(),
         customers=store,
+        customer_list=store,
         checkout=checkout,
         policy=settings,
         settings=settings,

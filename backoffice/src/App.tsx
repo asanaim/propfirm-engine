@@ -1,4 +1,7 @@
+import CandlestickChartIcon from "@mui/icons-material/CandlestickChart";
+import PeopleIcon from "@mui/icons-material/People";
 import { Route } from "react-router-dom";
+import { AccountList, CustomerList, CustomerShow } from "./resources/customers";
 import { Admin, CustomRoutes, Resource } from "react-admin";
 import type { UserManager } from "oidc-client-ts";
 import type { Api } from "./api";
@@ -38,6 +41,8 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
           const screens = screensFor(permissions ?? []);
           return (
             <>
+              {screens.has("customers") ? <Resource name="customers" icon={PeopleIcon} list={CustomerList} show={CustomerShow} /> : null}
+              {screens.has("accounts") ? <Resource name="accounts" icon={CandlestickChartIcon} options={{ label: "Trading accounts" }} list={AccountList} /> : null}
               {screens.has("payouts") ? <Resource name="payouts" list={PayoutList} show={PayoutShow} /> : null}
               {screens.has("cases") ? <Resource name="cases" list={CaseList} show={CaseShow} /> : null}
               {screens.has("onboardings") ? (

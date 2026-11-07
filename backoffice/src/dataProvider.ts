@@ -33,6 +33,8 @@ export const SOURCES: Record<string, Source> = {
     one: (id) => `/staff/progressions/${id}`,
     id: "prg",
   },
+  customers: { list: (f) => `/staff/customers${q(f)}`, one: (id) => `/staff/customers/${id}`, id: "cif" },
+  accounts: { list: (f) => `/staff/accounts${q(f)}`, id: "acc" },
   members: { list: (f) => `/staff/members${q(f)}`, one: (id) => `/staff/members/${id}`, id: "sid" },
   grants: { list: (f) => `/staff/grants${q(f, { status: "requested" })}`, id: "grt" },
   proposals: { list: (f) => `/admin/settings/proposals${q(f)}`, id: "id" },

@@ -302,6 +302,28 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.screening_decisions FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        8,
+        """
+        -- an employee's own to-do notes: a note, then its "done" (both kept)
+        CREATE TABLE {s}.notes (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            subject text NOT NULL,
+            text text NOT NULL CHECK (length(text) BETWEEN 1 AND 500),
+            due_at bigint,
+            ts bigint NOT NULL
+        );
+        CREATE INDEX notes_subject ON {s}.notes (subject);
+        CREATE TABLE {s}.notes_done (
+            note_id bigint PRIMARY KEY REFERENCES {s}.notes (id),
+            ts bigint NOT NULL
+        );
+        CREATE TRIGGER notes_append_only BEFORE UPDATE OR DELETE
+            ON {s}.notes FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER notes_done_append_only BEFORE UPDATE OR DELETE
+            ON {s}.notes_done FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 
@@ -454,6 +476,38 @@ class StaffOps:
             for r in decs
         ]
         return records, decisions
+
+    async def add_note(self, subject: str, text: str, due_at: int | None, ts: int) -> int:
+        note_id: int = await self._c.fetchval(
+            f"INSERT INTO {self._s}.notes (subject, text, due_at, ts) VALUES ($1, $2, $3, $4)"
+            f" RETURNING id",
+            subject,
+            text,
+            due_at,
+            ts,
+        )
+        return note_id
+
+    async def open_notes(self, subject: str) -> list[tuple[int, str, int | None, int]]:
+        """(id, text, due_at, ts) of this login's notes not done, oldest first."""
+        rows = await self._c.fetch(
+            f"SELECT n.id, n.text, n.due_at, n.ts FROM {self._s}.notes n"
+            f" LEFT JOIN {self._s}.notes_done d ON d.note_id = n.id"
+            f" WHERE n.subject = $1 AND d.note_id IS NULL ORDER BY n.id",
+            subject,
+        )
+        return [(r["id"], r["text"], r["due_at"], r["ts"]) for r in rows]
+
+    async def finish_note(self, subject: str, note_id: int, ts: int) -> bool:
+        """Mark one of this login's open notes done; False if it is not one."""
+        done: int | None = await self._c.fetchval(
+            f"INSERT INTO {self._s}.notes_done (note_id, ts) SELECT id, $3 FROM {self._s}.notes"
+            f" WHERE id = $2 AND subject = $1 ON CONFLICT (note_id) DO NOTHING RETURNING note_id",
+            subject,
+            note_id,
+            ts,
+        )
+        return done is not None
 
     async def record_check(self, r: CheckRecord) -> None:
         await self._c.execute(

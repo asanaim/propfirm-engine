@@ -361,6 +361,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 config.oidc_issuer, config.oidc_audience, JwksKeys(config.oidc_jwks_url, http)
             ),
             customers=customers,
+            customer_list=customers,
             checkout=checkout,
             policy=settings,
             settings=settings,

@@ -250,6 +250,19 @@ npm run typecheck && npm run lint && npm test && npm run build
   "BSD", read by hand as BSD-3-Clause (pinned to that version), and
   `(MPL-2.0 OR Apache-2.0)` packages are taken under Apache-2.0.
 
+## Customer and account lists, own notes [7 Nov 2026]
+
+- Back office → Customers (`GET /staff/customers?q=&status=`: search by
+  CIF, email or name; each with its account count) and a customer's page
+  (`GET /staff/customers/{cif}`: accounts with live status, balance and
+  equity; orders). Trading accounts (`GET /staff/accounts?stage=&status=`:
+  every evaluation and funded account with its owner). Staff T1+;
+  apprentices see personal data masked.
+- My work: an employee adds notes of their own, optionally due at a time
+  (`POST /staff/me/notes`), and ticks them off
+  (`POST /staff/me/notes/{id}/done`). Only that login sees them; both the
+  note and its "done" are kept (append-only).
+
 ## Pre-employment screening [decided 7 Nov 2026]
 
 Every employee (owners exempt) is screened at hire and every year

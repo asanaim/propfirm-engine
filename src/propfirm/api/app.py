@@ -187,6 +187,20 @@ class Customers(Protocol):
     async def cif(self, cif: str) -> CifRecord | None: ...
 
 
+class CustomerList(Protocol):
+    """The customer and account lists of the back office."""
+
+    async def customers(
+        self, search: str | None = None, status: str | None = None, limit: int = 200
+    ) -> list[CifRecord]: ...
+
+    async def account_counts(self) -> dict[str, int]: ...
+
+    async def all_accounts(
+        self, stage: str | None = None, limit: int = 500
+    ) -> list[AccountRecord]: ...
+
+
 def _today() -> date:
     return datetime.now(UTC).date()
 
@@ -213,6 +227,7 @@ class Deps:
     apprentices: ApprenticeDesk | None = None  # apprentices' proposals to their mentors
     oversight: Oversight | None = None  # sign-ins, dormant accounts, reviews, anomalies
     audit: AuditStore | None = None  # the security audit trail (7b); None: not recorded
+    customer_list: CustomerList | None = None  # the back office's customer and account lists
     client_ip_header: str | None = None  # set by a trusted proxy (X-Forwarded-For), else None
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
@@ -243,6 +258,11 @@ ATTRIBUTION: dict[str, dict[str, str | None]] = {
 
 class _Body(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class TodoNoteBody(_Body):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    due_at: Annotated[int | None, Field(ge=0)] = None
 
 
 class OrderBody(_Body):
@@ -698,6 +718,12 @@ def account_record_view(a: AccountRecord) -> dict[str, Any]:
     }
 
 
+def _live_summary(live: dict[str, Any] | None) -> dict[str, Any]:
+    """The live state's headline figures (None before the engine has it)."""
+    keys = ("status", "balance_cents", "equity_cents", "trading_days", "target_balance_cents")
+    return {k: (live or {}).get(k) for k in keys}
+
+
 def progression_view(p: ProgressionRecord) -> dict[str, Any]:
     return {
         "prg": p.prg,
@@ -1043,6 +1069,7 @@ STATUSES = Literal[
 OnbId = Annotated[str, Path(pattern=r"^ONB[0-9]{8}$")]
 CasId = Annotated[str, Path(pattern=r"^CAS[0-9]{8}$")]
 PoId = Annotated[str, Path(pattern=r"^PO[0-9]{8}$")]
+CifId = Annotated[str, Path(pattern=r"^CIF[0-9]{8}$")]
 PAYOUT_STATUS = Literal[
     "requested", "approved", "debited", "sent", "paid", "denied", "cancelled", "failed"
 ]
@@ -1231,6 +1258,10 @@ async def build_todo(deps: Deps, me: Principal, access: Access) -> list[dict[str
                 missing = ", ".join(sc.missing) or "renewal"
                 title = f"Screen {sid}: {missing}"
                 out.append(_todo("screening_check", sid, title, now, sc.valid_until))
+        # the employee's own notes
+        async with deps.staff.store.read() as ops:
+            for note_id, text, due_at, ts in await ops.open_notes(me.subject):
+                out.append(_todo("note", str(note_id), text, ts, due_at))
     out.sort(key=lambda t: (t["due_at"] if t["due_at"] is not None else t["since"], t["ref"]))
     return out
 
@@ -1905,6 +1936,73 @@ def create_app(
         return result
 
     # --- employees: identity reviews ---------------------------------------------------
+
+    def _lists(deps: Deps) -> CustomerList:
+        if deps.customer_list is None:
+            raise HTTPException(status_code=404, detail="no customer lists on this server")
+        return deps.customer_list
+
+    @app.get("/staff/customers")
+    async def staff_customers(
+        deps: D,
+        me: Viewer,
+        q: Annotated[str | None, Query(max_length=100)] = None,
+        status: Annotated[str | None, Query(pattern="^(registered|blocked)$")] = None,
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
+    ) -> list[dict[str, Any]]:
+        """Registered customers, newest first, with how many accounts each
+        has; `q` searches the CIF, email and name (apprentices: masked)."""
+        lists = _lists(deps)
+        counts = await lists.account_counts()
+        return [
+            {**cif_view(c), "accounts": counts.get(c.cif, 0)}
+            for c in await lists.customers(q or None, status, limit)
+        ]
+
+    @app.get("/staff/customers/{cif}")
+    async def staff_customer(deps: D, me: Viewer, cif: CifId) -> dict[str, Any]:
+        """One customer: the record, each account with its live state, the
+        orders."""
+        record = await deps.customers.cif(cif)
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown customer")
+        accounts = []
+        for a in await deps.customers.accounts_for(cif):
+            live = await deps.live.account(a.acc)
+            accounts.append({**account_record_view(a), **_live_summary(live)})
+        orders = [order_view(o) for o in await deps.customers.orders_for(cif)]
+        return {**cif_view(record), "account_list": accounts, "orders": orders}
+
+    @app.get("/staff/accounts")
+    async def staff_accounts(
+        deps: D,
+        me: Viewer,
+        stage: Annotated[str | None, Query(pattern="^(s1|s2|funded)$")] = None,
+        status: Annotated[str | None, Query(pattern="^(active|passed|breached|voided)$")] = None,
+        limit: Annotated[int, Query(ge=1, le=1_000)] = 500,
+    ) -> list[dict[str, Any]]:
+        """Every trading account, newest first, with its owner and live state
+        (status, balance, equity); filter by stage and status."""
+        lists = _lists(deps)
+        owners: dict[str, CifRecord | None] = {}
+        out = []
+        for a in await lists.all_accounts(stage, limit):
+            live = _live_summary(await deps.live.account(a.acc))
+            if status is not None and live["status"] != status:
+                continue
+            if a.cif not in owners:
+                owners[a.cif] = await deps.customers.cif(a.cif)
+            owner = owners[a.cif]
+            out.append(
+                {
+                    **account_record_view(a),
+                    **live,
+                    "cif": a.cif,
+                    "full_name": owner.full_name if owner else None,
+                    "email": owner.email if owner else None,
+                }
+            )
+        return out
 
     @app.get("/staff/onboardings")
     async def onboardings(
@@ -2650,6 +2748,30 @@ def create_app(
         except DeskError as exc:
             raise desk_refused(exc) from exc
         return {"sheet": sheet, "version": version}
+
+    @app.post("/staff/me/notes", status_code=201)
+    async def add_note(deps: D, me: Employee, body: TodoNoteBody) -> dict[str, Any]:
+        """A note of my own on my to-do list, optionally with a due time."""
+        if deps.staff is None:
+            raise HTTPException(status_code=404, detail="no staff directory on this server")
+        now = deps.clock()
+        if body.due_at is not None and body.due_at <= now:
+            raise HTTPException(status_code=422, detail="due_at must be in the future")
+        async with deps.staff.store.read() as ops:
+            note_id = await ops.add_note(me.subject, body.text, body.due_at, now)
+        return {"id": note_id, "text": body.text, "due_at": body.due_at, "ts": now}
+
+    @app.post("/staff/me/notes/{note_id}/done")
+    async def finish_note(
+        deps: D, me: Employee, note_id: Annotated[int, Path(ge=1)]
+    ) -> dict[str, Any]:
+        """Tick off one of my notes (it stays on record)."""
+        if deps.staff is None:
+            raise HTTPException(status_code=404, detail="no staff directory on this server")
+        async with deps.staff.store.read() as ops:
+            if not await ops.finish_note(me.subject, note_id, deps.clock()):
+                raise HTTPException(status_code=404, detail="no such open note of yours")
+        return {"id": note_id, "done": True}
 
     @app.get("/staff/notifications")
     async def my_notifications(

@@ -6,8 +6,9 @@ import FactCheckIcon from "@mui/icons-material/FactCheck";
 import GavelIcon from "@mui/icons-material/Gavel";
 import PaymentsIcon from "@mui/icons-material/Payments";
 import SchoolIcon from "@mui/icons-material/School";
+import StickyNote2Icon from "@mui/icons-material/StickyNote2";
 import TuneIcon from "@mui/icons-material/Tune";
-import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { Link, Title } from "react-admin";
 import { ApiError } from "./api";
@@ -80,6 +81,7 @@ const AREA_ICON: Record<string, typeof PaymentsIcon> = {
   Staff: BadgeIcon,
   Training: SchoolIcon,
   Duties: AssignmentIcon,
+  "My notes": StickyNote2Icon,
 };
 
 function useNow(): number {
@@ -111,7 +113,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "def
   );
 }
 
-function TodoRow({ t, now }: { t: Todo; now: number }) {
+function TodoRow({ t, now, onDone }: { t: Todo; now: number; onDone: (ref: string) => void }) {
   const to = linkFor(t);
   const area = areaOf(t.kind);
   const Icon = AREA_ICON[area] ?? BadgeIcon;
@@ -131,9 +133,69 @@ function TodoRow({ t, now }: { t: Todo; now: number }) {
       </Box>
       {due === null ? null : <Chip size="small" label={due} color={u === "overdue" ? "error" : "warning"} variant={u === "overdue" ? "filled" : "outlined"} />}
       {to === null ? null : <ChevronRightIcon aria-hidden="true" color="action" />}
+      {t.kind === "note" ? (
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={() => {
+            onDone(t.ref);
+          }}
+          aria-label={`Done: ${t.title}`}
+        >
+          Done
+        </Button>
+      ) : null}
     </Box>
   );
   return <li>{to === null ? body : <Link to={to} className="todo-link">{body}</Link>}</li>;
+}
+
+/** A note of my own on the to-do list, optionally due at a local date and time. */
+function AddNote({ onAdd }: { onAdd: (text: string, dueAt: number | null) => void }) {
+  const [text, setText] = useState("");
+  const [due, setDue] = useState("");
+  const submit = () => {
+    const t = text.trim();
+    if (t === "") return;
+    onAdd(t, due === "" ? null : new Date(due).getTime());
+    setText("");
+    setDue("");
+  };
+  return (
+    <Box
+      component="form"
+      className="add-note"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <TextField
+        size="small"
+        label="Add a note"
+        value={text}
+        slotProps={{ htmlInput: { maxLength: 500 } }}
+        onChange={(e) => {
+          setText(e.target.value);
+        }}
+        fullWidth={false}
+      />
+      <TextField
+        size="small"
+        type="datetime-local"
+        label="Due (optional)"
+        value={due}
+        fullWidth={false}
+        slotProps={{ inputLabel: { shrink: true } }}
+        onChange={(e) => {
+          setDue(e.target.value);
+        }}
+      />
+      <Button type="submit" variant="contained" disabled={text.trim() === ""}>
+        Add
+      </Button>
+    </Box>
+  );
 }
 
 /** My staff page: what to do first, then notifications, duties, training. */
@@ -142,8 +204,8 @@ export function Home() {
   const { result, reload } = useGet<StaffPage>("/staff/me");
   const [error, setError] = useState<string | null>(null);
   const now = useNow();
-  const post = (path: string) => {
-    api.post(path).then(reload, (e: unknown) => {
+  const post = (path: string, body?: unknown) => {
+    api.post(path, body).then(reload, (e: unknown) => {
       setError(e instanceof ApiError ? e.message : "failed");
     });
   };
@@ -184,12 +246,24 @@ export function Home() {
       <Card>
         <CardHeader slotProps={{ title: { component: "h2" } }} title={`To do (${todo.length})`} subheader="Overdue first, then the soonest due, then the longest waiting." />
         <CardContent sx={{ pt: 0 }}>
+          <AddNote
+            onAdd={(text, dueAt) => {
+              post("/staff/me/notes", dueAt === null ? { text } : { text, due_at: dueAt });
+            }}
+          />
           {todo.length === 0 ? (
             <Typography color="text.secondary">Nothing waiting.</Typography>
           ) : (
             <ul className="todo-list" aria-label="To do">
               {todo.map((t) => (
-                <TodoRow key={`${t.kind}-${t.ref}`} t={t} now={now} />
+                <TodoRow
+                  key={`${t.kind}-${t.ref}`}
+                  t={t}
+                  now={now}
+                  onDone={(ref) => {
+                    post(`/staff/me/notes/${ref}/done`);
+                  }}
+                />
               ))}
             </ul>
           )}
