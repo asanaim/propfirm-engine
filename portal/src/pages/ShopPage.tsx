@@ -162,7 +162,7 @@ export function ShopPage() {
       {products === null && error === null ? (
         <Loading />
       ) : (
-        <div className="grid">
+        <div className="grid products">
           {(products ?? []).map((p) => (
             <ProductCard key={p.id} product={p} busy={busy === p.id} onBuy={(size) => void buy(p, size)} />
           ))}

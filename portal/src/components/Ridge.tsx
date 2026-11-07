@@ -2,7 +2,8 @@
 from the starting balance to the profit target without touching the
 maximum-loss floor, and reaches the summit (funded). The rule lines carry
 the real figures of the first challenge when they are known. Shown in 3D:
-the chart stands on a terrain of two ridges behind it and turns a little
+the chart stands in front of the hero's WebGL terrain (`Terrain`; two CSS
+ridges here instead where WebGL is missing: `layers`) and turns a little
 with the pointer. Drawn once on load; still for people who prefer reduced
 motion. */
 
@@ -55,10 +56,12 @@ export function Ridge({
   target,
   maxLoss,
   area,
+  layers = true,
 }: {
   target?: string | undefined;
   maxLoss?: string | undefined;
   area?: RefObject<HTMLElement | null>;
+  layers?: boolean;
 }) {
   const scene = useRef<HTMLDivElement>(null);
   useTilt(scene, 5, area);
@@ -67,8 +70,8 @@ export function Ridge({
   return (
     <figure className="ridge" aria-label="An evaluation account climbing from its starting balance to the profit target, staying above the maximum loss">
       <div className="ridge-scene" ref={scene}>
-        <Range points={FAR} className="ridge-far" />
-        <Range points={NEAR} className="ridge-near" />
+        {layers ? <Range points={FAR} className="ridge-far" /> : null}
+        {layers ? <Range points={NEAR} className="ridge-near" /> : null}
         <svg className="ridge-chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="presentation" focusable="false">
           <defs>
             <linearGradient id="ridge-fill" x1="0" y1="0" x2="0" y2="1">
