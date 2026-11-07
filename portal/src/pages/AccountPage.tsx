@@ -1,10 +1,11 @@
-import { AlertTriangle, Radio } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Circle, Radio, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useApi } from "../api/ApiProvider";
 import type { Attribution as AttributionSource, Bar, LiveAccount, Market, Quote } from "../api/types";
 import { useAccountStream } from "../api/useAccountStream";
 import { useAuth } from "../auth/AuthProvider";
 import { Attribution } from "../components/Attribution";
+import { BalanceCurve, balancePoints, type CurvePoint, type Level, Ring } from "../components/Gauges";
 import { OrderTicket } from "../components/OrderTicket";
 import { PendingRow, PositionRow, TrailingRow } from "../components/PositionRow";
 import { PriceChart } from "../components/PriceChart";
@@ -12,6 +13,7 @@ import { Problem } from "../components/Problem";
 import { Button, Card, Loading, Notice, ScrollRegion } from "../components/ui";
 import { formatCents, formatDuration, formatPrice } from "../lib/money";
 import { Link } from "../router";
+import { loadHistory } from "./HistoryPage";
 
 const STAGES: Record<string, string> = { s1: "Stage 1", s2: "Stage 2", funded: "Funded" };
 const STATUS: Record<LiveAccount["status"], string> = {
@@ -25,21 +27,6 @@ function clamp(x: number): number {
   return Math.min(1, Math.max(0, x));
 }
 
-function Meter({ value, label, tone }: { value: number; label: string; tone: "ok" | "warn" | "danger" }) {
-  return (
-    <div
-      className={`meter meter-${tone}`}
-      role="meter"
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(value * 100)}
-    >
-      <span style={{ width: `${(value * 100).toFixed(1)}%` }} />
-    </div>
-  );
-}
-
 /** Loss room left before a floor: tone by how much of the limit is used. */
 function LossCard({ title, equity, floor, limit }: { title: string; equity: number; floor: number; limit: number }) {
   const left = equity - floor;
@@ -47,9 +34,15 @@ function LossCard({ title, equity, floor, limit }: { title: string; equity: numb
   const tone = share > 0.5 ? "ok" : share > 0.2 ? "warn" : "danger";
   return (
     <Card title={title}>
-      <p className="figure">{formatCents(Math.max(0, left))}</p>
-      <p className="muted">left of {formatCents(limit)}</p>
-      <Meter value={share} label={`${title}: share of the limit left`} tone={tone} />
+      <div className="gauge-row">
+        <Ring value={share} label={`${title}: share of the limit left`} tone={tone}>
+          {Math.round(share * 100)}%
+        </Ring>
+        <div>
+          <p className="figure">{formatCents(Math.max(0, left))}</p>
+          <p className="muted">left of {formatCents(limit)}</p>
+        </div>
+      </div>
       <dl className="facts">
         <dt>Floor (equity)</dt>
         <dd>{formatCents(floor)}</dd>
@@ -109,9 +102,15 @@ function TargetCard({ account }: { account: LiveAccount }) {
   const share = target > initial ? clamp((account.balance_cents - initial) / (target - initial)) : 0;
   return (
     <Card title="Profit target">
-      <p className="figure">{formatCents(Math.max(0, target - account.balance_cents))}</p>
-      <p className="muted">to go, on the closed balance (target {formatCents(target)})</p>
-      <Meter value={share} label="Profit target reached" tone="ok" />
+      <div className="gauge-row">
+        <Ring value={share} label="Profit target reached" tone="ok">
+          {Math.round(share * 100)}%
+        </Ring>
+        <div>
+          <p className="figure">{formatCents(Math.max(0, target - account.balance_cents))}</p>
+          <p className="muted">to go, on the closed balance (target {formatCents(target)})</p>
+        </div>
+      </div>
     </Card>
   );
 }
@@ -223,6 +222,120 @@ function Chart({ market, quotes }: { market: Market; quotes: Record<string, Quot
   );
 }
 
+type Check = "done" | "open" | "failed";
+
+/** What is left to pass this stage, item by item. */
+export function objectives(account: LiveAccount): { label: string; detail: string; state: Check }[] {
+  const failed = account.status === "breached" || account.status === "voided";
+  const out: { label: string; detail: string; state: Check }[] = [];
+  const target = account.target_balance_cents;
+  if (target !== null) {
+    const left = target - account.balance_cents;
+    out.push({
+      label: "Profit target",
+      detail: left <= 0 ? `reached (${formatCents(target)})` : `${formatCents(left)} to go`,
+      state: left <= 0 ? "done" : "open",
+    });
+  }
+  const days = account.rules.min_trading_days;
+  if (days > 0) {
+    out.push({
+      label: "Minimum trading days",
+      detail: `${account.trading_days} of ${days}`,
+      state: account.trading_days >= days ? "done" : "open",
+    });
+  }
+  out.push({
+    label: "Daily loss limit",
+    detail: failed ? "breached" : `kept · ${formatCents(Math.max(0, account.equity_cents - account.daily_floor_cents))} room today`,
+    state: failed ? "failed" : "done",
+  });
+  out.push({
+    label: "Maximum loss",
+    detail: failed ? "breached" : `kept · ${formatCents(Math.max(0, account.equity_cents - account.max_floor_cents))} room`,
+    state: failed ? "failed" : "done",
+  });
+  if (account.rules.consistency_percent !== null) {
+    out.push({
+      label: `Consistency (best day at most ${account.rules.consistency_percent} %)`,
+      detail: account.consistency_ok ? "met" : "not met yet",
+      state: account.consistency_ok ? "done" : "open",
+    });
+  }
+  return out;
+}
+
+function Objectives({ account }: { account: LiveAccount }) {
+  const items = objectives(account);
+  const done = items.filter((i) => i.state === "done").length;
+  const icon = { done: CheckCircle2, open: Circle, failed: XCircle };
+  return (
+    <Card title={account.target_balance_cents === null ? "Account rules" : "To pass this stage"}>
+      <p className="muted">
+        {done} of {items.length} met{account.status === "passed" ? " · passed" : ""}
+      </p>
+      <ul className="objectives">
+        {items.map((i) => {
+          const Icon = icon[i.state];
+          return (
+            <li key={i.label} className={`objective objective-${i.state}`}>
+              <Icon aria-hidden="true" />
+              <span>
+                <strong>{i.label}</strong>
+                <span className="muted">{i.detail}</span>
+              </span>
+              <span className="visually-hidden">{i.state === "done" ? "met" : i.state === "failed" ? "failed" : "open"}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+function Curve({ acc, account, now }: { acc: string; account: LiveAccount; now: number }) {
+  const api = useApi();
+  const [points, setPoints] = useState<CurvePoint[] | null>(null);
+  const balance = account.balance_cents;
+  useEffect(() => {
+    let live = true;
+    loadHistory(api.get, acc).then(
+      (events) => {
+        if (live) setPoints(balancePoints(events, account.initial_balance_cents));
+      },
+      () => {
+        if (live) setPoints([]);
+      },
+    );
+    return () => {
+      live = false;
+    };
+    // the history only changes when the balance does
+  }, [api, acc, balance, account.initial_balance_cents]);
+  const levels: Level[] = [{ cents: account.max_floor_cents, label: "Maximum loss floor", kind: "floor" }];
+  if (account.target_balance_cents !== null) {
+    levels.unshift({ cents: account.target_balance_cents, label: "Target", kind: "target" });
+  }
+  const start = points?.[0] ?? { ts: now - 60_000, cents: account.initial_balance_cents };
+  return (
+    <Card title="Balance">
+      <p className="figure">{formatCents(account.balance_cents)}</p>
+      <p className="muted">
+        started at {formatCents(account.initial_balance_cents)} · equity {formatCents(account.equity_cents)}
+      </p>
+      {points === null ? (
+        <Loading label="Loading the curve" />
+      ) : (
+        <BalanceCurve
+          points={points.length > 0 ? points : [start]}
+          levels={levels}
+          now={{ ts: Math.max(now, (points.at(-1) ?? start).ts + 1), cents: account.equity_cents }}
+        />
+      )}
+    </Card>
+  );
+}
+
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -274,11 +387,11 @@ export function AccountPage({ acc }: { acc: string }) {
           <Radio aria-hidden="true" className="inline-icon" /> {live.connected ? "Live" : "Reconnecting"}
         </span>
       </div>
+      <div className="dash-hero">
+        <Curve acc={acc} account={account} now={now} />
+        <Objectives account={account} />
+      </div>
       <div className="grid">
-        <Card title="Balance">
-          <p className="figure">{formatCents(account.balance_cents)}</p>
-          <p className="muted">started at {formatCents(account.initial_balance_cents)}</p>
-        </Card>
         <Card title="Equity">
           <p className="figure">{formatCents(account.equity_cents)}</p>
           <p className={floating < 0 ? "loss" : "muted"}>

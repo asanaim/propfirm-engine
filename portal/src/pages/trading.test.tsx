@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { LivePendingOrder, LivePosition, LiveTrailingOrder, Market } from "../api/types";
 import { describeOutcome, OrderTicket } from "../components/OrderTicket";
@@ -265,14 +265,26 @@ it("exports closed trades as exact CSV", () => {
   );
 });
 
-it("lists restricted news windows", async () => {
+it("lists restricted news windows by day, public, with the next one counted down", async () => {
+  const soon = Date.now() + 3 * 3_600_000;
   const news = [
-    { event_id: "2026-11-06-us-employment", title: "US employment situation (October)", start_ts: 0, end_ts: 240_001, symbols: ["EUR/USD", "USD/JPY"] },
-    { event_id: "2026-11-07-snb", title: null, start_ts: 0, end_ts: 240_001, symbols: ["USD/CHF"] },
+    { event_id: "us-emp", title: "US employment situation (October)", start_ts: soon, end_ts: soon + 240_001, release_ts: soon + 120_000, symbols: ["EUR/USD", "USD/JPY"], currency: "USD", source: "https://www.bls.gov/schedule/" },
+    { event_id: "2026-11-07-snb", title: null, start_ts: soon + 86_400_000, end_ts: soon + 86_640_001, symbols: ["USD/CHF"] },
+    { event_id: "over", title: "Already over", start_ts: 0, end_ts: 240_001, symbols: ["EUR/USD"] },
   ];
-  const { fetcher } = recorder(() => [200, news]);
-  renderWith(<NewsPage />, fakeAuth(), fetcher);
-  const row = (await screen.findByRole("rowheader", { name: "US employment situation (October)" })).closest("tr");
-  expect(row).toHaveTextContent("EUR/USD, USD/JPY");
-  expect(screen.getByRole("rowheader", { name: "2026-11-07-snb" })).toBeInTheDocument(); // no title: the id
+  const { fetcher, calls } = recorder(() => [200, news]);
+  renderWith(<NewsPage />, fakeAuth({ status: "anonymous" }), fetcher);
+  expect(await screen.findByText("Next restricted release")).toBeInTheDocument();
+  expect(calls[0]?.url).toContain("/calendar");
+  const item = screen.getAllByText("US employment situation (October)").at(-1)?.closest("li");
+  expect(item).toHaveTextContent("USD");
+  expect(item).toHaveTextContent("EUR/USD");
+  expect(screen.getByRole("link", { name: /publisher/i })).toHaveAttribute("href", "https://www.bls.gov/schedule/");
+  expect(screen.getByText("2026-11-07-snb")).toBeInTheDocument(); // no title: the id
+  expect(screen.queryByText("Already over")).toBeNull();
+  // one symbol at a time
+  fireEvent.change(screen.getByRole("combobox", { name: "Symbol" }), { target: { value: "USD/CHF" } });
+  expect(screen.queryByText("Already over")).toBeNull();
+  expect(screen.getAllByText("2026-11-07-snb").length).toBeGreaterThan(0);
+  expect(screen.queryAllByText("US employment situation (October)").every((n) => n.closest(".next-up") === null)).toBe(true);
 });

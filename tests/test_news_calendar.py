@@ -333,6 +333,33 @@ def test_traders_read_titled_windows_but_cannot_touch_the_calendar() -> None:
     ].status_code == (403)
 
 
+def test_the_calendar_is_public_with_publisher_and_currency() -> None:
+    async def go() -> httpx.Response:
+        news, gateway, _ = desk()
+        deps = Deps(Live(), History(), gateway, verifier(), FakeCustomers(), news=news)
+        transport = httpx.ASGITransport(app=create_app(deps))
+        async with httpx.AsyncClient(transport=transport, base_url="http://api") as client:
+            return await client.get("/calendar")  # no token
+
+    response = asyncio.run(go())
+    assert response.status_code == 200
+    cpi, unnamed = response.json()
+    assert cpi["event_id"] == "2026-11-10-us-cpi"
+    assert (cpi["title"], cpi["currency"], cpi["symbols"]) == ("US CPI y/y", "USD", ["EUR/USD"])
+    assert cpi["source"].startswith("https://www.bls.gov/")
+    assert isinstance(cpi["release_ts"], int)
+    assert unnamed == {
+        "event_id": "unnamed",
+        "start_ts": 3,
+        "end_ts": 4,
+        "symbols": ["EUR/USD"],
+        "title": None,
+        "release_ts": None,
+        "currency": None,
+        "source": None,
+    }
+
+
 def test_staff_publish_and_list_but_only_an_admin_cancels() -> None:
     response, gateway = call("POST", "/staff/news/calendars/2026-11/publish", {"reason": "nov"})
     assert response.status_code == 200
