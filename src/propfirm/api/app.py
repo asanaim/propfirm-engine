@@ -129,6 +129,13 @@ from propfirm.settings.overlay import (
     to_json,
 )
 from propfirm.settings.service import Settings, SettingsError
+from propfirm.settings.site import (
+    SECTIONS,
+    SiteSection,
+    rendered,
+    section_json,
+    token_values,
+)
 from propfirm.settings.store import ChangeStatus, Proposal
 from propfirm.staff.cutoff import Cutoffs, IdentityError, cutoff_view
 from propfirm.staff.desk import (
@@ -482,6 +489,12 @@ class SandboxKycBody(_Body):
 class CountryGatingBody(_Body):
     country_gating: bool
     blocked_countries: list[Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]]
+    reason: Reason
+
+
+class SiteSectionBody(_Body):
+    fields: dict[str, Annotated[str, StringConstraints(max_length=300)]]
+    items: list[dict[str, Annotated[str, StringConstraints(max_length=300)]]] = []
     reason: Reason
 
 
@@ -2413,6 +2426,50 @@ def create_app(
         )
 
     # --- the owners' stand-in approver (rule AC00, decided 8 Nov 2026) -----------------
+
+    # --- the website's text (rules AC07, AC08) ------------------------------------------
+
+    @app.get("/site")
+    async def site(deps: D) -> dict[str, Any]:
+        """The home page text approved for each section (sections not edited
+        are absent: the site keeps its own wording), with every product figure
+        filled from the products and policy in force (public)."""
+        values = token_values(await _policy(deps))
+        sections = await _settings(deps).site()
+        return {name: rendered(s, values) for name, s in sorted(sections.items())}
+
+    @app.get("/admin/site")
+    async def admin_site(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """For the editor: each section's fields and items, the approved text
+        (with tokens, not filled), and each token's value now."""
+        sections = await _settings(deps).site()
+        return {
+            "shapes": {
+                name: {
+                    "fields": dict(shape.fields),
+                    "items": dict(shape.items),
+                    "max_items": shape.max_items,
+                }
+                for name, shape in SECTIONS.items()
+            },
+            "sections": {name: section_json(s) for name, s in sorted(sections.items())},
+            "tokens": token_values(await _policy(deps)),
+        }
+
+    @app.put("/admin/site/{section}")
+    async def propose_site(
+        deps: D,
+        me: SettingsChanger,
+        section: Annotated[str, Path(pattern=r"^[a-z]{1,20}$")],
+        body: SiteSectionBody,
+    ) -> dict[str, Any]:
+        """New text for one section: a proposal a second admin or owner
+        approves (rule AC00). Figures are tokens, never typed (AC08)."""
+        try:
+            setting = SiteSection(section, body.fields, tuple(body.items))
+        except PolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await propose_setting(deps, me, setting, body.reason)
 
     # --- policy pages (rule AC10) ------------------------------------------------------
 

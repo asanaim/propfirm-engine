@@ -44,8 +44,10 @@ from propfirm.settings.overlay import (
     apply_changes,
     limits_rule_set,
     policy_pages,
+    site_sections,
     stand_in_in_force,
 )
+from propfirm.settings.site import SiteSection
 from propfirm.settings.store import ChangeStatus, Proposal, ProposalDecided
 from propfirm.staff.model import Tier
 
@@ -178,6 +180,10 @@ class Settings:
         await self._accepts().accept(subject, slug, version, ts)
         return versions[-1]
 
+    async def site(self) -> dict[str, SiteSection]:
+        """The website text approved for each section (rule AC07)."""
+        return site_sections(await self._records.applied_changes())
+
     async def stand_in(self, now: int) -> StandIn | None:
         """The owners' stand-in approver in force at `now`, if any."""
         return stand_in_in_force(await self._records.applied_changes(), now)
@@ -273,7 +279,7 @@ class Settings:
         if expiry_ms and ts - proposal.ts > expiry_ms:
             raise SettingsError("expired", f"proposal {pid} has expired; propose it again")
         self._check(proposal.setting)
-        at_once = isinstance(proposal.setting, CountryGating | StandIn | PolicyPage)
+        at_once = isinstance(proposal.setting, CountryGating | StandIn | PolicyPage | SiteSection)
         try:
             change = await self._store().approve(proposal, approver, reason, ts, applied=at_once)
         except ProposalDecided as exc:

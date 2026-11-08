@@ -77,6 +77,19 @@ The portal shows the pages (plain text, never HTML), links them in the
 footer and asks for acceptance on every page until given; the back office
 has a "Policy pages" editor. Settings migration 7.
 
+AC07 and AC08, the website's text with figures from the products. In
+place for the home page sections hero, challenges and "How it works"
+(fixed fields, and up to six steps): an admin or owner proposes new text
+in the back office "Website" editor, which previews it filled; a second
+admin or owner approves (AC00). `GET /site` (public) gives each approved
+section with its figures filled; a section never edited keeps the site's
+own words. A figure is written as a token (`{max_split}`, `{min_price}`,
+`{max_allocation}`, `{first_target}` and others, listed in the editor) and
+filled from the products and policy in force when read, so the site and
+the products cannot disagree; text that types an amount or a percentage
+is refused. Settings migration 9. More sections (FAQ, about, payouts,
+footer, contact) follow the same shape when the portal gains those pages.
+
 News impact (decided 8 Nov 2026). In place: the risk desk (one person,
 as adding a news window) marks each release high, medium or low impact
 (`POST /staff/news/events/{id}/impact`, kept append-only); a release not
@@ -96,8 +109,7 @@ only add restrictions; cancelling a news window still needs an admin.
 
 AC02 payment and withdrawal methods as attachable plugins with owner
 approval (today the providers are fixed in code and environment). AC05
-settings hub, AC06 Ctrl+K search, AC07 website content manager, AC08
-figures bound to product data, AC09 evidence for claims, AC11 SEO and generated sitemap, AC12
+settings hub, AC06 Ctrl+K search, AC09 evidence for claims, AC11 SEO and generated sitemap, AC12
 editable notification templates (notifications exist; templates are
 code), AC13 method plugins, AC14 write-only secrets in the console, AC17
 maintenance mode, AC18 language manager, AC19 to AC22 console lists and
