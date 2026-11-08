@@ -26,7 +26,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from propfirm.policy import PolicyError, parse_percent, percent_text
 
 PAYMENT_METHOD = "payment_method"
-METHOD_SECRET = "method_secret"
+METHOD_SECRET = "method_secret"  # nosec B105
 METHOD_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 SECRET_NAME = re.compile(r"[a-z][a-z0-9_]{0,39}")
 KINDS = ("payment", "withdrawal")
