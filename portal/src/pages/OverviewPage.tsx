@@ -11,13 +11,36 @@ import { countdown, ImpactMark, type NewsEvent } from "./NewsPage";
 import { useReveal, useTilt } from "../lib/motion";
 import { Link } from "../router";
 import { RegisterForm } from "./RegisterForm";
+import { ClosedPage, useSiteStatus } from "../components/SiteStatus";
 
 export function OverviewPage() {
   const auth = useAuth();
   const me = useMe();
+  const site = useSiteStatus();
   if (auth.status === "loading" || me.status === "loading") return <Loading />;
-  if (me.status === "anonymous") return <Landing onSignIn={() => void auth.signIn("/")} />;
+  if (me.status === "anonymous") {
+    if (site.status.maintenance) {
+      return (
+        <div className="page narrow">
+          <ClosedPage kind="maintenance" page={site.pages.maintenance} />
+          <button type="button" className="button button-secondary" onClick={() => void auth.signIn("/")}>
+            Sign in
+          </button>
+        </div>
+      );
+    }
+    return <Landing onSignIn={() => void auth.signIn("/")} />;
+  }
   if (me.status === "unregistered") {
+    if (!site.status.registering) {
+      // rule AC17: no new traders while closed or under maintenance
+      const kind = site.status.maintenance ? "maintenance" : "registration_closed";
+      return (
+        <div className="page narrow">
+          <ClosedPage kind={kind} page={site.pages[kind]} />
+        </div>
+      );
+    }
     return (
       <div className="page narrow">
         <h1>Welcome</h1>

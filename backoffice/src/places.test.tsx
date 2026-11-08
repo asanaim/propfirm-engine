@@ -149,7 +149,7 @@ describe("the screens", () => {
         <SettingsHub />
       </AdminContext>,
     );
-    expect(await screen.findByTestId("area-maintenance")).toHaveTextContent("Not built yet (AC17)");
+    expect(await screen.findByTestId("area-seo")).toHaveTextContent("Not built yet (AC11)");
     expect(screen.getByTestId("area-general")).toHaveTextContent("Fixed in deployment");
     await userEvent.type(screen.getByLabelText("Search settings"), "maintenance");
     expect(screen.queryByTestId("area-general")).toBeNull();

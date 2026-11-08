@@ -48,7 +48,16 @@ from propfirm.settings.methods import (
     secret_from_json,
     secret_json,
 )
-from propfirm.settings.site import SITE_SECTION, SiteSection, section_from_json, section_json
+from propfirm.settings.site import (
+    SITE_MODE,
+    SITE_SECTION,
+    SiteMode,
+    SiteSection,
+    mode_from_json,
+    mode_json,
+    section_from_json,
+    section_json,
+)
 
 COUNTRY_GATING = "country_gating"
 STAGE_LIMITS = "stage_limits"
@@ -116,7 +125,14 @@ class PageVersion:
 
 
 type Setting = (
-    CountryGating | StageLimits | StandIn | PolicyPage | SiteSection | PaymentMethod | MethodSecret
+    CountryGating
+    | StageLimits
+    | StandIn
+    | PolicyPage
+    | SiteSection
+    | SiteMode
+    | PaymentMethod
+    | MethodSecret
 )
 
 
@@ -156,7 +172,14 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
                 gating = value
             case StageLimits() as value:
                 limits[(value.product_id, value.stage)] = change
-            case StandIn() | PolicyPage() | SiteSection() | PaymentMethod() | MethodSecret():
+            case (
+                StandIn()
+                | PolicyPage()
+                | SiteSection()
+                | SiteMode()
+                | PaymentMethod()
+                | MethodSecret()
+            ):
                 pass  # not part of the policy: `stand_in_in_force`, `policy_pages`
     access = base.access
     if gating is not None:
@@ -209,6 +232,15 @@ def site_sections(changes: Iterable[SettingChange]) -> dict[str, SiteSection]:
     return out
 
 
+def site_mode(changes: Iterable[SettingChange]) -> SiteMode:
+    """The site mode in force (rule AC17): the latest approved, else open."""
+    out = SiteMode()
+    for change in sorted(changes, key=lambda c: c.id):
+        if isinstance(change.setting, SiteMode):
+            out = change.setting
+    return out
+
+
 def public_json(setting: Setting) -> tuple[str, dict[str, Any]]:
     """(kind, value) for any view: a secret shows which one, never its value."""
     if isinstance(setting, MethodSecret):
@@ -252,6 +284,8 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
             return STAND_IN, {"subject": setting.subject, "until": setting.until}
         case SiteSection():
             return SITE_SECTION, section_json(setting)
+        case SiteMode():
+            return SITE_MODE, mode_json(setting)
         case PaymentMethod():
             return PAYMENT_METHOD, method_json(setting)
         case MethodSecret():
@@ -286,6 +320,8 @@ def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
         return StandIn(subject, until)
     if kind == SITE_SECTION:
         return section_from_json(value)
+    if kind == SITE_MODE:
+        return mode_from_json(value)
     if kind == PAYMENT_METHOD:
         return method_from_json(value)
     if kind == METHOD_SECRET:

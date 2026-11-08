@@ -49,10 +49,11 @@ from propfirm.settings.overlay import (
     apply_changes,
     limits_rule_set,
     policy_pages,
+    site_mode,
     site_sections,
     stand_in_in_force,
 )
-from propfirm.settings.site import SiteSection
+from propfirm.settings.site import SiteMode, SiteSection
 from propfirm.settings.store import ChangeStatus, Proposal, ProposalDecided
 from propfirm.staff.model import Tier
 
@@ -188,6 +189,10 @@ class Settings:
     async def site(self) -> dict[str, SiteSection]:
         """The website text approved for each section (rule AC07)."""
         return site_sections(await self._records.applied_changes())
+
+    async def mode(self) -> SiteMode:
+        """Maintenance and registration in force (rule AC17)."""
+        return site_mode(await self._records.applied_changes())
 
     async def methods(self) -> dict[str, PaymentMethod]:
         """Payment and withdrawal methods in force (rule AC13)."""

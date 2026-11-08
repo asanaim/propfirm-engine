@@ -165,12 +165,12 @@ export const AREAS: readonly Area[] = [
   {
     key: "maintenance",
     title: "Maintenance",
-    explains: "Maintenance mode and the registration closed page, each with its own message and image.",
+    explains: "Maintenance mode and closing registration, and the page shown for each with its own message and image. A second person approves.",
     icon: "maintenance",
-    state: "planned",
-    path: null,
-    screen: null,
-    rule: "AC17",
+    state: "open",
+    path: "/site",
+    screen: "site",
+    rule: null,
     keywords: "maintenance downtime registration closed",
   },
   {

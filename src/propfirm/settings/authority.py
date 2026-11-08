@@ -18,7 +18,7 @@ Country gating and the website's text (AC07) stay with admins: an admin
 
 from propfirm.settings.methods import MethodSecret, PaymentMethod
 from propfirm.settings.overlay import CountryGating, PolicyPage, Setting, StageLimits, StandIn
-from propfirm.settings.site import SiteSection
+from propfirm.settings.site import SiteMode, SiteSection
 from propfirm.staff.model import Tier
 
 # AC10: a new version of a policy page is owner level too (no stand-in)
@@ -45,7 +45,9 @@ def check_proposer(setting: Setting, tier: Tier | None) -> None:
         if tier != Tier.OWNER:
             raise Refused("owners_only", "an owner proposes a product, stand-in or policy change")
         return
-    assert isinstance(setting, CountryGating | SiteSection | PaymentMethod | MethodSecret)
+    assert isinstance(
+        setting, CountryGating | SiteSection | SiteMode | PaymentMethod | MethodSecret
+    )
     if tier is None or tier < Tier.ADMIN:
         raise Refused("forbidden", "an admin or owner proposes this change")
 

@@ -35,7 +35,7 @@ from propfirm.settings.overlay import (
     to_json,
 )
 from propfirm.settings.service import Settings, SettingsError
-from propfirm.settings.site import SiteSection, rendered
+from propfirm.settings.site import SiteMode, SiteSection, rendered
 from propfirm.settings.store import ChangeStatus, Proposal, ProposalDecided
 from propfirm.staff.model import ROLES, Access, Tier, legacy_access
 from tests.auth_rig import FakeCustomers, bearer, verifier
@@ -922,3 +922,135 @@ def test_a_section_keeps_its_shape() -> None:
     kind, value = to_json(section)
     assert from_json(kind, json.loads(json.dumps(value))) == section
     assert rendered(section, {"min_price": "$59"})["items"][0]["text"] == "From $59."
+
+
+# --- rule AC17: maintenance mode and the registration closed page ------------------------
+
+CLOSED_PAGE = {
+    "fields": {
+        "title": "Registration is closed",
+        "message": "We open again soon. Traders with accounts can sign in as usual.",
+        "image": "/brand/closed.svg",
+    },
+    "reason": "launch copy",
+}
+
+
+def _approve(kw: dict[str, Any], pid: int) -> None:
+    ok = api("POST", f"/admin/settings/proposals/{pid}/approve", {"reason": "ok"},
+             user="admin-2", **kw)  # fmt: skip
+    assert ok.status_code == 200, ok.text
+
+
+def test_the_site_is_open_until_a_second_person_approves_a_change_of_mode() -> None:
+    records = MemoryRecords()
+    kw: dict[str, Any] = {"records": records, "proposals": MemoryProposals(records),
+                          "tiers": OWNERS}  # fmt: skip
+    status = api("GET", "/site/status", signed_in=False, **kw).json()
+    assert status == {"maintenance": False, "registration_open": True,
+                      "registering": True, "selling": True}  # fmt: skip
+    body = {"maintenance": True, "registration_open": True, "reason": "database upgrade"}
+    assert api("PUT", "/admin/site-mode", body, user="admin-1", **kw).status_code == 200
+    assert api("GET", "/site/status", signed_in=False, **kw).json()["maintenance"] is False
+    own = api("POST", "/admin/settings/proposals/1/approve", {"reason": "x"}, user="admin-1", **kw)
+    assert own.json()["detail"]["code"] == "four_eyes"
+    _approve(kw, 1)
+    status = api("GET", "/site/status", signed_in=False, **kw).json()
+    assert (status["maintenance"], status["registering"], status["selling"]) == (True, False, False)
+    assert api("GET", "/admin/site", **kw).json()["mode"]["maintenance"] is True
+
+
+def test_a_trader_below_admin_cannot_propose_a_mode() -> None:
+    body = {"maintenance": True, "registration_open": True, "reason": "x"}
+    refused = api("PUT", "/admin/site-mode", body, roles=("trader",),
+                  proposals=MemoryProposals(MemoryRecords()))  # fmt: skip
+    assert refused.status_code in (401, 403)
+    loose = {"maintenance": "yes", "registration_open": True, "reason": "x"}
+    assert api("PUT", "/admin/site-mode", loose).status_code == 422
+
+
+def _staffed() -> dict[str, Any]:
+    records = MemoryRecords()
+    return {"records": records, "proposals": MemoryProposals(records), "tiers": OWNERS}
+
+
+def _set_mode(kw: dict[str, Any], maintenance: bool, registration_open: bool) -> None:
+    body = {"maintenance": maintenance, "registration_open": registration_open, "reason": "x"}
+    put = api("PUT", "/admin/site-mode", body, user="admin-1", **kw)
+    assert put.status_code == 200, put.text
+    _approve(kw, put.json()["proposal"]["id"])
+
+
+REGISTER = {"full_name": "Ada Trader", "date_of_birth": "1990-01-01", "residence_country": "GB"}
+
+
+@pytest.mark.parametrize(
+    ("maintenance", "registration_open", "code"),
+    [(True, True, "maintenance"), (False, False, "registration_closed")],
+)
+def test_registration_is_refused_while_closed_or_in_maintenance(
+    maintenance: bool, registration_open: bool, code: str
+) -> None:
+    kw = _staffed()
+    _set_mode(kw, maintenance, registration_open)
+    refused = api("POST", "/me", REGISTER, roles=("trader",), user="u9", **kw)
+    assert (refused.status_code, refused.json()["detail"]["code"]) == (409, code)
+
+
+def test_no_challenge_is_sold_in_maintenance_but_closing_registration_alone_keeps_the_shop() -> (
+    None
+):
+    kw = _staffed()
+    order = {"product_id": "one-step", "size_cents": 2_500_000}
+    trader: dict[str, Any] = {"roles": ("trader",), "user": "u1",
+                              "customers": FakeCustomers(cifs={"u1": "CIF00000001"})}  # fmt: skip
+    _set_mode(kw, maintenance=False, registration_open=False)
+    kept = api("POST", "/orders", order, **trader, **kw)
+    assert kept.json()["detail"] == "checkout not available"  # past the gate (no checkout here)
+    _set_mode(kw, maintenance=True, registration_open=False)
+    refused = api("POST", "/orders", order, **trader, **kw)
+    assert (refused.status_code, refused.json()["detail"]["code"]) == (409, "maintenance")
+
+
+def test_the_closed_and_maintenance_pages_are_sections_with_an_optional_image() -> None:
+    records = MemoryRecords()
+    kw: dict[str, Any] = {"records": records, "proposals": MemoryProposals(records),
+                          "tiers": OWNERS}  # fmt: skip
+    put = api("PUT", "/admin/site/registration_closed", CLOSED_PAGE, user="admin-1", **kw)
+    assert put.status_code == 200, put.text
+    _approve(kw, 1)
+    page = api("GET", "/site", signed_in=False, **kw).json()["registration_closed"]["fields"]
+    assert page["image"] == "/brand/closed.svg"
+    shapes = api("GET", "/admin/site", **kw).json()["shapes"]
+    assert shapes["maintenance"]["optional"] == ["image"]
+    SiteSection("maintenance", {"title": "Back soon", "message": "Upgrading.", "image": ""})
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "closed.svg",
+        "//evil.example/x.png",
+        "http://cdn.example/x.png",
+        "https://cdn.example.com/a.webp",
+        "/brand/../secret.png",
+        "/brand/closed.gif",
+        "javascript:alert(1)//.png",
+        "/brand/closed.svg?x=1",
+    ],
+)
+def test_an_image_address_is_checked(image: str) -> None:
+    with pytest.raises(PolicyError, match="image"):
+        SiteSection("maintenance", {"title": "Back soon", "message": "Upgrading.", "image": image})
+
+
+def test_an_image_is_on_the_site_and_the_mode_round_trips() -> None:
+    for image in ("/brand/closed.svg", "/media/a/b-1.webp", "/x.jpg"):
+        SiteSection("maintenance", {"title": "Back soon", "message": "Upgrading.", "image": image})
+    with pytest.raises(PolicyError, match="title"):
+        SiteSection("maintenance", {"title": "", "message": "Upgrading.", "image": ""})
+    with pytest.raises(PolicyError):
+        SiteMode(1, True)  # type: ignore[arg-type]
+    mode = SiteMode(maintenance=True, registration_open=False)
+    kind, value = to_json(mode)
+    assert from_json(kind, json.loads(json.dumps(value))) == mode
