@@ -7,7 +7,7 @@ import { Ridge } from "../components/Ridge";
 import { Terrain } from "../components/Terrain";
 import { formatCents, formatPercent, formatSize } from "../lib/money";
 import { Ring } from "../components/Gauges";
-import { countdown, type NewsEvent } from "./NewsPage";
+import { countdown, ImpactMark, type NewsEvent } from "./NewsPage";
 import { useReveal, useTilt } from "../lib/motion";
 import { Link } from "../router";
 import { RegisterForm } from "./RegisterForm";
@@ -134,7 +134,7 @@ function UpcomingNews() {
         <ul className="mini-news">
           {next.map((e) => (
             <li key={e.event_id}>
-              <span className="impact" aria-hidden="true" />
+              <ImpactMark impact={e.impact} />
               <span>
                 <strong>{e.title ?? e.event_id}</strong>
                 <span className="muted">

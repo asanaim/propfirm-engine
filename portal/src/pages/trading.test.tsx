@@ -288,3 +288,18 @@ it("lists restricted news windows by day, public, with the next one counted down
   expect(screen.getAllByText("2026-11-07-snb").length).toBeGreaterThan(0);
   expect(screen.queryAllByText("US employment situation (October)").every((n) => n.closest(".next-up") === null)).toBe(true);
 });
+
+it("shows each release's impact in words and that it is restricted", async () => {
+  const soon = Date.now() + 3 * 3_600_000;
+  const news = [
+    { event_id: "cpi", title: "US CPI", start_ts: soon, end_ts: soon + 240_001, symbols: ["EUR/USD"], impact: "medium", restricted: true },
+    { event_id: "boj", title: "BoJ", start_ts: soon + 86_400_000, end_ts: soon + 86_640_001, symbols: ["USD/JPY"] },
+  ];
+  const { fetcher } = recorder(() => [200, news]);
+  renderWith(<NewsPage />, fakeAuth({ status: "anonymous" }), fetcher);
+  const cpi = (await screen.findAllByText("US CPI")).at(-1)?.closest("li");
+  expect(cpi).toHaveTextContent("Medium impact");
+  expect(cpi).toHaveTextContent("Restricted");
+  const boj = screen.getAllByText("BoJ").at(-1)?.closest("li");
+  expect(boj).toHaveTextContent("High impact"); // not marked yet: high
+});

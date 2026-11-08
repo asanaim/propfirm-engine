@@ -77,10 +77,19 @@ The portal shows the pages (plain text, never HTML), links them in the
 footer and asks for acceptance on every page until given; the back office
 has a "Policy pages" editor. Settings migration 7.
 
+News impact (decided 8 Nov 2026). In place: the risk desk (one person,
+as adding a news window) marks each release high, medium or low impact
+(`POST /staff/news/events/{id}/impact`, kept append-only); a release not
+marked is high. The public calendar shows the impact in words and that
+the release is restricted; marking changes no restriction. Every release
+on the calendar is a restricted one: medium and low releases from outside
+FTMO's list would need a licensed calendar feed (not chosen).
+
 ## Exceptions to AC00 decided by the owners (8 Nov 2026)
 
-Two decisions stay with one person: confirming a customer block on a case
-(`case.confirm`) and adding a restricted news window (`news.desk`). Both
+Decisions that stay with one person: confirming a customer block on a case
+(`case.confirm`), adding a restricted news window and marking a release's
+impact (`news.desk`). Both
 only add restrictions; cancelling a news window still needs an admin.
 
 ## Not started

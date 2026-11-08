@@ -39,6 +39,10 @@ class Submitter(Protocol):
     async def submit(self, item: Input, wait_s: float = 5.0) -> Outcome: ...
 
 
+IMPACTS = ("high", "medium", "low")
+DEFAULT_IMPACT = "high"  # every restricted release is high impact until marked
+
+
 class NewsRefused(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -121,6 +125,28 @@ class NewsStore:
         )
         return {r["event_id"]: r["title"] for r in rows}
 
+    async def set_impact(
+        self, event_id: str, impact: str, author: str, email: str | None, reason: str, ts: int
+    ) -> None:
+        await self._pool.execute(
+            f"INSERT INTO {self._s}.news_impacts (event_id, impact, author, author_email, "
+            f"reason, ts) VALUES ($1, $2, $3, $4, $5, $6)",
+            event_id,
+            impact,
+            author,
+            email,
+            reason,
+            ts,
+        )
+
+    async def impacts(self) -> dict[str, str]:
+        """The latest impact marked for each event."""
+        rows = await self._pool.fetch(
+            f"SELECT DISTINCT ON (event_id) event_id, impact FROM {self._s}.news_impacts "
+            f"ORDER BY event_id, id DESC"
+        )
+        return {r["event_id"]: r["impact"] for r in rows}
+
     async def known_ids(self) -> set[str]:
         """Every event id the desk ever sent or cancelled: the collector
         sends none of them again (a cancelled event stays cancelled)."""
@@ -136,6 +162,12 @@ class NewsLog(Protocol):
     async def titles(self) -> dict[str, str]: ...
 
     async def known_ids(self) -> set[str]: ...
+
+    async def set_impact(
+        self, event_id: str, impact: str, author: str, email: str | None, reason: str, ts: int
+    ) -> None: ...
+
+    async def impacts(self) -> dict[str, str]: ...
 
 
 def _result(outcome: Outcome) -> tuple[str, str | None]:
@@ -242,6 +274,17 @@ class NewsDesk:
 
     async def known_ids(self) -> set[str]:
         return await self._log.known_ids()
+
+    async def mark_impact(self, event_id: str, impact: str, who: Author, now: int) -> None:
+        """The risk desk marks a release high, medium or low impact (shown to
+        traders). It changes no restriction: the window stays as it is."""
+        if impact not in IMPACTS:
+            raise NewsRefused("invalid", f"impact must be one of {IMPACTS}")
+        await self._log.set_impact(event_id, impact, who.subject, who.email, who.reason, now)
+
+    async def impacts(self) -> dict[str, str]:
+        """Each event's impact: the latest mark, else high."""
+        return await self._log.impacts()
 
     async def collected(
         self, event: RestrictedEvent, title: str, source: str, who: Author, now: int

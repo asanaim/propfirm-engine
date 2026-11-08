@@ -171,6 +171,25 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        8,
+        """
+        -- a release's impact, marked by the risk desk (8 Nov 2026): the latest
+        -- mark of an event wins; restriction is separate and unchanged
+        CREATE TABLE {s}.news_impacts (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            event_id text NOT NULL,
+            impact text NOT NULL CHECK (impact IN ('high', 'medium', 'low')),
+            author text NOT NULL,
+            author_email text,
+            reason text NOT NULL CHECK (length(reason) BETWEEN 1 AND 500),
+            ts bigint NOT NULL
+        );
+        CREATE INDEX news_impacts_event ON {s}.news_impacts (event_id, id);
+        CREATE TRIGGER news_impacts_append_only BEFORE UPDATE OR DELETE ON {s}.news_impacts
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

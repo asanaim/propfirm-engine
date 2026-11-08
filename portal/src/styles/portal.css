@@ -1450,6 +1450,28 @@ the headline (left) and toward the next section (bottom) */
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--summit) 22%, transparent);
 }
 
+/* impact marked by the risk desk: shape and words, never colour alone */
+.impact-medium {
+  background: var(--warn);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 18%, transparent);
+}
+
+.impact-low {
+  background: var(--muted);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 16%, transparent);
+}
+
+.impact-label,
+.restricted-label {
+  margin-left: var(--space-2);
+  font-size: 0.75rem;
+}
+
+.restricted-label {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 .news-meta {
   margin: var(--space-1) 0 var(--space-2);
   font-size: 0.875rem;
