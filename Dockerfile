@@ -3,7 +3,7 @@
 #     tests, no uv; runs as the unprivileged user `pipridge` (uid 10001).
 #   test: the test suite (`docker compose run --rm --build test`).
 # pinned by digest: rebuild with a newer digest to take Debian security fixes
-FROM python:3.14.10-slim@sha256:af8a5aa14780025dbfbcfbc81bd8a91ebd87711dd5b0f48ed71090949dd7cb1d AS base
+FROM python:3.14.10-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS base
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv
 
