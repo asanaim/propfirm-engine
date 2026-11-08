@@ -1,0 +1,16 @@
+/* staff: the same look, labelled for the back office */
+#kc-header-wrapper::after {
+  content: "Back office";
+  display: block;
+  margin-top: 10px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pp-muted);
+}
+
+/* staff logins are created by admins: no self-registration link here */
+#kc-registration-container {
+  display: none;
+}

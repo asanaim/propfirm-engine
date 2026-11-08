@@ -1,11 +1,45 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu as RaMenu, usePermissions } from "react-admin";
+import { Terrain } from "./components/Terrain";
 import { ICONS, SIZE, STROKE } from "./icons";
+import { useTilt } from "./motion";
 import { screensFor } from "./screens";
 
-/** The resources, plus the report pages this login may read. */
+/** Numbers each menu item (--i) for the staggered entrance. */
+function useStagger(root: React.RefObject<HTMLElement | null>, count: number): void {
+  useEffect(() => {
+    const items = root.current?.querySelectorAll<HTMLElement>(".RaMenuItemLink-root") ?? [];
+    items.forEach((item, i) => {
+      item.style.setProperty("--i", i.toString());
+    });
+  }, [root, count]);
+}
+
+/** The left menu in the pipridge style: items on a plane that leans toward
+the pointer, each rising in from depth and lifting when hovered, over the
+ridge terrain drifting at the foot (still for reduced motion). */
 export function Menu() {
   const { permissions } = usePermissions<string[]>();
   const screens = screensFor(permissions ?? []);
+  const area = useRef<HTMLDivElement>(null);
+  const plane = useRef<HTMLDivElement>(null);
+  const [webgl, setWebgl] = useState(true);
+  const noWebgl = useCallback(() => {
+    setWebgl(false);
+  }, []);
+  useTilt(plane, 3, area);
+  useStagger(plane, screens.size);
+  return (
+    <div className="menu-3d" ref={area}>
+      {webgl ? <Terrain area={area} onUnavailable={noWebgl} /> : <div className="menu-ridge-fallback" aria-hidden="true" />}
+      <div className="menu-3d-plane" ref={plane}>
+        <MenuItems screens={screens} />
+      </div>
+    </div>
+  );
+}
+
+function MenuItems({ screens }: { screens: Set<string> }) {
   return (
     <RaMenu>
       <RaMenu.DashboardItem primaryText="My work" leftIcon={<ICONS.work size={SIZE} strokeWidth={STROKE} />} />
