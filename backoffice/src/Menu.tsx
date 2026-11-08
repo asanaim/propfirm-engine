@@ -10,6 +10,9 @@ export function Menu() {
     <RaMenu>
       <RaMenu.DashboardItem primaryText="My work" leftIcon={<ICONS.work size={SIZE} strokeWidth={STROKE} />} />
       <RaMenu.ResourceItems />
+      {screens.has("settings") ? (
+        <RaMenu.Item to="/settings" primaryText="System settings" leftIcon={<ICONS.settings size={SIZE} strokeWidth={STROKE} />} />
+      ) : null}
       {screens.has("news") ? <RaMenu.Item to="/news" primaryText="News desk" leftIcon={<ICONS.news size={SIZE} strokeWidth={STROKE} />} /> : null}
       {screens.has("anomalies") ? (
         <RaMenu.Item to="/anomalies" primaryText="Anomaly report" leftIcon={<ICONS.anomalies size={SIZE} strokeWidth={STROKE} />} />

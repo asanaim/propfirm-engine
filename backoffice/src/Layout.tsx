@@ -1,10 +1,11 @@
 import { Box } from "@mui/material";
 import type { ReactNode } from "react";
 import { AppBar, Layout as RaLayout, TitlePortal } from "react-admin";
+import { CommandSearch } from "./CommandSearch";
 import { Menu } from "./Menu";
 
 /** The top bar: the pipridge logo (the reverse logo: the bar is ink in both
-themes), "Back office", then the page's title. */
+themes), "Back office", the page's title, then the Ctrl+K search (AC06). */
 export function BrandBar() {
   return (
     <AppBar color="inherit" className="brand-bar">
@@ -15,6 +16,7 @@ export function BrandBar() {
         </Box>
       </Box>
       <TitlePortal variant="h6" className="brand-bar-title" />
+      <CommandSearch />
     </AppBar>
   );
 }

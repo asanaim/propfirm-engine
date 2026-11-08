@@ -12,6 +12,7 @@ import { Login } from "./Login";
 import { PolicyPages } from "./Policies";
 import { SiteEditorPage } from "./Site";
 import { PaymentMethodsPage } from "./PaymentMethods";
+import { SecurityPage, SettingsHub } from "./SettingsHub";
 import { AnomalyReport, AuditTrail, NewsDesk } from "./Reports";
 import { CaseList, CaseShow } from "./resources/cases";
 import { NotificationList } from "./resources/notifications";
@@ -63,6 +64,8 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
                 {screens.has("news") ? <Route path="/news" element={<NewsDesk />} /> : null}
                 {screens.has("policies") ? <Route path="/policies" element={<PolicyPages />} /> : null}
                 {screens.has("site") ? <Route path="/site" element={<SiteEditorPage />} /> : null}
+                {screens.has("settings") ? <Route path="/settings" element={<SettingsHub />} /> : null}
+                {screens.has("settings") ? <Route path="/security" element={<SecurityPage />} /> : null}
                 {screens.has("methods") ? <Route path="/payment-methods" element={<PaymentMethodsPage />} /> : null}
               </CustomRoutes>
             </>

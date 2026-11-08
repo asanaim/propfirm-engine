@@ -115,6 +115,21 @@ the release is restricted; marking changes no restriction. Every release
 on the calendar is a restricted one: medium and low releases from outside
 FTMO's list would need a licensed calendar feed (not chosen).
 
+AC05 settings hub and AC06 Ctrl+K search (8 Nov 2026). In place: a System
+settings page (`/settings`, for `settings.view`) with one card per area and
+its own search box. Open areas link to their screen (payment methods,
+withdrawal methods, security, website, policy pages); General is fixed in
+the deployment; brand, notification templates, KYC form, SEO, languages,
+extensions and maintenance say which rule builds them. The Security page
+lists the locked switches from `GET /admin/security`, read only. Ctrl+K
+(Cmd+K on a Mac), or the Search button in the top bar, opens a search from
+any screen over pages and settings the login may open, and opens a record
+from its full reference (PO, CAS, ONB, PRG and 8 digits; CIF opens that
+customer's cases). Menu, hub and search read one catalogue
+(`backoffice/src/places.ts`). Not yet: searching users, tickets and
+transactions by name or amount; it needs the trader lists (AC19), tickets
+(AC21) and a transaction log (AC20), none of which exist yet.
+
 ## Exceptions to AC00 decided by the owners (8 Nov 2026)
 
 Decisions that stay with one person: confirming a customer block on a case
@@ -124,8 +139,7 @@ only add restrictions; cancelling a news window still needs an admin.
 
 ## Not started
 
-AC05
-settings hub, AC06 Ctrl+K search, AC09 evidence for claims, AC11 SEO and generated sitemap, AC12
+AC09 evidence for claims, AC11 SEO and generated sitemap, AC12
 editable notification templates (notifications exist; templates are
 code), AC17
 maintenance mode, AC18 language manager, AC19 to AC22 console lists and
