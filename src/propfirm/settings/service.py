@@ -33,10 +33,15 @@ from propfirm.policy import Policy
 from propfirm.rules.products import RuleSet
 from propfirm.service.gateway import Outcome
 from propfirm.settings.authority import Refused, check_approver, check_proposer
+from propfirm.settings.methods import (
+    MethodSecret,
+    PaymentMethod,
+    methods_in_force,
+    secrets_in_force,
+)
 from propfirm.settings.overlay import (
     CountryGating,
     PageVersion,
-    PolicyPage,
     Setting,
     SettingChange,
     StageLimits,
@@ -184,6 +189,18 @@ class Settings:
         """The website text approved for each section (rule AC07)."""
         return site_sections(await self._records.applied_changes())
 
+    async def methods(self) -> dict[str, PaymentMethod]:
+        """Payment and withdrawal methods in force (rule AC13)."""
+        return methods_in_force(
+            c.setting for c in sorted(await self._records.applied_changes(), key=lambda c: c.id)
+        )
+
+    async def secrets(self) -> dict[tuple[str, str], MethodSecret]:
+        """Each method's secrets in force, encrypted (rule AC14)."""
+        return secrets_in_force(
+            c.setting for c in sorted(await self._records.applied_changes(), key=lambda c: c.id)
+        )
+
     async def stand_in(self, now: int) -> StandIn | None:
         """The owners' stand-in approver in force at `now`, if any."""
         return stand_in_in_force(await self._records.applied_changes(), now)
@@ -279,7 +296,7 @@ class Settings:
         if expiry_ms and ts - proposal.ts > expiry_ms:
             raise SettingsError("expired", f"proposal {pid} has expired; propose it again")
         self._check(proposal.setting)
-        at_once = isinstance(proposal.setting, CountryGating | StandIn | PolicyPage | SiteSection)
+        at_once = not isinstance(proposal.setting, StageLimits)  # limits wait for the engine
         try:
             change = await self._store().approve(proposal, approver, reason, ts, applied=at_once)
         except ProposalDecided as exc:

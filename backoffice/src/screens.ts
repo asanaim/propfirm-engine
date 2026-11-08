@@ -11,5 +11,6 @@ export function screensFor(permissions: readonly string[]): Set<string> {
   if (has("settings.view")) for (const s of ["proposals", "changes", "anomalies", "audit"]) out.add(s);
   if (has("settings.change")) out.add("policies"); // owners propose; the API checks the tier
   if (has("settings.change")) out.add("site"); // the website's text (AC07)
+  if (has("settings.change")) out.add("methods"); // payment methods (AC13)
   return out;
 }

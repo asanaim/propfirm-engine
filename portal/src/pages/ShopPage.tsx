@@ -92,6 +92,17 @@ function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size:
   );
 }
 
+/** A way to pay, as the firm attached it (rule AC13). */
+export interface PayMethod {
+  method_id: string;
+  name: string;
+  min_cents: number;
+  max_cents: number; // 0: no maximum
+  fixed_charge_cents: number;
+  percent_charge: string;
+  instructions: string;
+}
+
 export function ShopPage() {
   const api = useApi();
   const auth = useAuth();
@@ -101,9 +112,20 @@ export function ShopPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [order, setOrder] = useState<PlacedOrder | null>(null);
   const [paid, setPaid] = useState(false);
+  const [methods, setMethods] = useState<PayMethod[]>([]);
+  const [method, setMethod] = useState<string | null>(null);
 
   useEffect(() => {
     api.get<Product[]>("/catalogue").then(setProducts, setError);
+    api.get<PayMethod[]>("/payment-methods").then(
+      (found) => {
+        setMethods(found);
+        setMethod(found[0]?.method_id ?? null);
+      },
+      () => {
+        setMethods([]); // none attached: the checkout's own way to pay
+      },
+    );
   }, [api]);
 
   const buy = async (product: Product, size: number) => {
@@ -119,7 +141,8 @@ export function ShopPage() {
     setError(null);
     setPaid(false);
     try {
-      setOrder(await api.post<PlacedOrder>("/orders", { product_id: product.id, size_cents: size }));
+      const body = { product_id: product.id, size_cents: size, ...(method === null ? {} : { method }) };
+      setOrder(await api.post<PlacedOrder>("/orders", body));
     } catch (reason) {
       setError(reason);
     } finally {
@@ -143,6 +166,24 @@ export function ShopPage() {
       <h1>Challenges</h1>
       <p className="lead">Pass the evaluation, then trade a funded account and keep most of the profit.</p>
       {error !== null && <Problem error={error} />}
+      {methods.length > 0 && (
+        <fieldset className="segmented pay-methods" aria-label="Pay with">
+          <legend className="visually-hidden">Pay with</legend>
+          {methods.map((m) => (
+            <label key={m.method_id} className="segment">
+              <input
+                type="radio"
+                name="pay-method"
+                checked={method === m.method_id}
+                onChange={() => {
+                  setMethod(m.method_id);
+                }}
+              />
+              <span>{m.name}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       {order !== null && (
         <Card title={`Order ${order.ord}`}>
           <p>

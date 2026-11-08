@@ -16,6 +16,7 @@ Country gating and the website's text (AC07) stay with admins: an admin
 (or an owner) proposes, another admin or owner approves.
 """
 
+from propfirm.settings.methods import MethodSecret, PaymentMethod
 from propfirm.settings.overlay import CountryGating, PolicyPage, Setting, StageLimits, StandIn
 from propfirm.settings.site import SiteSection
 from propfirm.staff.model import Tier
@@ -30,6 +31,10 @@ class Refused(Exception):
         self.code = code
 
 
+# AC02: an admin or owner proposes; an owner, never the proposer, approves
+OWNER_APPROVES = (PaymentMethod, MethodSecret)
+
+
 def owner_level(setting: Setting) -> bool:
     return isinstance(setting, OWNER_LEVEL)
 
@@ -40,7 +45,7 @@ def check_proposer(setting: Setting, tier: Tier | None) -> None:
         if tier != Tier.OWNER:
             raise Refused("owners_only", "an owner proposes a product, stand-in or policy change")
         return
-    assert isinstance(setting, CountryGating | SiteSection)  # admin level
+    assert isinstance(setting, CountryGating | SiteSection | PaymentMethod | MethodSecret)
     if tier is None or tier < Tier.ADMIN:
         raise Refused("forbidden", "an admin or owner proposes this change")
 
@@ -66,6 +71,10 @@ def check_approver(
         ):
             return "stand_in"
         raise Refused("owners_only", "the other owner (or the owners' stand-in) approves this")
+    if isinstance(setting, OWNER_APPROVES):
+        if tier == Tier.OWNER:
+            return "owner"
+        raise Refused("owners_only", "an owner approves a payment method change (rule AC02)")
     if tier is None or tier < Tier.ADMIN:
         raise Refused("forbidden", "a second admin (T4) or an owner approves settings")
     return "admin"
