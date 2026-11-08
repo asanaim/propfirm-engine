@@ -300,6 +300,8 @@ it("shows each release's impact in words and that it is restricted", async () =>
   const cpi = (await screen.findAllByText("US CPI")).at(-1)?.closest("li");
   expect(cpi).toHaveTextContent("Medium impact");
   expect(cpi).toHaveTextContent("Restricted");
+  expect(cpi).toHaveClass("restricted"); // the red bar
+  expect(cpi?.querySelector(".impact")).toHaveClass("impact-medium");
   const boj = screen.getAllByText("BoJ").at(-1)?.closest("li");
   expect(boj).toHaveTextContent("High impact"); // not marked yet: high
 });

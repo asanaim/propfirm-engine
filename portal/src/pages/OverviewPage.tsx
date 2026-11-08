@@ -133,7 +133,7 @@ function UpcomingNews() {
       ) : (
         <ul className="mini-news">
           {next.map((e) => (
-            <li key={e.event_id}>
+            <li key={e.event_id} className={e.restricted === false ? undefined : "restricted"}>
               <ImpactMark impact={e.impact} />
               <span>
                 <strong>{e.title ?? e.event_id}</strong>

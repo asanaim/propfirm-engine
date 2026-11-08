@@ -192,7 +192,12 @@ export function NewsPage() {
             </h2>
             <ul className="news-list">
               {g.events.map((e) => (
-                <li key={e.event_id} className={now >= e.start_ts && now < e.end_ts ? "news-item live" : "news-item"}>
+                <li
+                  key={e.event_id}
+                  className={["news-item", now >= e.start_ts && now < e.end_ts ? "live" : "", e.restricted === false ? "" : "restricted"]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
                   <time className="news-time" dateTime={new Date(e.release_ts ?? e.start_ts).toISOString()}>
                     {time.format(e.release_ts ?? e.start_ts)}
                   </time>
@@ -201,7 +206,7 @@ export function NewsPage() {
                       <ImpactMark impact={e.impact} />
                       {e.title ?? e.event_id}
                       {e.currency && <span className="badge">{e.currency}</span>}
-                      <span className={`badge impact-label impact-label-${e.impact ?? "high"}`}>{IMPACT_LABEL[e.impact ?? "high"]}</span>
+                      <span className={`badge impact-label impact-${e.impact ?? "high"}`}>{IMPACT_LABEL[e.impact ?? "high"]}</span>
                       {e.restricted !== false && <span className="badge restricted-label">Restricted</span>}
                     </p>
                     <p className="news-meta">
