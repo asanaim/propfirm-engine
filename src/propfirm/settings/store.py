@@ -190,6 +190,18 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        9,
+        """
+        -- rules AC07, AC08 (8 Nov 2026): the website's text, section by section
+        ALTER TABLE {s}.changes DROP CONSTRAINT changes_kind_check;
+        ALTER TABLE {s}.changes ADD CONSTRAINT changes_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section'));
+        ALTER TABLE {s}.proposals DROP CONSTRAINT proposals_kind_check;
+        ALTER TABLE {s}.proposals ADD CONSTRAINT proposals_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section'));
+        """,
+    ),
 )
 
 

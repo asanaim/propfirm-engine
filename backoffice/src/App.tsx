@@ -10,6 +10,7 @@ import { Home } from "./Home";
 import { ICONS, icon } from "./icons";
 import { Login } from "./Login";
 import { PolicyPages } from "./Policies";
+import { SiteEditorPage } from "./Site";
 import { AnomalyReport, AuditTrail, NewsDesk } from "./Reports";
 import { CaseList, CaseShow } from "./resources/cases";
 import { NotificationList } from "./resources/notifications";
@@ -60,6 +61,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
                 {screens.has("audit") ? <Route path="/audit" element={<AuditTrail />} /> : null}
                 {screens.has("news") ? <Route path="/news" element={<NewsDesk />} /> : null}
                 {screens.has("policies") ? <Route path="/policies" element={<PolicyPages />} /> : null}
+                {screens.has("site") ? <Route path="/site" element={<SiteEditorPage />} /> : null}
               </CustomRoutes>
             </>
           );

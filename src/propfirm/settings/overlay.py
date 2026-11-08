@@ -37,6 +37,7 @@ from propfirm.policy import (
     percent_text,
 )
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
+from propfirm.settings.site import SITE_SECTION, SiteSection, section_from_json, section_json
 
 COUNTRY_GATING = "country_gating"
 STAGE_LIMITS = "stage_limits"
@@ -103,7 +104,7 @@ class PageVersion:
     approved_by: str | None
 
 
-type Setting = CountryGating | StageLimits | StandIn | PolicyPage
+type Setting = CountryGating | StageLimits | StandIn | PolicyPage | SiteSection
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,7 +143,7 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
                 gating = value
             case StageLimits() as value:
                 limits[(value.product_id, value.stage)] = change
-            case StandIn() | PolicyPage():
+            case StandIn() | PolicyPage() | SiteSection():
                 pass  # not part of the policy: `stand_in_in_force`, `policy_pages`
     access = base.access
     if gating is not None:
@@ -186,6 +187,15 @@ def policy_pages(changes: Iterable[SettingChange]) -> dict[str, list[PageVersion
     return out
 
 
+def site_sections(changes: Iterable[SettingChange]) -> dict[str, SiteSection]:
+    """The latest approved text of each website section."""
+    out: dict[str, SiteSection] = {}
+    for change in sorted(changes, key=lambda c: c.id):
+        if isinstance(change.setting, SiteSection):
+            out[change.setting.section] = change.setting
+    return out
+
+
 def stand_in_in_force(changes: Iterable[SettingChange], now: int) -> StandIn | None:
     """The owners' stand-in approver at `now`: the latest stand-in change,
     if it names someone and has not run out."""
@@ -220,6 +230,8 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
             }
         case StandIn():
             return STAND_IN, {"subject": setting.subject, "until": setting.until}
+        case SiteSection():
+            return SITE_SECTION, section_json(setting)
         case PolicyPage():
             return POLICY_PAGE, {"slug": setting.slug, "title": setting.title, "body": setting.body}
 
@@ -248,6 +260,8 @@ def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
         if not isinstance(until, int) or isinstance(until, bool) or until < 0:
             raise PolicyError("stand-in until must be milliseconds")
         return StandIn(subject, until)
+    if kind == SITE_SECTION:
+        return section_from_json(value)
     if kind == POLICY_PAGE:
         slug, title, body = value["slug"], value["title"], value["body"]
         if not all(isinstance(v, str) for v in (slug, title, body)):

@@ -234,18 +234,33 @@ function Tile({ children }: { children: ReactNode }) {
   );
 }
 
+/** One home page section as the firm's editors approved it (rule AC07); its
+figures already filled from the products in force (AC08). */
+export interface SiteSection {
+  fields: Record<string, string>;
+  items: Record<string, string>[];
+}
+export type Site = Partial<Record<"hero" | "challenges" | "how", SiteSection>>;
+
 /** The signed-out home page: what a challenge is, what it costs, how it works. */
 function Landing({ onSignIn }: { onSignIn: () => void }) {
   const api = useApi();
   const [products, setProducts] = useState<Product[] | null>(null);
+  const [site, setSite] = useState<Site>({});
   useEffect(() => {
     api.get<Product[]>("/catalogue").then(setProducts, () => {
       setProducts([]);
     });
+    api.get<Site>("/site").then(setSite, () => {
+      setSite({}); // the page's own words
+    });
   }, [api]);
+  const hero = site.hero?.fields;
+  const how = site.how;
+  const steps = how !== undefined && how.items.length > 0 ? how.items.map((i) => ({ title: i.title ?? "", text: i.text ?? "" })) : STEPS;
   const first = products?.[0]?.stages[0];
   const page = useRef<HTMLDivElement>(null);
-  const hero = useRef<HTMLElement>(null);
+  const heroArea = useRef<HTMLElement>(null);
   useReveal(page, [products]);
   const [webgl, setWebgl] = useState(true);
   const noWebgl = useCallback(() => {
@@ -254,19 +269,19 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
   const split = products?.reduce((best, p) => Math.max(best, Number(p.profit_split_percent)), 0);
   return (
     <div className="landing" ref={page}>
-      <section className="hero" aria-labelledby="hero-title" ref={hero}>
-        {webgl ? <Terrain area={hero} onUnavailable={noWebgl} /> : null}
+      <section className="hero" aria-labelledby="hero-title" ref={heroArea}>
+        {webgl ? <Terrain area={heroArea} onUnavailable={noWebgl} /> : null}
         <h1 id="hero-title">
-          Trade the evaluation.
+          {hero?.title_line_1 ?? "Trade the evaluation."}
           <br />
-          Keep {split === undefined || split === 0 ? "most" : `${split.toString()} %`} of the profit.
+          {hero?.title_line_2 ?? `Keep ${split === undefined || split === 0 ? "most" : `${split.toString()} %`} of the profit.`}
         </h1>
         <p className="lead">
-          Prove your trading on a simulated account. Pass, and trade a funded account with a share of every profit.
+          {hero?.lead ?? "Prove your trading on a simulated account. Pass, and trade a funded account with a share of every profit."}
         </p>
         <div className="row">
           <Link className="button button-primary button-large" href="/shop">
-            Choose a challenge
+            {hero?.button ?? "Choose a challenge"}
           </Link>
           <button type="button" className="button button-secondary button-large" onClick={onSignIn}>
             Sign in
@@ -275,7 +290,7 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
         <Ridge
           target={first?.profit_target_percent === null || first === undefined ? undefined : formatPercent(first.profit_target_percent)}
           maxLoss={first === undefined ? undefined : formatPercent(first.max_loss_percent)}
-          area={hero}
+          area={heroArea}
           layers={!webgl}
         />
       </section>
@@ -283,7 +298,7 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
       {products !== null && products.length > 0 && (
         <section className="tiles" aria-labelledby="tiles-title">
           <h2 id="tiles-title" data-reveal="">
-            Challenges
+            {site.challenges?.fields.heading ?? "Challenges"}
           </h2>
           <ul className="tile-list">
             {products.map((p) => {
@@ -313,17 +328,17 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
 
       <section className="how" aria-labelledby="how-title">
         <h2 id="how-title" data-reveal="">
-          How it works
+          {how?.fields.heading ?? "How it works"}
         </h2>
         <ol className="how-steps">
-          {STEPS.map((s) => (
+          {steps.map((s) => (
             <li key={s.title} data-reveal="">
               <h3>{s.title}</h3>
               <p className="muted">{s.text}</p>
             </li>
           ))}
         </ol>
-        <p className="muted small">All trading here is simulated. Each challenge's rules are shown before you buy.</p>
+        <p className="muted small">{how?.fields.footnote ?? "All trading here is simulated. Each challenge's rules are shown before you buy."}</p>
       </section>
     </div>
   );

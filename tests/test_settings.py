@@ -35,6 +35,7 @@ from propfirm.settings.overlay import (
     to_json,
 )
 from propfirm.settings.service import Settings, SettingsError
+from propfirm.settings.site import SiteSection, rendered
 from propfirm.settings.store import ChangeStatus, Proposal, ProposalDecided
 from propfirm.staff.model import ROLES, Access, Tier, legacy_access
 from tests.auth_rig import FakeCustomers, bearer, verifier
@@ -859,3 +860,65 @@ def test_a_policy_page_is_checked() -> None:
             PolicyPage(slug, title, body)
     kind, value = to_json(PolicyPage("terms", "T", "B"))
     assert from_json(kind, value) == PolicyPage("terms", "T", "B")
+
+
+# --- rules AC07, AC08: the website's text, figures from the products ---------------------
+
+HERO = {
+    "fields": {
+        "title_line_1": "Trade the evaluation.",
+        "title_line_2": "Keep up to {max_split} of the profit.",
+        "lead": "Accounts from {min_size} to {max_size}, challenges from {min_price}.",
+        "button": "Choose a challenge",
+    },
+    "reason": "launch copy",
+}
+
+
+def test_admins_edit_a_website_section_and_figures_come_from_the_products() -> None:
+    records = MemoryRecords()
+    proposals = MemoryProposals(records)
+    kw: dict[str, Any] = {"records": records, "proposals": proposals, "tiers": OWNERS}
+    assert api("GET", "/site", signed_in=False, **kw).json() == {}  # the site's own words
+    assert api("PUT", "/admin/site/hero", HERO, user="admin-1", **kw).status_code == 200
+    assert api("GET", "/site", signed_in=False, **kw).json() == {}  # not approved yet
+    own = api("POST", "/admin/settings/proposals/1/approve", {"reason": "x"}, user="admin-1", **kw)
+    assert own.json()["detail"]["code"] == "four_eyes"
+    ok = api("POST", "/admin/settings/proposals/1/approve", {"reason": "ok"}, user="admin-2", **kw)
+    assert ok.status_code == 200, ok.text
+    hero = api("GET", "/site", signed_in=False, **kw).json()["hero"]["fields"]
+    tokens = api("GET", "/admin/site", **kw).json()["tokens"]
+    assert hero["title_line_2"] == f"Keep up to {tokens['max_split']} of the profit."
+    assert tokens["max_split"].endswith("%") and tokens["min_price"].startswith("$")
+    assert "{" not in hero["lead"]
+    editor = api("GET", "/admin/site", **kw).json()
+    assert (
+        editor["sections"]["hero"]["fields"]["title_line_2"]
+        == "Keep up to {max_split} of the profit."
+    )
+    assert editor["shapes"]["how"]["max_items"] == 6
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Keep 90% of the profit.", "Keep 90 percent.", "Only $99 today", "Up to 200K", "{nope}"],
+)
+def test_typed_figures_and_unknown_tokens_are_refused(text: str) -> None:
+    body = {**HERO, "fields": {**HERO["fields"], "lead": text}}  # type: ignore[dict-item]
+    refused = api("PUT", "/admin/site/hero", body, proposals=MemoryProposals(MemoryRecords()))
+    assert refused.status_code == 422
+
+
+def test_a_section_keeps_its_shape() -> None:
+    steps = [{"title": f"Step {n}", "text": "Do this."} for n in range(7)]
+    with pytest.raises(PolicyError, match="at most 6"):
+        SiteSection("how", {"heading": "How it works", "footnote": "Simulated."}, tuple(steps))
+    with pytest.raises(PolicyError, match="fields"):
+        SiteSection("hero", {"lead": "x"})
+    with pytest.raises(PolicyError, match="section"):
+        SiteSection("footer", {})
+    section = SiteSection("how", {"heading": "How", "footnote": "Simulated."},
+                          ({"title": "Choose", "text": "From {min_price}."},))  # fmt: skip
+    kind, value = to_json(section)
+    assert from_json(kind, json.loads(json.dumps(value))) == section
+    assert rendered(section, {"min_price": "$59"})["items"][0]["text"] == "From $59."
