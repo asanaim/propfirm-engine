@@ -50,3 +50,18 @@ docker compose --profile platform up -d
 Development only. The production realm drops `dev-cli` and the test users,
 turns on e-mail verification (needs SMTP, Amazon SES) and requires
 multi-factor authentication for sensitive actions (outline M04).
+
+## Sign-in pages (pipridge themes, 8 Nov 2026)
+
+`themes/` holds two login themes built on Keycloak's own `keycloak.v2`
+pages: `pipridge` (traders, the realm's login theme) and `pipridge-staff`
+(the `backoffice` client's login theme: the same look, labelled "Back
+office", without the self-registration link). Both draw the pipridge ridge
+terrain behind a glass card (`js/terrain.js`, WebGL; one still frame for
+reduced motion, CSS ridges without WebGL) and use self-hosted Inter (SIL
+OFL, `fonts/OFL.txt`). Compose mounts the folder at `/opt/keycloak/themes`.
+A new realm gets the themes from the realm file; for an existing one the
+one-shot `keycloak-theme` service sets them on every
+`docker compose --profile platform up` (it logs "pipridge sign-in themes
+set" and exits). Development mode does not cache themes, so an edited CSS
+file shows on the next page load.

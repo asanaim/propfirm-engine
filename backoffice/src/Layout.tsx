@@ -1,5 +1,5 @@
-import { Box } from "@mui/material";
-import type { ReactNode } from "react";
+import { Box, useTheme } from "@mui/material";
+import { type ReactNode, useEffect } from "react";
 import { AppBar, Layout as RaLayout, TitlePortal } from "react-admin";
 import { CommandSearch } from "./CommandSearch";
 import { Menu } from "./Menu";
@@ -21,7 +21,17 @@ export function BrandBar() {
   );
 }
 
+/** Mirrors the MUI theme's mode on <html data-theme>, so CSS and the
+terrain pick the colours of the theme in use. */
+export function useThemeMark(): void {
+  const mode = useTheme().palette.mode;
+  useEffect(() => {
+    document.documentElement.dataset.theme = mode;
+  }, [mode]);
+}
+
 export function Layout({ children }: { children: ReactNode }) {
+  useThemeMark();
   return (
     <RaLayout menu={Menu} appBar={BrandBar}>
       {children}

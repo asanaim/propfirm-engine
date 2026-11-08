@@ -1,6 +1,7 @@
 {
   "realm": "propfirm",
   "displayName": "pipridge (development)",
+  "loginTheme": "pipridge",
   "enabled": true,
   "registrationAllowed": true,
   "registrationEmailAsUsername": true,
@@ -120,7 +121,8 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:5174/*"
+        "post.logout.redirect.uris": "http://localhost:5174/*",
+        "login_theme": "pipridge-staff"
       },
       "protocolMappers": [
         {
