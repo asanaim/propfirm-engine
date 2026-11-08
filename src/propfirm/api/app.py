@@ -63,7 +63,7 @@ from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints
 
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
 from propfirm.audit.chain import AuditEvent
@@ -142,7 +142,9 @@ from propfirm.settings.overlay import (
 from propfirm.settings.service import Settings, SettingsError
 from propfirm.settings.site import (
     SECTIONS,
+    SiteMode,
     SiteSection,
+    mode_json,
     rendered,
     section_json,
     token_values,
@@ -534,6 +536,12 @@ class SecretBody(_Body):
 class SiteSectionBody(_Body):
     fields: dict[str, Annotated[str, StringConstraints(max_length=300)]]
     items: list[dict[str, Annotated[str, StringConstraints(max_length=300)]]] = []
+    reason: Reason
+
+
+class SiteModeBody(_Body):
+    maintenance: StrictBool
+    registration_open: StrictBool
     reason: Reason
 
 
@@ -1376,6 +1384,15 @@ def _refused(exc: CheckoutError) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
 
 
+async def _mode(deps: Deps) -> SiteMode:
+    """The site mode in force (rule AC17); open when settings are not attached."""
+    return SiteMode() if deps.settings is None else await deps.settings.mode()
+
+
+def _closed(code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=409, detail={"code": code, "message": message})
+
+
 # --- the app --------------------------------------------------------------------------
 
 
@@ -1648,6 +1665,11 @@ def create_app(
         ip_country = request.headers.get(deps.country_header) if deps.country_header else None
         if ip_country is not None and not (len(ip_country) == 2 and ip_country.isupper()):
             ip_country = None  # unknown or malformed: no signal
+        mode = await _mode(deps)
+        if mode.maintenance:
+            raise _closed("maintenance", "the site is under maintenance; try again later")
+        if not mode.registering:
+            raise _closed("registration_closed", "registration is closed for now")
         form = Registration(body.full_name, dob, body.residence_country)
         try:
             cif = await _checkout(deps).register(
@@ -1662,6 +1684,8 @@ def create_app(
     @app.post("/orders", status_code=201)
     async def purchase(deps: D, me: Trader, body: PurchaseBody) -> dict[str, Any]:
         cif = await _cif(deps, me)
+        if not (await _mode(deps)).selling:  # rule AC17
+            raise _closed("maintenance", "challenges are not on sale during maintenance")
         if deps.settings is not None and await deps.settings.pending_pages(me.subject):
             raise HTTPException(  # rule AC10: accept the policies in force first
                 status_code=409,
@@ -2589,6 +2613,20 @@ def create_app(
         sections = await _settings(deps).site()
         return {name: rendered(s, values) for name, s in sorted(sections.items())}
 
+    @app.get("/site/status")
+    async def site_status(deps: D) -> dict[str, Any]:
+        """Whether the site is under maintenance and registration is open
+        (rule AC17, public); the pages' text is in `/site`."""
+        mode = await _mode(deps)
+        return {**mode_json(mode), "registering": mode.registering, "selling": mode.selling}
+
+    @app.put("/admin/site-mode")
+    async def propose_site_mode(deps: D, me: SettingsChanger, body: SiteModeBody) -> dict[str, Any]:
+        """Turn maintenance on or off, or open or close registration: a
+        proposal a second admin or owner approves (rules AC00, AC16, AC17)."""
+        setting = SiteMode(body.maintenance, body.registration_open)
+        return await propose_setting(deps, me, setting, body.reason)
+
     @app.get("/admin/site")
     async def admin_site(deps: D, me: SettingsReader) -> dict[str, Any]:
         """For the editor: each section's fields and items, the approved text
@@ -2600,18 +2638,21 @@ def create_app(
                     "fields": dict(shape.fields),
                     "items": dict(shape.items),
                     "max_items": shape.max_items,
+                    "optional": sorted(shape.optional),
+                    "images": sorted(shape.images),
                 }
                 for name, shape in SECTIONS.items()
             },
             "sections": {name: section_json(s) for name, s in sorted(sections.items())},
             "tokens": token_values(await _policy(deps)),
+            "mode": mode_json(await _mode(deps)),
         }
 
     @app.put("/admin/site/{section}")
     async def propose_site(
         deps: D,
         me: SettingsChanger,
-        section: Annotated[str, Path(pattern=r"^[a-z]{1,20}$")],
+        section: Annotated[str, Path(pattern=r"^[a-z_]{1,20}$")],
         body: SiteSectionBody,
     ) -> dict[str, Any]:
         """New text for one section: a proposal a second admin or owner

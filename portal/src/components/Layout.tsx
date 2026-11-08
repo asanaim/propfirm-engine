@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { config } from "../config";
 import { PolicyGate, PolicyLinks } from "../pages/PolicyPages";
 import { Link, usePath } from "../router";
+import { MaintenanceBanner, useSiteStatus } from "./SiteStatus";
 
 type Theme = "light" | "dark";
 const THEME_KEY = "portal-theme";
@@ -49,6 +50,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const path = usePath();
   const [theme, toggle] = useTheme();
+  const site = useSiteStatus();
   return (
     <>
       <a className="skip" href="#main">
@@ -90,6 +92,7 @@ export function Layout({ children }: { children: ReactNode }) {
           )}
         </div>
       </header>
+      <MaintenanceBanner status={site.status} />
       <main id="main" tabIndex={-1}>
         <PolicyGate />
         {children}

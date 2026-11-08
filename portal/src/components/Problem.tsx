@@ -32,6 +32,8 @@ const MESSAGES: Record<string, string> = {
   blocked: "Your account is blocked. Please contact support.",
   screening: "We cannot complete this request. Please contact support.",
   unknown_product: "This product is not available.",
+  maintenance: "We are doing some maintenance. Purchases and registrations are paused for a short while.",
+  registration_closed: "Registration is closed for now.",
 };
 
 function describe(error: ApiError): string {

@@ -130,6 +130,21 @@ customer's cases). Menu, hub and search read one catalogue
 transactions by name or amount; it needs the trader lists (AC19), tickets
 (AC21) and a transaction log (AC20), none of which exist yet.
 
+AC17 maintenance mode and registration closed page (8 Nov 2026). In place:
+the site mode (`maintenance`, `registration_open`), changed by a proposal a
+second admin or owner approves (`PUT /admin/site-mode`; settings migration
+11), and two website sections, `maintenance` and `registration_closed`,
+each with a title, a message and an optional image (a path on the site;
+the content security policy loads images only from the site). While
+registration is closed, `POST /me` is refused (409 `registration_closed`).
+Under maintenance, registration and `POST /orders` are refused (409
+`maintenance`), but sign in, trading and payouts carry on, so no trader is
+kept from managing an open position. `GET /site/status` is public. The
+portal shows the maintenance page to signed out visitors, the closed page
+instead of the registration form, and a banner on every page during
+maintenance. Not yet: uploading images from the console (a file must be
+placed on the site first).
+
 ## Exceptions to AC00 decided by the owners (8 Nov 2026)
 
 Decisions that stay with one person: confirming a customer block on a case
@@ -141,8 +156,7 @@ only add restrictions; cancelling a news window still needs an admin.
 
 AC09 evidence for claims, AC11 SEO and generated sitemap, AC12
 editable notification templates (notifications exist; templates are
-code), AC17
-maintenance mode, AC18 language manager, AC19 to AC22 console lists and
+code), AC18 language manager, AC19 to AC22 console lists and
 reports (partly present: not checked), AC23 system pages, AC24 price feed
 failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.

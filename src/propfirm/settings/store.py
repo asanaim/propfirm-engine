@@ -217,6 +217,20 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             'payment_method', 'method_secret'));
         """,
     ),
+    (
+        11,
+        """
+        -- rule AC17 (8 Nov 2026): maintenance mode and closing registration
+        ALTER TABLE {s}.changes DROP CONSTRAINT changes_kind_check;
+        ALTER TABLE {s}.changes ADD CONSTRAINT changes_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret', 'site_mode'));
+        ALTER TABLE {s}.proposals DROP CONSTRAINT proposals_kind_check;
+        ALTER TABLE {s}.proposals ADD CONSTRAINT proposals_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret', 'site_mode'));
+        """,
+    ),
 )
 
 

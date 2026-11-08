@@ -10,6 +10,15 @@ account size, a loss limit, a payout term) is never typed: the text names
 it with a token, such as {max_split}, and the token is filled from the
 products and policy in force when the page is read. Text that types a
 money amount or a percentage is refused.
+
+AC17 (8 Nov 2026): the maintenance page and the registration closed page
+are two more sections, each with a title, a message and an optional image
+(a path on the site: the site's content security policy loads images only
+from itself). Whether either is shown is the
+site mode, a separate setting with the same two-person approval: in
+maintenance the firm takes no registrations and sells no challenges;
+trading, payouts and sign in carry on, so no trader is ever kept from
+managing an open position.
 """
 
 import re
@@ -20,6 +29,7 @@ from typing import Any
 from propfirm.policy import Policy, PolicyError, percent_text
 
 SITE_SECTION = "site_section"
+SITE_MODE = "site_mode"
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,13 +37,27 @@ class Shape:
     fields: Mapping[str, int]  # field -> its longest text
     items: Mapping[str, int] = field(default_factory=dict)  # item field -> longest
     max_items: int = 0
+    optional: frozenset[str] = frozenset()  # fields that may be left empty
+    images: frozenset[str] = frozenset()  # fields holding an image address
 
 
 SECTIONS: dict[str, Shape] = {
     "hero": Shape({"title_line_1": 80, "title_line_2": 80, "lead": 300, "button": 40}),
     "challenges": Shape({"heading": 80}),
     "how": Shape({"heading": 80, "footnote": 300}, {"title": 60, "text": 200}, 6),
+    "maintenance": Shape(
+        {"title": 80, "message": 600, "image": 300},
+        optional=frozenset({"image"}),
+        images=frozenset({"image"}),
+    ),
+    "registration_closed": Shape(
+        {"title": 80, "message": 600, "image": 300},
+        optional=frozenset({"image"}),
+        images=frozenset({"image"}),
+    ),
 }
+# an image on the site itself ("/brand/closed.svg")
+IMAGE = re.compile(r"^/[A-Za-z0-9][A-Za-z0-9/._-]*\.(svg|png|jpe?g|webp)$")
 
 TOKEN = re.compile(r"\{([a-z_]+)\}")
 # a typed figure: a money amount or a percentage written as digits
@@ -55,7 +79,12 @@ class SiteSection:
             raise PolicyError(f"section must be one of {sorted(SECTIONS)}")
         if set(self.fields) != set(shape.fields):
             raise PolicyError(f"{self.section}: fields must be {sorted(shape.fields)}")
-        texts = [(k, v, shape.fields[k]) for k, v in self.fields.items()]
+        texts = []
+        for k, v in self.fields.items():
+            if k in shape.images:
+                check_image(k, v, shape.fields[k])
+            elif not (k in shape.optional and v == ""):
+                texts.append((k, v, shape.fields[k]))
         if len(self.items) > shape.max_items:
             raise PolicyError(f"{self.section}: at most {shape.max_items} items")
         for item in self.items:
@@ -64,6 +93,46 @@ class SiteSection:
             texts += [(k, v, shape.items[k]) for k, v in item.items()]
         for key, text, longest in texts:
             check_text(key, text, longest)
+
+
+def check_image(key: str, address: str, longest: int) -> None:
+    """An image field: empty, or the path of an image on the site."""
+    if not isinstance(address, str) or len(address) > longest:
+        raise PolicyError(f"{key}: at most {longest} characters")
+    if address and (".." in address or not IMAGE.match(address)):
+        raise PolicyError(
+            f"{key}: the path of an svg, png, jpg or webp image on the site, such as /brand/a.svg"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SiteMode:
+    """Whether the maintenance page is up and registration is open (AC17)."""
+
+    maintenance: bool = False
+    registration_open: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.maintenance, bool) or not isinstance(self.registration_open, bool):
+            raise PolicyError("maintenance and registration_open are true or false")
+
+    @property
+    def registering(self) -> bool:
+        """Whether a new trader may register now."""
+        return self.registration_open and not self.maintenance
+
+    @property
+    def selling(self) -> bool:
+        """Whether challenges are on sale now."""
+        return not self.maintenance
+
+
+def mode_json(m: SiteMode) -> dict[str, Any]:
+    return {"maintenance": m.maintenance, "registration_open": m.registration_open}
+
+
+def mode_from_json(value: Mapping[str, Any]) -> SiteMode:
+    return SiteMode(value["maintenance"], value["registration_open"])
 
 
 def check_text(key: str, text: str, longest: int) -> None:
