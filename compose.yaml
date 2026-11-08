@@ -111,10 +111,12 @@ services:
       timeout: 5s
       retries: 60
 
-  # Once per start: points an existing realm at the pipridge sign-in themes
-  # (a new realm gets them from the realm file). Exits when done.
+  # Points an existing realm at the pipridge sign-in themes (a new realm gets
+  # them from the realm file), then exits. A one-shot job, so not part of
+  # `up` (whose --wait expects services that keep running): start-up runs
+  #   docker compose --profile platform run --rm keycloak-theme
   keycloak-theme:
-    profiles: ["platform"]
+    profiles: ["setup"]
     image: quay.io/keycloak/keycloak:26.8.1
     depends_on:
       keycloak:

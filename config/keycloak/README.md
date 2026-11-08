@@ -60,8 +60,8 @@ office", without the self-registration link). Both draw the pipridge ridge
 terrain behind a glass card (`js/terrain.js`, WebGL; one still frame for
 reduced motion, CSS ridges without WebGL) and use self-hosted Inter (SIL
 OFL, `fonts/OFL.txt`). Compose mounts the folder at `/opt/keycloak/themes`.
-A new realm gets the themes from the realm file; for an existing one the
-one-shot `keycloak-theme` service sets them on every
-`docker compose --profile platform up` (it logs "pipridge sign-in themes
-set" and exits). Development mode does not cache themes, so an edited CSS
+A new realm gets the themes from the realm file; for an existing one run
+the one-shot `keycloak-theme` job once Keycloak is up:
+`docker compose --profile platform run --rm keycloak-theme` (it prints
+"pipridge sign-in themes set" and exits; running it again is harmless). Development mode does not cache themes, so an edited CSS
 file shows on the next page load.

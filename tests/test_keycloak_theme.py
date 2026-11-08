@@ -72,3 +72,5 @@ def test_compose_mounts_the_themes_and_points_an_existing_realm_at_them() -> Non
     assert "./config/keycloak/themes:/opt/keycloak/themes:ro" in compose
     assert "loginTheme=pipridge" in compose
     assert "attributes.login_theme=pipridge-staff" in compose
+    job = compose.split("  keycloak-theme:")[1].split("\n  api:")[0]
+    assert 'profiles: ["setup"]' in job  # a one-shot job is never part of `up --wait`
