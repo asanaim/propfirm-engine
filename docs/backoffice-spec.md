@@ -90,6 +90,23 @@ the products cannot disagree; text that types an amount or a percentage
 is refused. Settings migration 9. More sections (FAQ, about, payouts,
 footer, contact) follow the same shape when the portal gains those pages.
 
+AC02, AC13 and AC14, payment and withdrawal methods and their secrets.
+In place: a method (payment or withdrawal; provider adapter, enabled,
+minimum, maximum, fixed and percent charge, instructions, fields the
+trader fills) is attached, changed, enabled or disabled through a
+proposal: an admin or owner proposes, an owner who is not the proposer
+approves. Back office "Payment methods" screen. `GET /payment-methods`
+(public) lists the enabled ones. Once a payment method is attached, a
+purchase must name an enabled one whose provider is the checkout's, and
+the list price must be within its limits; the portal shop offers the
+choice. Charges round up to a whole cent. Secrets are sealed with
+AES-256-GCM (key `PROPFIRM_SECRETS_KEY`, outside the database), bound to
+their method, shown only as "set", and replaced by an owner-approved
+proposal. Settings migration 10. Not yet: withdrawal methods applied to
+payout requests (limits and charge at request time) and real provider
+adapters (only `sandbox` and `manual` exist; NOWPayments and a card
+processor need the operator's accounts).
+
 News impact (decided 8 Nov 2026). In place: the risk desk (one person,
 as adding a news window) marks each release high, medium or low impact
 (`POST /staff/news/events/{id}/impact`, kept append-only); a release not
@@ -107,11 +124,10 @@ only add restrictions; cancelling a news window still needs an admin.
 
 ## Not started
 
-AC02 payment and withdrawal methods as attachable plugins with owner
-approval (today the providers are fixed in code and environment). AC05
+AC05
 settings hub, AC06 Ctrl+K search, AC09 evidence for claims, AC11 SEO and generated sitemap, AC12
 editable notification templates (notifications exist; templates are
-code), AC13 method plugins, AC14 write-only secrets in the console, AC17
+code), AC17
 maintenance mode, AC18 language manager, AC19 to AC22 console lists and
 reports (partly present: not checked), AC23 system pages, AC24 price feed
 failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,

@@ -52,11 +52,12 @@ money integer cents, times integer UTC milliseconds; floats are refused.
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal, Protocol
 
@@ -116,7 +117,16 @@ from propfirm.rules.news import EventScope
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.service.projector import INTERVALS
-from propfirm.settings.authority import Refused, check_appointment, owner_level
+from propfirm.settings.authority import OWNER_APPROVES, Refused, check_appointment, owner_level
+from propfirm.settings.methods import (
+    ADAPTERS,
+    METHOD_ID,
+    SECRET_NAME,
+    SecretsUnavailable,
+    Vault,
+    method_from_json,
+    method_json,
+)
 from propfirm.settings.newsdesk import DEFAULT_IMPACT, Author, NewsDesk, NewsRefused, action_view
 from propfirm.settings.overlay import (
     PAGE_SLUG,
@@ -125,6 +135,7 @@ from propfirm.settings.overlay import (
     PolicyPage,
     Setting,
     StandIn,
+    public_json,
     stage_limits,
     to_json,
 )
@@ -237,6 +248,7 @@ class Deps:
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
+    vault: Vault = field(default_factory=Vault.from_env)  # method secrets (AC14)
     clock: Callable[[], int] = now_ms
     today: Callable[[], date] = _today
     new_id: Callable[[], str] = lambda: uuid.uuid4().hex
@@ -340,6 +352,7 @@ Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, m
 class PurchaseBody(_Body):
     product_id: Annotated[str, StringConstraints(pattern=PRODUCT_PATTERN)]
     size_cents: StrictInt
+    method: Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")] | None = None
     code: Annotated[str, StringConstraints(pattern=r"^[A-Z0-9-]{3,32}$")] | None = None
 
 
@@ -489,6 +502,32 @@ class SandboxKycBody(_Body):
 class CountryGatingBody(_Body):
     country_gating: bool
     blocked_countries: list[Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]]
+    reason: Reason
+
+
+class UserFieldBody(_Body):
+    name: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,39}$")]
+    label: Annotated[str, StringConstraints(min_length=1, max_length=60)]
+    type: Literal["text", "number", "email"] = "text"
+    required: bool = True
+
+
+class MethodBody(_Body):
+    kind: Literal["payment", "withdrawal"]
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+    adapter: str
+    enabled: bool
+    min_cents: Annotated[StrictInt, Field(ge=0)]
+    max_cents: Annotated[StrictInt, Field(ge=0)]  # 0: no maximum
+    fixed_charge_cents: Annotated[StrictInt, Field(ge=0)]
+    percent_charge: Percent
+    instructions: Annotated[str, StringConstraints(max_length=2_000)] = ""
+    user_fields: list[UserFieldBody] = []
+    reason: Reason
+
+
+class SecretBody(_Body):
+    value: Annotated[str, StringConstraints(min_length=1, max_length=4_000)]
     reason: Reason
 
 
@@ -644,7 +683,7 @@ def _staff_refused(exc: StaffRefused) -> HTTPException:
 
 def change_view(status: ChangeStatus) -> dict[str, Any]:
     change = status.change
-    kind, value = to_json(change.setting)
+    kind, value = public_json(change.setting)
     return {
         "id": change.id,
         "kind": kind,
@@ -674,7 +713,7 @@ def page_view(p: PageVersion, *, body: bool) -> dict[str, Any]:
 
 
 def proposal_view(p: Proposal, now: int, expiry_ms: int) -> dict[str, Any]:
-    kind, value = to_json(p.setting)
+    kind, value = public_json(p.setting)
     status = p.decision or ("expired" if expiry_ms and now - p.ts > expiry_ms else "open")
     return {
         "id": p.id,
@@ -1628,6 +1667,7 @@ def create_app(
                 status_code=409,
                 detail={"code": "policies_pending", "message": "accept the updated policies"},
             )
+        await check_method(deps, body)
         try:
             order, pay_url = await _checkout(deps).place_order(
                 cif, body.product_id, body.size_cents, body.code, deps.clock()
@@ -2292,7 +2332,13 @@ def create_app(
             raise _settings_refused(exc) from exc
         if deps.desk is not None:
             kind, _ = to_json(setting)
-            who = "the other owner" if owner_level(setting) else "a second admin"
+            who = (
+                "the other owner"
+                if owner_level(setting)
+                else "an owner"
+                if isinstance(setting, OWNER_APPROVES)
+                else "a second admin"
+            )
             await deps.desk.notify(
                 "settings.change",
                 "settings_proposal",
@@ -2426,6 +2472,111 @@ def create_app(
         )
 
     # --- the owners' stand-in approver (rule AC00, decided 8 Nov 2026) -----------------
+
+    # --- payment and withdrawal methods (rules AC02, AC13, AC14) ------------------------
+
+    async def check_method(deps: Deps, body: PurchaseBody) -> None:
+        """Rule AC13: once payment methods are attached, a purchase names an
+        enabled one, its provider is this checkout's, and the list price is
+        within its limits. With none attached the checkout's provider is used."""
+        if deps.settings is None:
+            return
+        methods = {
+            m.method_id: m
+            for m in (await deps.settings.methods()).values()
+            if m.kind == "payment" and m.enabled
+        }
+        if not methods:
+            return
+        method = methods.get(body.method or "")
+        wrong = (
+            deps.checkout is not None
+            and method is not None
+            and (method.adapter != deps.checkout.adapter)
+        )
+        if method is None or wrong:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "method", "message": f"choose one of {sorted(methods)}"},
+            )
+        try:
+            prices = dict((await _policy(deps)).product(body.product_id).prices_cents)
+        except KeyError:
+            return  # the checkout refuses an unknown product
+        price = prices.get(body.size_cents)
+        if price is not None and not method.allows(price):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "method_limits",
+                    "message": f"{method.name} does not take this amount",
+                },
+            )
+
+    @app.get("/payment-methods")
+    async def payment_methods(
+        deps: D, kind: Literal["payment", "withdrawal"] = "payment"
+    ) -> list[dict[str, Any]]:
+        """The enabled methods of one kind, with limits and charges (public)."""
+        return [
+            {k: v for k, v in method_json(m).items() if k != "adapter"}
+            for m in sorted((await _settings(deps).methods()).values(), key=lambda m: m.method_id)
+            if m.kind == kind and m.enabled
+        ]
+
+    @app.get("/admin/payment-methods")
+    async def admin_payment_methods(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """Every method, and which secrets each has set (never their values)."""
+        settings = _settings(deps)
+        secrets = await settings.secrets()
+        return {
+            "adapters": list(ADAPTERS),
+            "methods": [
+                {
+                    **method_json(m),
+                    "secrets": sorted(name for (mid, name) in secrets if mid == m.method_id),
+                }
+                for m in sorted((await settings.methods()).values(), key=lambda m: m.method_id)
+            ],
+        }
+
+    @app.put("/admin/payment-methods/{method_id}")
+    async def propose_method(
+        deps: D,
+        me: SettingsChanger,
+        method_id: Annotated[str, Path(pattern=METHOD_ID.pattern)],
+        body: MethodBody,
+    ) -> dict[str, Any]:
+        """Attach or change a method (enable or disable it too): an admin or
+        owner proposes, an owner who is not the proposer approves (AC02)."""
+        try:
+            method = method_from_json(
+                {**body.model_dump(exclude={"reason"}), "method_id": method_id}
+            )
+        except (PolicyError, KeyError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await propose_setting(deps, me, method, body.reason)
+
+    @app.put("/admin/payment-methods/{method_id}/secrets/{name}")
+    async def propose_secret(
+        deps: D,
+        me: SettingsChanger,
+        method_id: Annotated[str, Path(pattern=METHOD_ID.pattern)],
+        name: Annotated[str, Path(pattern=SECRET_NAME.pattern)],
+        body: SecretBody,
+    ) -> dict[str, Any]:
+        """Set or replace a secret (AC14): encrypted at once, never shown
+        again; it takes effect when an owner approves."""
+        if method_id not in await _settings(deps).methods():
+            raise HTTPException(status_code=404, detail="unknown method")
+        try:
+            sealed = deps.vault.seal(method_id, name, body.value, os.urandom(12))
+        except SecretsUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail={"code": "no_secrets_key", "message": str(exc)}
+            ) from exc
+        out = await propose_setting(deps, me, sealed, body.reason)
+        return out
 
     # --- the website's text (rules AC07, AC08) ------------------------------------------
 

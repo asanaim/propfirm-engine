@@ -202,6 +202,21 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section'));
         """,
     ),
+    (
+        10,
+        """
+        -- rules AC02, AC13, AC14 (8 Nov 2026): payment and withdrawal methods,
+        -- and their secrets (encrypted before they are stored)
+        ALTER TABLE {s}.changes DROP CONSTRAINT changes_kind_check;
+        ALTER TABLE {s}.changes ADD CONSTRAINT changes_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret'));
+        ALTER TABLE {s}.proposals DROP CONSTRAINT proposals_kind_check;
+        ALTER TABLE {s}.proposals ADD CONSTRAINT proposals_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret'));
+        """,
+    ),
 )
 
 

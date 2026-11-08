@@ -179,3 +179,26 @@ it("shows a visitor what a challenge is, what it costs and how it works", async 
   expect(steps?.querySelectorAll("li")).toHaveLength(4);
   expect(screen.getByRole("link", { name: "Choose a challenge" })).toHaveAttribute("href", "/shop");
 });
+
+it("lets a trader choose how to pay when the firm has attached methods (rule AC13)", async () => {
+  const methods = [
+    { method_id: "card", name: "Card", min_cents: 0, max_cents: 0, fixed_charge_cents: 0, percent_charge: "0", instructions: "" },
+    { method_id: "usdt", name: "USDT (TRC-20)", min_cents: 0, max_cents: 0, fixed_charge_cents: 0, percent_charge: "0", instructions: "" },
+  ];
+  const placed = { ord: "ORD00000001", product_id: "lite", size_cents: 500_000, price_cents: 2_400, status: "awaiting_payment", pay_url: "/dev/payments/ORD00000001/complete" };
+  const fetcher = fakeFetch([
+    ["GET", "/catalogue", 200, [LITE]],
+    ["GET", "/payment-methods", 200, methods],
+    ["GET", "/me", 200, { cif: "CIF00000001", email: "a@example.com", full_name: "Ada", date_of_birth: "1990-01-01", residence_country: "DE", status: "registered", created_at: 0, accounts: [], orders: [], progressions: [], onboardings: [] }],
+    ["POST", "/orders", 200, placed],
+  ]);
+  renderWith(<ShopPage />, fakeAuth(), fetcher);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("radio", { name: "USDT (TRC-20)" }));
+  await user.click((await screen.findAllByRole("button", { name: /buy/i }))[0] as HTMLElement);
+  await waitFor(() => {
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true);
+  });
+  const post = fetcher.mock.calls.find(([, init]) => init?.method === "POST");
+  expect(JSON.parse(post?.[1]?.body as string)).toMatchObject({ method: "usdt" });
+});

@@ -125,6 +125,8 @@ services:
       OIDC_ISSUER: http://localhost:8080/realms/propfirm
       OIDC_JWKS_URL: http://keycloak:8080/realms/propfirm/protocol/openid-connect/certs
       PROPFIRM_SANDBOX: "1"  # sandbox payments and screening: development only
+      # payment method secrets (rule AC14): a 32-byte key, base64; set it in .env
+      PROPFIRM_SECRETS_KEY: ${PROPFIRM_SECRETS_KEY:-}
       # leavers' logins disabled at Keycloak (development realm's service account)
       STAFF_IDP_URL: http://keycloak:8080
       STAFF_IDP_CLIENT_ID: staff-cutoff

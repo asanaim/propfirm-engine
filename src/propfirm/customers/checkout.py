@@ -93,6 +93,11 @@ class Checkout:
         self._funded = funded
         self._cases = cases
 
+    @property
+    def adapter(self) -> str:
+        """The payment provider this checkout uses (a method names it)."""
+        return str(self._payments.name)
+
     # --- registration ---------------------------------------------------------------
 
     async def register(
