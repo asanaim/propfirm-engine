@@ -25,6 +25,10 @@
   --on-ok: #ffffff;
   --on-danger: #ffffff;
   --warn: #9a6700;
+  /* news impact, light to deep red; never the only cue (words beside it) */
+  --impact-low: #f4a7a0;
+  --impact-medium: #e5534b;
+  --impact-high: #b42318;
   --info-bg: #eaf0fc;
   --focus: #1a4651;
   --shadow: 0 1px 2px rgb(16 24 40 / 5%), 0 4px 16px rgb(16 24 40 / 6%);
@@ -68,6 +72,9 @@
   --on-ok: #0e1013;
   --on-danger: #0e1013;
   --warn: #e3b341;
+  --impact-low: #7a3530;
+  --impact-medium: #d9473d;
+  --impact-high: #ff5a4f;
   --info-bg: #18233d;
   --focus: #f2a93b;
   --shadow: none;
@@ -1442,23 +1449,27 @@ the headline (left) and toward the next section (bottom) */
   font-weight: 650;
 }
 
+.impact,
+.impact-high {
+  --impact: var(--impact-high);
+}
+
 .impact {
   width: 10px;
   height: 10px;
+  flex: none;
   border-radius: 50%;
-  background: var(--summit);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--summit) 22%, transparent);
+  background: var(--impact);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--impact) 22%, transparent);
 }
 
-/* impact marked by the risk desk: shape and words, never colour alone */
+/* impact marked by the risk desk: light to deep red, always with words */
 .impact-medium {
-  background: var(--warn);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 18%, transparent);
+  --impact: var(--impact-medium);
 }
 
 .impact-low {
-  background: var(--muted);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 16%, transparent);
+  --impact: var(--impact-low);
 }
 
 .impact-label,
@@ -1467,9 +1478,25 @@ the headline (left) and toward the next section (bottom) */
   font-size: 0.75rem;
 }
 
+.impact-label {
+  color: var(--text);
+  background: color-mix(in srgb, var(--impact) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--impact);
+}
+
 .restricted-label {
-  background: var(--danger-bg);
-  color: var(--danger);
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+/* a restricted release: a red bar down its edge */
+.news-item.restricted,
+.mini-news li.restricted {
+  border-left: 4px solid var(--danger);
+}
+
+.mini-news li.restricted {
+  padding-left: var(--space-2);
 }
 
 .news-meta {

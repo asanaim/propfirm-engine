@@ -143,6 +143,12 @@ export interface NewsPage {
 export type Impact = "high" | "medium" | "low";
 const IMPACTS: Impact[] = ["high", "medium", "low"];
 const IMPACT_WORDS: Record<Impact, string> = { high: "High", medium: "Medium", low: "Low" };
+/** Light to deep red, as on the traders' calendar; the words carry the meaning. */
+const IMPACT_SX: Record<Impact, { bgcolor: string; color: string }> = {
+  high: { bgcolor: "#b42318", color: "#ffffff" },
+  medium: { bgcolor: "#c8372d", color: "#ffffff" },
+  low: { bgcolor: "#fde3e0", color: "#7a1b12" },
+};
 
 /** The releases still to come, each with its impact and a way to mark it
 (the risk desk, one person; the restriction itself does not change). */
@@ -167,7 +173,7 @@ function ImpactMarks({ n, now, onDone }: { n: NewsPage; now: number; onDone: () 
                   <Typography sx={{ flex: 1, minWidth: 240 }}>
                     {when(e.ts)} · {e.title}
                   </Typography>
-                  <Chip size="small" label={`${IMPACT_WORDS[impact]} impact`} color={impact === "high" ? "error" : impact === "medium" ? "warning" : "default"} />
+                  <Chip size="small" label={`${IMPACT_WORDS[impact]} impact`} sx={IMPACT_SX[impact]} />
                   {IMPACTS.filter((i) => i !== impact).map((i) => (
                     <ActionButton
                       key={i}
