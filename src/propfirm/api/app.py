@@ -59,6 +59,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from importlib import metadata
 from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
@@ -113,6 +114,7 @@ from propfirm.policy import (
     switch_value,
 )
 from propfirm.rules.calendar import Calendar
+from propfirm.rules.clock import NEW_YORK_17
 from propfirm.rules.news import EventScope
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
@@ -138,6 +140,7 @@ from propfirm.settings.notices import (
     Notices,
     NoticeTemplate,
     NoticeWrapper,
+    utc_text,
 )
 from propfirm.settings.overlay import (
     PAGE_SLUG,
@@ -1191,6 +1194,13 @@ ONB_STATUSES = Literal[
     "provisioned",
     "failed",
 ]
+
+
+def _engine_version() -> str:
+    try:
+        return metadata.version("propfirm-engine")
+    except metadata.PackageNotFoundError:
+        return "unknown"
 
 
 async def _policy(deps: Deps) -> Policy:
@@ -2332,6 +2342,51 @@ def create_app(
     ) -> dict[str, Any]:
         payouts = _payouts(deps)
         return await payout_step(lambda: payouts.deny(po, me.subject, body.reason, deps.clock()))
+
+    @app.get("/admin/general")
+    async def admin_general(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        """The firm-wide basics (rule AC05, General), read only: each with
+        what it means and why it is fixed in the deployment rather than a
+        console setting."""
+        policy = await _policy(deps)
+        now = deps.clock()
+        reset = NEW_YORK_17.next_boundary(now)
+        return [
+            {
+                "name": "Base currency",
+                "value": "US dollar (USD)",
+                "explains": "Prices, balances, fees and payouts are kept in US cents.",
+                "why_fixed": "Every amount in the records is in US cents; another currency "
+                "would need a conversion of every record, not a switch.",
+            },
+            {
+                "name": "Trading day",
+                "value": "17:00 to 17:00 New York time (America/New_York)",
+                "explains": "Daily loss limits and trading days are counted from this "
+                f"reset; the next is at {utc_text(reset)}.",
+                "why_fixed": "The forex market's day close. Moving it would move every "
+                "running account's daily limit in the middle of a day.",
+            },
+            {
+                "name": "Time in records",
+                "value": "UTC, to the millisecond",
+                "explains": "Every record carries its time in UTC; screens may show local time.",
+                "why_fixed": "Records must replay the same way on any machine.",
+            },
+            {
+                "name": "Trading configuration version",
+                "value": policy.trading.config_version,
+                "explains": "The version of the instrument and trading settings in force.",
+                "why_fixed": "Set by the policy file; product changes go through Setting "
+                "proposals.",
+            },
+            {
+                "name": "Engine version",
+                "value": _engine_version(),
+                "explains": "The version of the engine serving this console.",
+                "why_fixed": "Changes with each release.",
+            },
+        ]
 
     @app.get("/admin/security")
     async def admin_security(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
