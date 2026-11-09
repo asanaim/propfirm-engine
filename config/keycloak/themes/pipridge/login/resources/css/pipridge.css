@@ -171,9 +171,8 @@ body.pp-no-webgl::before {
   background: color-mix(in srgb, var(--pp-paper) 70%, transparent);
 }
 
-.pf-v5-c-form-control:focus-within {
-  outline: 2px solid var(--pp-focus);
-  outline-offset: 1px;
+.pf-v5-c-form-control {
+  --pf-v5-c-form-control--focus--after--BorderBottomColor: var(--pp-focus);
 }
 
 .pf-v5-c-button.pf-m-primary {
