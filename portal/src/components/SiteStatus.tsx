@@ -81,3 +81,23 @@ export function MaintenanceBanner({ status }: { status: SiteStatus }) {
     </div>
   );
 }
+
+/** One website section's approved fields (empty until approved, or if
+/site cannot be read: callers fall back to their own words). */
+export function useSection(name: string): Record<string, string> {
+  const api = useApi();
+  const [fields, setFields] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let live = true;
+    api.get<Record<string, SiteSection | undefined>>("/site").then(
+      (s) => {
+        if (live) setFields(s[name]?.fields ?? {});
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, name]);
+  return fields;
+}

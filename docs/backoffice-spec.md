@@ -161,6 +161,15 @@ and push (no such channel exists yet), and the per-customer notification
 history screen (AC19's user detail page; the outbox already keeps every
 email and each send attempt).
 
+AC15 identity checks (10 Nov 2026), decided: provider only, as FTMO and
+FundedNext do. Identity checks run at the provider (Didit: photo ID and a
+selfie); there is no staff-designed upload form, so no document images are
+held by the firm. Staff edit the words traders see while a check is
+required, pending or declined: the `kyc` website section (five fields,
+approved by a second person; figures refused as in AC08). The attempts
+count stays in code. KYC stays on: a funded account cannot open without an
+approved check. The settings hub's KYC card opens the Website screen.
+
 ## Exceptions to AC00 decided by the owners (8 Nov 2026)
 
 Decisions that stay with one person: confirming a customer block on a case

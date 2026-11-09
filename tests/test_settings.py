@@ -1054,3 +1054,29 @@ def test_an_image_is_on_the_site_and_the_mode_round_trips() -> None:
     mode = SiteMode(maintenance=True, registration_open=False)
     kind, value = to_json(mode)
     assert from_json(kind, json.loads(json.dumps(value))) == mode
+
+
+# --- rule AC15: the identity-check texts are a website section ----------------------------
+
+KYC_TEXT = {
+    "required_title": "Verify your identity",
+    "required_text": "We check a photo ID and a selfie at our identity provider.",
+    "pending_title": "Checks and review",
+    "pending_text": "Your check is done; we review your account within one business day.",
+    "declined_text": "The check was declined. Use a valid ID in your own name.",
+}
+
+
+def test_the_identity_check_texts_are_edited_like_any_section() -> None:
+    records = MemoryRecords()
+    kw: dict[str, Any] = {"records": records, "proposals": MemoryProposals(records),
+                          "tiers": OWNERS}  # fmt: skip
+    put = api("PUT", "/admin/site/kyc", {"fields": KYC_TEXT, "reason": "clearer"},
+              user="admin-1", **kw)  # fmt: skip
+    assert put.status_code == 200, put.text
+    _approve(kw, put.json()["proposal"]["id"])
+    assert api("GET", "/site", signed_in=False, **kw).json()["kyc"]["fields"] == KYC_TEXT
+    with pytest.raises(PolicyError):
+        SiteSection("kyc", {**KYC_TEXT, "pending_text": "Pay $50 and we review it faster."})
+    with pytest.raises(PolicyError):
+        SiteSection("kyc", {k: v for k, v in KYC_TEXT.items() if k != "declined_text"})

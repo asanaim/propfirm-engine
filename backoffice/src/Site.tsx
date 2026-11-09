@@ -32,6 +32,7 @@ const TITLES: Record<string, string> = {
   hero: "Top of the home page",
   challenges: "Challenges",
   how: "How it works",
+  kyc: "Identity check texts (KYC)",
   maintenance: "Maintenance page",
   registration_closed: "Registration closed page",
 };

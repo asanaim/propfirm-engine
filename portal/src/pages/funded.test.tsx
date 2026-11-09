@@ -270,3 +270,28 @@ it("checks the payout again once the wallet is saved", async () => {
     expect(reads()).toBe(2);
   });
 });
+
+it("shows the approved identity-check words (rule AC15), keeping the attempts count", async () => {
+  const declined = { ...ONB, status: "verification_declined" as const, kyc_attempts: 1 };
+  const kyc = {
+    fields: {
+      required_title: "Prove it is you",
+      required_text: "A photo ID and a selfie, checked by our provider.",
+      pending_title: "Almost there",
+      pending_text: "We review within a day.",
+      declined_text: "Declined: use an ID in your own name.",
+    },
+    items: [],
+  };
+  renderWith(
+    <OnboardingPage onb="ONB00000001" />,
+    fakeAuth(),
+    fakeFetch([
+      ["GET", "/me/onboardings/ONB00000001", 200, declined],
+      ["GET", "/site", 200, { kyc }],
+    ]),
+  );
+  expect(await screen.findByRole("heading", { name: "Prove it is you" })).toBeInTheDocument();
+  expect(screen.getByText("Declined: use an ID in your own name.")).toBeInTheDocument();
+  expect(screen.getByText(/A photo ID and a selfie, checked by our provider\.\s+Attempts used: 1 of 3\./)).toBeInTheDocument();
+});
