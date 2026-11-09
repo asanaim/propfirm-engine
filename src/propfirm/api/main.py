@@ -323,6 +323,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 SandboxPayouts(),
                 identity=onboardings,
                 cases=cases,
+                notices=settings,
             )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
         tasks.append(asyncio.create_task(_publish_calendars(news, live)))

@@ -22,7 +22,6 @@ import logging
 import smtplib
 import ssl
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import make_msgid
 from typing import Any, Protocol
@@ -30,6 +29,7 @@ from typing import Any, Protocol
 import asyncpg
 
 from propfirm.pgschema import Conn, check_schema
+from propfirm.settings.notices import Notices, utc_text
 
 log = logging.getLogger(__name__)
 NOTICE_KINDS = ("wallet_changed",)
@@ -45,37 +45,25 @@ class Notice:
     body: str
 
 
-def _utc(ts: int) -> str:
-    return datetime.fromtimestamp(ts / 1000, UTC).strftime("%Y-%m-%d %H:%M UTC")
-
-
 def wallet_notice(
     email: str,
     full_name: str,
     address: str,
     previous: str | None,
     ts: int,
+    notices: Notices | None = None,
 ) -> Notice:
-    """The email for a payout wallet added (`previous` None) or changed."""
-    what = "changed" if previous else "added"
-    lines = [
-        f"Hello {full_name},",
-        "",
-        f"The payout wallet of your account was {what} on {_utc(ts)}.",
-        "",
-        f"  New wallet:      {address} (USDT, TRC-20)",
-    ]
-    if previous:
-        lines.append(f"  Previous wallet: {previous}")
-    lines += [
-        "",
-        "Your payouts will be sent to the new wallet.",
-        "",
-        "If you did not make this change, reply to this email at once and do not",
-        "sign in until we have answered: someone else may have access to your",
-        "account. We will never ask for your password or your wallet's keys.",
-    ]
-    return Notice("wallet_changed", email, f"Your payout wallet was {what}", "\n".join(lines))
+    """The email for a payout wallet added (`previous` None) or changed, in
+    the wording in force (rule AC12; the built-in wording by default)."""
+    values = {
+        "full_name": full_name,
+        "action": "changed" if previous else "added",
+        "time": utc_text(ts),
+        "new_wallet": address,
+        "previous_wallet_line": f"\n  Previous wallet: {previous}" if previous else "",
+    }
+    subject, body = (notices or Notices()).render("wallet_changed", values)
+    return Notice("wallet_changed", email, subject, body)
 
 
 async def insert_notice(

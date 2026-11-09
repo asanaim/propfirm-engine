@@ -145,6 +145,22 @@ instead of the registration form, and a banner on every page during
 maintenance. Not yet: uploading images from the console (a file must be
 placed on the site first).
 
+AC12 notification templates (9 Nov 2026). In place: a template per event
+(subject and body with variables in braces) and one email wrapper around
+every body (`{body}` once), each a setting a second admin or owner
+approves (settings migration 12; `GET /admin/notices`, `PUT
+/admin/notices/{event}`, `PUT /admin/notice-wrapper/email`). Until wording
+is approved, the built-in wording is sent, word for word what was sent
+before. The engine refuses a template that could not be sent: unknown
+variables, stray braces, a missing required variable (the payout wallet
+email must name the new wallet and the time), control characters, over
+length. Values are never read as variables. Back office: Notification
+templates screen with live preview on sample values. Events today: the
+payout wallet security email (the only email the firm sends). Not yet: SMS
+and push (no such channel exists yet), and the per-customer notification
+history screen (AC19's user detail page; the outbox already keeps every
+email and each send attempt).
+
 ## Exceptions to AC00 decided by the owners (8 Nov 2026)
 
 Decisions that stay with one person: confirming a customer block on a case
@@ -154,9 +170,8 @@ only add restrictions; cancelling a news window still needs an admin.
 
 ## Not started
 
-AC09 evidence for claims, AC11 SEO and generated sitemap, AC12
-editable notification templates (notifications exist; templates are
-code), AC18 language manager, AC19 to AC22 console lists and
+AC09 evidence for claims, AC11 SEO and generated sitemap, AC18 language
+manager, AC19 to AC22 console lists and
 reports (partly present: not checked), AC23 system pages, AC24 price feed
 failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.

@@ -56,6 +56,9 @@ function MenuItems({ screens }: { screens: Set<string> }) {
         <RaMenu.Item to="/payment-methods" primaryText="Payment methods" leftIcon={<ICONS.methods size={SIZE} strokeWidth={STROKE} />} />
       ) : null}
       {screens.has("site") ? <RaMenu.Item to="/site" primaryText="Website" leftIcon={<ICONS.site size={SIZE} strokeWidth={STROKE} />} /> : null}
+      {screens.has("templates") ? (
+        <RaMenu.Item to="/notices" primaryText="Notification templates" leftIcon={<ICONS.templates size={SIZE} strokeWidth={STROKE} />} />
+      ) : null}
       {screens.has("policies") ? (
         <RaMenu.Item to="/policies" primaryText="Policy pages" leftIcon={<ICONS.policies size={SIZE} strokeWidth={STROKE} />} />
       ) : null}

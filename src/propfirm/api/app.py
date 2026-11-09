@@ -128,6 +128,17 @@ from propfirm.settings.methods import (
     method_json,
 )
 from propfirm.settings.newsdesk import DEFAULT_IMPACT, Author, NewsDesk, NewsRefused, action_view
+from propfirm.settings.notices import (
+    BODY_MAX,
+    CHANNELS,
+    DEFAULT_WRAPPER,
+    EVENTS,
+    SUBJECT_MAX,
+    WRAPPER_MAX,
+    Notices,
+    NoticeTemplate,
+    NoticeWrapper,
+)
 from propfirm.settings.overlay import (
     PAGE_SLUG,
     CountryGating,
@@ -536,6 +547,17 @@ class SecretBody(_Body):
 class SiteSectionBody(_Body):
     fields: dict[str, Annotated[str, StringConstraints(max_length=300)]]
     items: list[dict[str, Annotated[str, StringConstraints(max_length=300)]]] = []
+    reason: Reason
+
+
+class NoticeTemplateBody(_Body):
+    subject: Annotated[str, Field(min_length=1, max_length=SUBJECT_MAX)]
+    body: Annotated[str, Field(min_length=1, max_length=BODY_MAX)]
+    reason: Reason
+
+
+class NoticeWrapperBody(_Body):
+    text: Annotated[str, Field(min_length=1, max_length=WRAPPER_MAX)]
     reason: Reason
 
 
@@ -2612,6 +2634,65 @@ def create_app(
         values = token_values(await _policy(deps))
         sections = await _settings(deps).site()
         return {name: rendered(s, values) for name, s in sorted(sections.items())}
+
+    @app.get("/admin/notices")
+    async def admin_notices(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """The notification templates (rule AC12): each event's variables and
+        built-in wording, the wording in force, and the email wrapper."""
+        current = Notices() if deps.settings is None else await deps.settings.notices()
+        return {
+            "channels": list(CHANNELS),
+            "events": {
+                name: {
+                    "label": e.label,
+                    "variables": dict(e.variables),
+                    "required": sorted(e.required),
+                    "default": {"subject": e.subject, "body": e.body},
+                    "sample": dict(e.sample),
+                }
+                for name, e in EVENTS.items()
+            },
+            "templates": {
+                name: {
+                    "subject": current.template(name).subject,
+                    "body": current.template(name).body,
+                    "approved": name in current.templates,
+                }
+                for name in EVENTS
+            },
+            "wrapper": {"email": current.wrapper},
+            "default_wrapper": DEFAULT_WRAPPER,
+            "limits": {"subject": SUBJECT_MAX, "body": BODY_MAX, "wrapper": WRAPPER_MAX},
+        }
+
+    @app.put("/admin/notices/{event}")
+    async def propose_notice(
+        deps: D,
+        me: SettingsChanger,
+        event: Annotated[str, Path(pattern=r"^[a-z_]{1,40}$")],
+        body: NoticeTemplateBody,
+    ) -> dict[str, Any]:
+        """New wording for one event's email: a proposal a second admin or
+        owner approves (rules AC00, AC12)."""
+        try:
+            setting = NoticeTemplate(event, body.subject, body.body)
+        except PolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await propose_setting(deps, me, setting, body.reason)
+
+    @app.put("/admin/notice-wrapper/{channel}")
+    async def propose_wrapper(
+        deps: D,
+        me: SettingsChanger,
+        channel: Annotated[str, Path(pattern=r"^[a-z]{1,20}$")],
+        body: NoticeWrapperBody,
+    ) -> dict[str, Any]:
+        """New text around every email body ({body} once), by proposal."""
+        try:
+            setting = NoticeWrapper(channel, body.text)
+        except PolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await propose_setting(deps, me, setting, body.reason)
 
     @app.get("/site/status")
     async def site_status(deps: D) -> dict[str, Any]:
