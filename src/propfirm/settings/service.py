@@ -39,6 +39,7 @@ from propfirm.settings.methods import (
     methods_in_force,
     secrets_in_force,
 )
+from propfirm.settings.notices import Notices
 from propfirm.settings.overlay import (
     CountryGating,
     PageVersion,
@@ -48,6 +49,7 @@ from propfirm.settings.overlay import (
     StandIn,
     apply_changes,
     limits_rule_set,
+    notices,
     policy_pages,
     site_mode,
     site_sections,
@@ -189,6 +191,10 @@ class Settings:
     async def site(self) -> dict[str, SiteSection]:
         """The website text approved for each section (rule AC07)."""
         return site_sections(await self._records.applied_changes())
+
+    async def notices(self) -> Notices:
+        """Notification templates in force (rule AC12)."""
+        return notices(await self._records.applied_changes())
 
     async def mode(self) -> SiteMode:
         """Maintenance and registration in force (rule AC17)."""

@@ -48,6 +48,17 @@ from propfirm.settings.methods import (
     secret_from_json,
     secret_json,
 )
+from propfirm.settings.notices import (
+    NOTICE_TEMPLATE,
+    NOTICE_WRAPPER,
+    Notices,
+    NoticeTemplate,
+    NoticeWrapper,
+    template_from_json,
+    template_json,
+    wrapper_from_json,
+    wrapper_json,
+)
 from propfirm.settings.site import (
     SITE_MODE,
     SITE_SECTION,
@@ -131,6 +142,8 @@ type Setting = (
     | PolicyPage
     | SiteSection
     | SiteMode
+    | NoticeTemplate
+    | NoticeWrapper
     | PaymentMethod
     | MethodSecret
 )
@@ -232,6 +245,20 @@ def site_sections(changes: Iterable[SettingChange]) -> dict[str, SiteSection]:
     return out
 
 
+def notices(changes: Iterable[SettingChange]) -> Notices:
+    """The notification templates in force (rule AC12): the latest approved
+    per event and the latest email wrapper; built-in wording otherwise."""
+    templates: dict[str, NoticeTemplate] = {}
+    wrapper = Notices().wrapper
+    for change in sorted(changes, key=lambda c: c.id):
+        match change.setting:
+            case NoticeTemplate() as t:
+                templates[t.event] = t
+            case NoticeWrapper() as w:
+                wrapper = w.text
+    return Notices(templates, wrapper)
+
+
 def site_mode(changes: Iterable[SettingChange]) -> SiteMode:
     """The site mode in force (rule AC17): the latest approved, else open."""
     out = SiteMode()
@@ -286,6 +313,10 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
             return SITE_SECTION, section_json(setting)
         case SiteMode():
             return SITE_MODE, mode_json(setting)
+        case NoticeTemplate():
+            return NOTICE_TEMPLATE, template_json(setting)
+        case NoticeWrapper():
+            return NOTICE_WRAPPER, wrapper_json(setting)
         case PaymentMethod():
             return PAYMENT_METHOD, method_json(setting)
         case MethodSecret():
@@ -322,6 +353,10 @@ def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
         return section_from_json(value)
     if kind == SITE_MODE:
         return mode_from_json(value)
+    if kind == NOTICE_TEMPLATE:
+        return template_from_json(value)
+    if kind == NOTICE_WRAPPER:
+        return wrapper_from_json(value)
     if kind == PAYMENT_METHOD:
         return method_from_json(value)
     if kind == METHOD_SECRET:

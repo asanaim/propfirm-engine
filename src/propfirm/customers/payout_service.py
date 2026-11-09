@@ -28,6 +28,7 @@ from propfirm.customers.providers import PayoutProvider
 from propfirm.customers.store import CifRecord, CustomerStore
 from propfirm.journal.inputs import DebitPayout
 from propfirm.policy import PolicySource, parse_percent
+from propfirm.settings.notices import Notices
 
 log = logging.getLogger(__name__)
 NETWORK = "TRC20"  # USDT on TRON, the only payout method [CONFIRMED]
@@ -43,6 +44,10 @@ def _failing(e: Eligibility) -> list[str]:
     return [c.name for c in e.checks if c.status == FAIL]
 
 
+class NoticeSource(Protocol):
+    async def notices(self) -> Notices: ...
+
+
 class Payouts:
     def __init__(
         self,
@@ -55,6 +60,7 @@ class Payouts:
         *,
         identity: OnboardingStore | None = None,  # Tier 2 identity checks
         cases: Casework | None = None,
+        notices: NoticeSource | None = None,  # notification templates (rule AC12)
         wait_s: float = 5.0,
     ) -> None:
         self._store = store
@@ -65,6 +71,7 @@ class Payouts:
         self._provider = provider
         self._identity = identity
         self._cases = cases
+        self._notices = notices
         self._wait_s = wait_s
 
     @property
@@ -156,8 +163,14 @@ class Payouts:
         if not tron_address_valid(address):
             raise PayoutRefused("invalid", "not a TRON (TRC-20) address")
         previous = await self._store.wallet(cif.cif)
+        wording = None if self._notices is None else await self._notices.notices()
         notice = wallet_notice(
-            cif.email, cif.full_name, address, previous.address if previous else None, ts
+            cif.email,
+            cif.full_name,
+            address,
+            previous.address if previous else None,
+            ts,
+            wording,
         )
         detail = {"mfa": mfa, "auth_time": auth_time}
         return await self._store.add_wallet(cif.cif, NETWORK, address, subject, ts, detail, notice)

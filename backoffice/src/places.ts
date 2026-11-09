@@ -39,6 +39,7 @@ export const PLACES: readonly Place[] = [
   { screen: "audit", label: "Security log", path: "/audit", icon: "audit", keywords: "audit trail log entries" },
   { screen: "methods", label: "Payment methods", path: "/payment-methods", icon: "methods", keywords: "gateways deposits withdrawal methods charges" },
   { screen: "site", label: "Website", path: "/site", icon: "site", keywords: "website content frontend sections hero" },
+  { screen: "templates", label: "Notification templates", path: "/notices", icon: "templates", keywords: "email templates wording wrapper messages" },
   { screen: "policies", label: "Policy pages", path: "/policies", icon: "policies", keywords: "terms privacy policy legal" },
 ];
 
@@ -88,12 +89,12 @@ export const AREAS: readonly Area[] = [
   {
     key: "notifications",
     title: "Notification templates",
-    explains: "Email, SMS and push wording per event, with one wrapper per channel.",
+    explains: "The wording of each email the firm sends, and one wrapper around them all. A second person approves. Email only today.",
     icon: "templates",
-    state: "planned",
-    path: null,
-    screen: null,
-    rule: "AC12",
+    state: "open",
+    path: "/notices",
+    screen: "templates",
+    rule: null,
     keywords: "email sms push templates wording",
   },
   {

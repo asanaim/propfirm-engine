@@ -231,6 +231,22 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             'payment_method', 'method_secret', 'site_mode'));
         """,
     ),
+    (
+        12,
+        """
+        -- rule AC12 (9 Nov 2026): notification templates and the email wrapper
+        ALTER TABLE {s}.changes DROP CONSTRAINT changes_kind_check;
+        ALTER TABLE {s}.changes ADD CONSTRAINT changes_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret', 'site_mode', 'notice_template',
+            'notice_wrapper'));
+        ALTER TABLE {s}.proposals DROP CONSTRAINT proposals_kind_check;
+        ALTER TABLE {s}.proposals ADD CONSTRAINT proposals_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret', 'site_mode', 'notice_template',
+            'notice_wrapper'));
+        """,
+    ),
 )
 
 
