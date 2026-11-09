@@ -10,7 +10,9 @@
   color: var(--pp-muted);
 }
 
-/* staff logins are created by admins: no self-registration link here */
-#kc-registration-container {
+/* staff logins are created by admins: no self-registration link, and no
+empty footer band where it was */
+#kc-registration-container,
+.pf-v5-c-login__main-footer:has(#kc-registration-container) {
   display: none;
 }
