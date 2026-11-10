@@ -11,6 +11,8 @@ interface Shape {
   max_items: number;
   optional?: string[];
   images?: string[];
+  figures?: string[];
+  private?: string[];
 }
 export interface SiteMode {
   maintenance: boolean;
@@ -33,6 +35,7 @@ const TITLES: Record<string, string> = {
   challenges: "Challenges",
   how: "How it works",
   kyc: "Identity check texts (KYC)",
+  stats: "Statistics strip (figures with evidence)",
   maintenance: "Maintenance page",
   registration_closed: "Registration closed page",
 };
@@ -82,7 +85,11 @@ function SectionEditor({ name, shape, data, onDone }: { name: string; shape: Sha
         set(e.target.value);
       }}
       helperText={
-        isImage(key)
+        shape.private?.includes(key)
+          ? "Required: the record that backs this figure and where it is kept. Approvers see it; the public site never does (rule AC09)."
+          : shape.figures?.includes(key)
+            ? "A figure such as $500M+, 140+, 98% or 4.8/5"
+            : isImage(key)
           ? "Optional: the path of an image on the site, such as /brand/closed.svg"
           : value.includes("{")
             ? `Shows: ${preview(value, data.tokens)}`

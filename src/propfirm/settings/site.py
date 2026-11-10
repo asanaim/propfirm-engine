@@ -39,6 +39,8 @@ class Shape:
     max_items: int = 0
     optional: frozenset[str] = frozenset()  # fields that may be left empty
     images: frozenset[str] = frozenset()  # fields holding an image address
+    figures: frozenset[str] = frozenset()  # item fields where a typed figure is the point
+    private: frozenset[str] = frozenset()  # item fields kept off the public site
 
 
 SECTIONS: dict[str, Shape] = {
@@ -55,6 +57,18 @@ SECTIONS: dict[str, Shape] = {
             "pending_text": 400,
             "declined_text": 300,
         }
+    ),
+    # rule AC09 (10 Nov 2026): figures such as traders served or amount paid
+    # appear only with the evidence for each on file. The evidence (what
+    # record backs the figure, and where it is kept) is required, shown to
+    # staff and approvers, never on the public site. No items: the strip is
+    # not shown.
+    "stats": Shape(
+        {"heading": 60},
+        {"label": 40, "value": 16, "evidence": 300},
+        4,
+        figures=frozenset({"value"}),
+        private=frozenset({"evidence"}),
     ),
     "maintenance": Shape(
         {"title": 80, "message": 600, "image": 300},
@@ -101,9 +115,25 @@ class SiteSection:
         for item in self.items:
             if set(item) != set(shape.items):
                 raise PolicyError(f"{self.section}: each item has {sorted(shape.items)}")
-            texts += [(k, v, shape.items[k]) for k, v in item.items()]
+            for k, v in item.items():
+                if k in shape.figures:
+                    check_figure(k, v, shape.items[k])
+                else:
+                    texts.append((k, v, shape.items[k]))
         for key, text, longest in texts:
             check_text(key, text, longest)
+
+
+FIGURE = re.compile(r"^[$€£]?[0-9][0-9.,]*\s?(%|[KMB]\+?|\+)?$|^[0-9]+(\.[0-9]+)?/[0-9]+$|^24/7$")
+
+
+def check_figure(key: str, value: str, longest: int) -> None:
+    """A statistic's figure: digits with an optional currency sign, K, M or B,
+    plus or percent ("$500M+", "140+", "4.8/5"); nothing else."""
+    if not isinstance(value, str) or not 1 <= len(value) <= longest:
+        raise PolicyError(f"{key}: 1 to {longest} characters")
+    if not FIGURE.match(value):
+        raise PolicyError(f"{key}: a figure such as $500M+, 140+, 98% or 4.8/5")
 
 
 def check_image(key: str, address: str, longest: int) -> None:
@@ -230,7 +260,10 @@ def section_from_json(value: Mapping[str, Any]) -> SiteSection:
 
 
 def rendered(s: SiteSection, values: Mapping[str, str]) -> dict[str, Any]:
+    """A section as the public site shows it: tokens filled, private fields
+    (a statistic's evidence) left out."""
+    hidden = SECTIONS[s.section].private
     return {
         "fields": {k: render(v, values) for k, v in s.fields.items()},
-        "items": [{k: render(v, values) for k, v in i.items()} for i in s.items],
+        "items": [{k: render(v, values) for k, v in i.items() if k not in hidden} for i in s.items],
     }
