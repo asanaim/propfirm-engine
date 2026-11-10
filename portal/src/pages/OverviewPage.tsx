@@ -303,18 +303,21 @@ function Landing({ onSignIn, onSignUp, registering }: { onSignIn: () => void; on
           {hero?.lead ?? "Prove your trading on a simulated account. Pass, and trade a funded account with a share of every profit."}
         </p>
         <div className="row">
-          <Link className="button button-primary button-large" href="/shop">
-            {hero?.button ?? "Choose a challenge"}
-          </Link>
           {registering ? (
-            <button type="button" className="button button-secondary button-large" onClick={onSignUp}>
-              Create a free account
+            <button type="button" className="button button-primary button-large" onClick={onSignUp}>
+              Get started
             </button>
           ) : null}
-          <button type="button" className="button button-quiet button-large" onClick={onSignIn}>
+          <Link className={`button button-large ${registering ? "button-secondary" : "button-primary"}`} href="/shop">
+            {hero?.button ?? "Choose a challenge"}
+          </Link>
+        </div>
+        <p className="hero-signin muted">
+          Already a trader?{" "}
+          <button type="button" className="link-button" onClick={onSignIn}>
             Sign in
           </button>
-        </div>
+        </p>
         <Ridge
           target={first?.profit_target_percent === null || first === undefined ? undefined : formatPercent(first.profit_target_percent)}
           maxLoss={first === undefined ? undefined : formatPercent(first.max_loss_percent)}
@@ -324,11 +327,11 @@ function Landing({ onSignIn, onSignUp, registering }: { onSignIn: () => void; on
       </section>
 
       {products !== null && products.length > 0 && (
-        <section className="tiles" aria-labelledby="tiles-title">
+        <section className="tiles" id="challenges" aria-labelledby="tiles-title">
           <h2 id="tiles-title" data-reveal="">
             {site.challenges?.fields.heading ?? "Challenges"}
           </h2>
-          <ul className="tile-list">
+          <ul className="tile-list" aria-label="Challenges: swipe for more on a phone">
             {products.map((p) => {
               const from = cheapest(p);
               const evaluations = p.stages.filter((st) => st.stage !== "funded").length;
@@ -354,7 +357,7 @@ function Landing({ onSignIn, onSignUp, registering }: { onSignIn: () => void; on
         </section>
       )}
 
-      <section className="how" aria-labelledby="how-title">
+      <section className="how" id="how" aria-labelledby="how-title">
         <h2 id="how-title" data-reveal="">
           {how?.fields.heading ?? "How it works"}
         </h2>
@@ -368,6 +371,64 @@ function Landing({ onSignIn, onSignUp, registering }: { onSignIn: () => void; on
         </ol>
         <p className="muted small">{how?.fields.footnote ?? "All trading here is simulated. Each challenge's rules are shown before you buy."}</p>
       </section>
+
+      <section className="faq" id="faq" aria-labelledby="faq-title">
+        <h2 id="faq-title" data-reveal="">
+          Questions traders ask
+        </h2>
+        <div className="faq-list">
+          {FAQ.map((q) => (
+            <details key={q.q} data-reveal="">
+              <summary>{q.q}</summary>
+              <p className="muted">{q.a}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+
+      <section className="closing" aria-labelledby="closing-title" data-reveal="">
+        <h2 id="closing-title">Start your challenge today</h2>
+        <p className="muted">Pick an evaluation, trade it on a simulated account, and earn a share of the profit on a funded account.</p>
+        <div className="row">
+          {registering ? (
+            <button type="button" className="button button-primary button-large" onClick={onSignUp}>
+              Get started
+            </button>
+          ) : null}
+          <Link className="button button-secondary button-large" href="/shop">
+            See the challenges
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }
+
+/** Plain answers that hold for every product; figures live on each
+challenge's own rules (rule AC08: no typed figures). */
+const FAQ: { q: string; a: string }[] = [
+  {
+    q: "Is the trading real?",
+    a: "No. Every account here, in the evaluation and when funded, is simulated. You trade real market prices without risking your own money beyond the challenge fee.",
+  },
+  {
+    q: "How do I join?",
+    a: "Press Get started, create your account with your email and a password, and add an authenticator app. Then choose a challenge and pay for it.",
+  },
+  {
+    q: "What are the rules?",
+    a: "Each challenge shows its profit target, daily loss limit and maximum loss before you buy, and your account page shows them while you trade. The trading day resets at 17:00 New York time.",
+  },
+  {
+    q: "What happens when I pass?",
+    a: "We check your identity with our provider (a photo ID and a selfie), review the account, and you sign the funded agreement. Then your funded account opens.",
+  },
+  {
+    q: "How am I paid?",
+    a: "From a funded account you request a payout of your share of the profit. It is sent to your USDT wallet on the TRON network (TRC-20).",
+  },
+  {
+    q: "Can I trade during news?",
+    a: "On funded accounts, trading around the restricted high-impact releases shown in the economic calendar is not allowed. Evaluations are not restricted.",
+  },
+];
