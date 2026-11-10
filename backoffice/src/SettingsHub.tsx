@@ -1,6 +1,7 @@
 import { Alert, Box, Button, Card, CardActions, CardContent, Chip, InputAdornment, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { useState } from "react";
 import { Link, Title, usePermissions } from "react-admin";
+import { config } from "./config";
 import { ICONS, SIZE, STROKE } from "./icons";
 import { type Area, canOpen, filterAreas } from "./places";
 import { screensFor } from "./screens";
@@ -72,6 +73,56 @@ export function SettingsHub() {
           <AreaCard key={a.key} area={a} screens={screens} />
         ))}
       </Box>
+    </Box>
+  );
+}
+
+interface Basic {
+  name: string;
+  value: string;
+  explains: string;
+  why_fixed: string;
+}
+
+/** The firm-wide basics behind the General card (rule AC05), read only. */
+export function GeneralPage() {
+  const { result } = useGet<Basic[]>("/admin/general");
+  const site: Basic = {
+    name: "Site name",
+    value: config.brand,
+    explains: "The firm's name in the portal, the back office, emails and sign-in pages.",
+    why_fixed: "Set when the firm is deployed, with the logo; a new name needs new artwork too.",
+  };
+  return (
+    <Box sx={{ p: 2 }}>
+      <Title title="General" />
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        The basics every account, price and record depends on. They are set in the deployment, not here, so a slip in the console can never change them for running accounts.
+      </Typography>
+      {result.state === "loading" ? <Typography>Loading…</Typography> : null}
+      {result.state === "error" ? <Alert severity="error">{result.message}</Alert> : null}
+      {result.state === "ready" ? (
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Setting</TableCell>
+              <TableCell>Value</TableCell>
+              <TableCell>What it means</TableCell>
+              <TableCell>Why it is fixed</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {[site, ...result.data].map((b) => (
+              <TableRow key={b.name}>
+                <TableCell sx={{ fontWeight: 600 }}>{b.name}</TableCell>
+                <TableCell>{b.value}</TableCell>
+                <TableCell>{b.explains}</TableCell>
+                <TableCell>{b.why_fixed}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : null}
     </Box>
   );
 }

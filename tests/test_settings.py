@@ -5,6 +5,7 @@ import asyncio
 import copy
 import dataclasses
 import json
+import re
 import tomllib
 from collections.abc import Sequence
 from fractions import Fraction
@@ -1054,3 +1055,19 @@ def test_an_image_is_on_the_site_and_the_mode_round_trips() -> None:
     mode = SiteMode(maintenance=True, registration_open=False)
     kind, value = to_json(mode)
     assert from_json(kind, json.loads(json.dumps(value))) == mode
+
+
+# --- rule AC05: the General card opens the firm-wide basics, read only ---------------------
+
+
+def test_the_general_page_lists_the_fixed_basics_with_why_each_is_fixed() -> None:
+    general = api("GET", "/admin/general")
+    assert general.status_code == 200, general.text
+    items = {g["name"]: g for g in general.json()}
+    assert items["Base currency"]["value"] == "US dollar (USD)"
+    day = items["Trading day"]
+    assert "America/New_York" in day["value"]
+    assert re.search(r"the next is at \d{4}-\d\d-\d\d (21|22):00 UTC\.$", day["explains"])
+    assert all(g["why_fixed"] for g in general.json())
+    refused = api("GET", "/admin/general", roles=("trader",), user="u9")
+    assert refused.status_code in (401, 403)
