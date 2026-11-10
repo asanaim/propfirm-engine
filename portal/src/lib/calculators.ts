@@ -15,6 +15,7 @@ export interface ToolInstrument {
   quote_currency: string;
   pip: string; // "0.0001"
   pip_name: "pip" | "point";
+  commission_percent: string; // "0", or e.g. "0.0525"
 }
 
 export function leverageOf(spec: ToolInstrument): number {
