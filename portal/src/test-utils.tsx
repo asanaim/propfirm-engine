@@ -9,6 +9,7 @@ export function fakeAuth(change: Partial<Auth> = {}): Auth {
     session: { subject: "u1", email: "u1@example.com", name: null, amr: ["pwd"], mfa: false, authTime: 0 },
     error: null,
     signIn: vi.fn(() => Promise.resolve()),
+    signUp: vi.fn(() => Promise.resolve()),
     signOut: vi.fn(() => Promise.resolve()),
     stepUp: vi.fn(() => Promise.resolve()),
     setUpAuthenticator: vi.fn(() => Promise.resolve()),

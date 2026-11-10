@@ -1,4 +1,4 @@
-import { LogIn, LogOut, Moon, Sun } from "lucide-react";
+import { LogIn, LogOut, Moon, Sun, UserPlus } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { config } from "../config";
@@ -86,9 +86,16 @@ export function Layout({ children }: { children: ReactNode }) {
               <LogOut aria-hidden="true" /> Sign out
             </button>
           ) : (
-            <button type="button" className="button button-quiet" onClick={() => void auth.signIn()}>
-              <LogIn aria-hidden="true" /> Sign in
-            </button>
+            <>
+              <button type="button" className="button button-quiet" onClick={() => void auth.signIn()}>
+                <LogIn aria-hidden="true" /> Sign in
+              </button>
+              {site.status.registering ? (
+                <button type="button" className="button button-primary button-small" onClick={() => void auth.signUp("/")}>
+                  <UserPlus aria-hidden="true" /> Sign up
+                </button>
+              ) : null}
+            </>
           )}
         </div>
       </header>

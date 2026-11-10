@@ -114,8 +114,8 @@ body.pp-no-webgl::before {
 #kc-header-wrapper::before {
   content: "";
   display: block;
-  height: 40px;
-  width: 168px;
+  height: 52px;
+  width: 220px;
   margin: 0 auto;
   background: var(--keycloak-logo-url) no-repeat center / contain;
 }

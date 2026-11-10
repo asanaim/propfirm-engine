@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu as RaMenu, usePermissions } from "react-admin";
 import { Terrain } from "./components/Terrain";
 import { ICONS, SIZE, STROKE } from "./icons";
-import { useTilt } from "./motion";
 import { screensFor } from "./screens";
 
 /** Numbers each menu item (--i) for the staggered entrance. */
@@ -15,9 +14,10 @@ function useStagger(root: React.RefObject<HTMLElement | null>, count: number): v
   }, [root, count]);
 }
 
-/** The left menu in the pipridge style: items on a plane that leans toward
-the pointer, each rising in from depth and lifting when hovered, over the
-ridge terrain drifting at the foot (still for reduced motion). */
+/** The left menu in the pipridge style: the menu itself stays still; only
+the item under the pointer moves, lifting toward the reader with its icon
+turning, and items rise in from depth when the page opens. The ridge
+terrain drifts at the foot (all still for reduced motion). */
 export function Menu() {
   const { permissions } = usePermissions<string[]>();
   const screens = screensFor(permissions ?? []);
@@ -27,7 +27,6 @@ export function Menu() {
   const noWebgl = useCallback(() => {
     setWebgl(false);
   }, []);
-  useTilt(plane, 3, area);
   useStagger(plane, screens.size);
   return (
     <div className="menu-3d" ref={area}>

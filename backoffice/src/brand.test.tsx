@@ -14,6 +14,13 @@ describe("the pipridge look in the back office", () => {
     expect(read("motion.ts")).toBe(read("../../portal/src/lib/motion.ts"));
   });
 
+  it("moves only the item under the pointer, never the whole menu", () => {
+    const css = read("backoffice.css");
+    const plane = css.slice(css.indexOf(".menu-3d-plane {"), css.indexOf("}", css.indexOf(".menu-3d-plane {")));
+    expect(plane).not.toMatch(/rotate|--rx|--ry/);
+    expect(read("Menu.tsx")).not.toContain("useTilt");
+  });
+
   it("keeps the menu still for people who prefer reduced motion", () => {
     const css = read("backoffice.css");
     const still = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
