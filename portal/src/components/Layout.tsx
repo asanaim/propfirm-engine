@@ -36,6 +36,14 @@ function useTheme(): [Theme, () => void] {
   return [theme, toggle];
 }
 
+/** Before sign in: the public site's own sections, as FTMO and FundedNext
+show (the trader dashboard's pages appear only after sign in). */
+const PUBLIC_NAV = [
+  { href: "/shop", label: "Challenges" },
+  { href: "/#how", label: "How it works" },
+  { href: "/#faq", label: "FAQ" },
+];
+
 const NAV = [
   { href: "/", label: "Overview" },
   { href: "/accounts", label: "Accounts" },
@@ -63,13 +71,27 @@ export function Layout({ children }: { children: ReactNode }) {
         </Link>
         <nav aria-label="Main">
           <ul>
-            {NAV.map((item) => (
-              <li key={item.href}>
-                <Link href={item.href} aria-current={path === item.href ? "page" : undefined}>
-                  {item.label}
-                </Link>
-              </li>
-            ))}
+            {auth.status === "signed_in"
+              ? NAV.map((item) => (
+                  <li key={item.href}>
+                    <Link href={item.href} aria-current={path === item.href ? "page" : undefined}>
+                      {item.label}
+                    </Link>
+                  </li>
+                ))
+              : PUBLIC_NAV.map((item) =>
+                  item.href.startsWith("/#") ? (
+                    <li key={item.href}>
+                      <a href={item.href}>{item.label}</a>
+                    </li>
+                  ) : (
+                    <li key={item.href}>
+                      <Link href={item.href} aria-current={path === item.href ? "page" : undefined}>
+                        {item.label}
+                      </Link>
+                    </li>
+                  ),
+                )}
           </ul>
         </nav>
         <div className="topbar-actions">
@@ -92,7 +114,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </button>
               {site.status.registering ? (
                 <button type="button" className="button button-primary button-small" onClick={() => void auth.signUp("/")}>
-                  <UserPlus aria-hidden="true" /> Sign up
+                  <UserPlus aria-hidden="true" /> Get started
                 </button>
               ) : null}
             </>
