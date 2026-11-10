@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ClosedPage, MaintenanceBanner, OPEN } from "../components/SiteStatus";
 import { fakeAuth, fakeFetch, renderWith } from "../test-utils";
@@ -51,5 +51,27 @@ describe("the home page while closed", () => {
     renderWith(<OverviewPage />, fakeAuth(), fetcher);
     expect(await screen.findByRole("heading", { name: "Registration is closed for now" })).toBeInTheDocument();
     expect(screen.queryByText("Create your trader profile")).toBeNull();
+  });
+});
+
+describe("joining from the home page", () => {
+  it("offers sign up, which opens Keycloak's registration", async () => {
+    const auth = fakeAuth({ status: "anonymous", session: null });
+    renderWith(<OverviewPage />, auth, fakeFetch([["GET", "/site/status", 200, OPEN], ["GET", "/site", 200, {}], ["GET", "/catalogue", 200, []]]));
+    const join = await screen.findByRole("button", { name: "Create a free account" });
+    join.click();
+    expect(auth.signUp).toHaveBeenCalledWith("/");
+  });
+
+  it("does not offer sign up while registration is closed", async () => {
+    renderWith(
+      <OverviewPage />,
+      fakeAuth({ status: "anonymous", session: null }),
+      fakeFetch([["GET", "/site/status", 200, CLOSED], ["GET", "/site", 200, {}], ["GET", "/catalogue", 200, []]]),
+    );
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Create a free account" })).toBeNull();
+    });
   });
 });

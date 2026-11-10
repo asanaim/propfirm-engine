@@ -277,8 +277,6 @@ pre.json {
   position: relative;
   z-index: 1;
   transform-style: preserve-3d;
-  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
-  transition: transform 420ms var(--ease-spring);
 }
 
 .menu-3d .RaMenuItemLink-root {
@@ -297,9 +295,17 @@ pre.json {
 
 .menu-3d .RaMenuItemLink-root:hover,
 .menu-3d .RaMenuItemLink-root:focus-visible {
-  transform: translateZ(22px) translateX(3px);
+  transform: translateZ(26px) translateX(4px) rotateY(-6deg);
   box-shadow: var(--bo-lift);
   background-color: var(--bo-glass);
+}
+
+.menu-3d .RaMenuItemLink-icon svg {
+  transition: transform 320ms var(--ease-spring);
+}
+
+.menu-3d .RaMenuItemLink-root:hover .RaMenuItemLink-icon svg {
+  transform: scale(1.15) rotate(-8deg);
 }
 
 .menu-3d .RaMenuItemLink-active {
@@ -395,6 +401,52 @@ pre.json {
   .menu-3d .RaMenuItemLink-root:hover,
   .menu-3d .RaMenuItemLink-active {
     transition: none;
+    transform: none;
+  }
+}
+
+/* boxes on every page: rise in when the page opens, lift under the pointer */
+.RaLayout-content .MuiCard-root,
+.RaLayout-content .MuiPaper-root.MuiPaper-elevation1 {
+  animation: box-rise 520ms var(--ease-out) backwards;
+  transition:
+    box-shadow 260ms var(--ease-out),
+    transform 320ms var(--ease-spring);
+}
+
+.RaLayout-content .MuiCard-root:nth-of-type(2) {
+  animation-delay: 60ms;
+}
+
+.RaLayout-content .MuiCard-root:nth-of-type(3) {
+  animation-delay: 120ms;
+}
+
+.RaLayout-content .MuiCard-root:nth-of-type(n + 4) {
+  animation-delay: 180ms;
+}
+
+.RaLayout-content .MuiCard-root:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--bo-lift);
+}
+
+@keyframes box-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .RaLayout-content .MuiCard-root,
+  .RaLayout-content .MuiPaper-root.MuiPaper-elevation1 {
+    animation: none;
+    transition: none;
+  }
+
+  .RaLayout-content .MuiCard-root:hover,
+  .menu-3d .RaMenuItemLink-root:hover .RaMenuItemLink-icon svg {
     transform: none;
   }
 }

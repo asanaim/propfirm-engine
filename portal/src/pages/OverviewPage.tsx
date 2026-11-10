@@ -29,7 +29,7 @@ export function OverviewPage() {
         </div>
       );
     }
-    return <Landing onSignIn={() => void auth.signIn("/")} />;
+    return <Landing onSignIn={() => void auth.signIn("/")} onSignUp={() => void auth.signUp("/")} registering={site.status.registering} />;
   }
   if (me.status === "unregistered") {
     if (!site.status.registering) {
@@ -266,7 +266,7 @@ export interface SiteSection {
 export type Site = Partial<Record<"hero" | "challenges" | "how", SiteSection>>;
 
 /** The signed-out home page: what a challenge is, what it costs, how it works. */
-function Landing({ onSignIn }: { onSignIn: () => void }) {
+function Landing({ onSignIn, onSignUp, registering }: { onSignIn: () => void; onSignUp: () => void; registering: boolean }) {
   const api = useApi();
   const [products, setProducts] = useState<Product[] | null>(null);
   const [site, setSite] = useState<Site>({});
@@ -306,7 +306,12 @@ function Landing({ onSignIn }: { onSignIn: () => void }) {
           <Link className="button button-primary button-large" href="/shop">
             {hero?.button ?? "Choose a challenge"}
           </Link>
-          <button type="button" className="button button-secondary button-large" onClick={onSignIn}>
+          {registering ? (
+            <button type="button" className="button button-secondary button-large" onClick={onSignUp}>
+              Create a free account
+            </button>
+          ) : null}
+          <button type="button" className="button button-quiet button-large" onClick={onSignIn}>
             Sign in
           </button>
         </div>
