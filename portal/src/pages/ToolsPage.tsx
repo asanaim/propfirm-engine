@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useApi } from "../api/ApiProvider";
 import { Loading, Notice } from "../components/ui";
+import { ToolsNav } from "./ToolsExtra";
 import { margin, parse, pipValue, positionSize, profit, type ToolInstrument, usd, usdPerQuote } from "../lib/calculators";
 
 type Tool = "size" | "pip" | "margin" | "profit";
@@ -80,7 +81,8 @@ export function ToolsPage() {
     <div className="page tools">
       <h1>Trading calculators</h1>
       <p className="lead">Plan a trade before you place it. Account currency: US dollars. These are estimates; your account page shows the platform&apos;s own figures.</p>
-      <div className="tool-tabs" role="tablist" aria-label="Calculators">
+      <ToolsNav />
+      <div className="tool-tabs tool-tabs-small" role="tablist" aria-label="Calculators">
         {TOOLS.map((t) => (
           <button key={t.key} type="button" role="tab" aria-selected={tool === t.key} className={tool === t.key ? "active" : undefined} onClick={() => { setTool(t.key); }}>
             {t.label}

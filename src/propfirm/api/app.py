@@ -1512,6 +1512,7 @@ def create_app(
         for i in (await _policy(deps)).trading.instruments:
             forex = i.symbol.asset_class == AssetClass.FOREX
             places = i.digits - 1 if forex else i.digits
+            pct = Decimal(i.commission.numerator * 100) / Decimal(i.commission.denominator)
             out.append(
                 {
                     "symbol": i.name,
@@ -1522,6 +1523,8 @@ def create_app(
                     "quote_currency": i.quote_currency,
                     "pip": f"{Decimal(1).scaleb(-places):f}",
                     "pip_name": "pip" if forex else "point",
+                    # charged once when a position opens, as a share of the notional
+                    "commission_percent": f"{pct.normalize():f}",
                 }
             )
         return out

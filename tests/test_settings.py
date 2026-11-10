@@ -1109,7 +1109,10 @@ def test_the_calculators_get_each_symbols_specs_without_prices() -> None:
     assert by["EUR/USD"] | {} == {
         "symbol": "EUR/USD", "asset_class": "forex", "digits": 5, "contract_size": 100_000,
         "leverage": "100/1", "quote_currency": "USD", "pip": "0.0001", "pip_name": "pip",
+        "commission_percent": "0",
     }  # fmt: skip
+    crypto = [i for i in got.json() if i["asset_class"] == "crypto"]
+    assert crypto and all(i["commission_percent"] != "0" for i in crypto)
     assert by["USD/JPY"]["pip"] == "0.01" and by["USD/JPY"]["quote_currency"] == "JPY"
     assert by["XAU/USD"]["pip_name"] == "point" and by["XAU/USD"]["contract_size"] == 100
     assert not any("bid" in i or "price" in i for i in got.json())

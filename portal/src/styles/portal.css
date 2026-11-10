@@ -2175,3 +2175,95 @@ the headline (left) and toward the next section (bottom) */
   font-size: 1.5rem;
   letter-spacing: -0.01em;
 }
+
+.tool-tabs a {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 550;
+  padding: var(--space-2) var(--space-4);
+  border-radius: 999px;
+  transition:
+    color 160ms var(--ease-out),
+    background-color 200ms var(--ease-out),
+    box-shadow 220ms var(--ease-out),
+    transform 280ms var(--ease-spring);
+}
+
+.tool-tabs a:hover {
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.tool-tabs a.active {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.tool-tabs-small {
+  margin-top: 0;
+}
+
+.symbol-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.symbol-bar .tool-tabs {
+  margin: 0;
+}
+
+.symbol-search {
+  min-height: 40px;
+  min-width: 240px;
+  padding: 0 var(--space-4);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.tool-big {
+  margin: var(--space-1) 0 0;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-weight: 720;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-chart {
+  width: 100%;
+  height: 280px;
+  margin-top: var(--space-5);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.sim-chart path {
+  fill: none;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.75;
+}
+
+.sim-chart .sim-up {
+  stroke: var(--summit);
+}
+
+.sim-chart .sim-down {
+  stroke: var(--muted);
+}
+
+.sim-start {
+  stroke: var(--border);
+  stroke-dasharray: 6 6;
+  vector-effect: non-scaling-stroke;
+}
+
+.sim-stats {
+  margin-top: var(--space-4);
+}
