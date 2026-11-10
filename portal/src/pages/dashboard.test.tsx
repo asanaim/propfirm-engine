@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, within, waitFor } from "@testing-library/react";
 import type { LiveAccount } from "../api/types";
 import { fakeAuth, renderWith } from "../test-utils";
 import { AccountPage, ResetCard } from "./AccountPage";
@@ -119,9 +119,10 @@ it("shows the account's numbers from the live stream", async () => {
   }
   expect(screen.getByRole("link", { name: "TradingView" })).toHaveAttribute("href", "https://www.tradingview.com/");
   expect(await screen.findByRole("figure", { name: "EUR/USD 1m candles" })).toBeInTheDocument();
-  expect(chart.setData).toHaveBeenCalledWith([
-    { time: 60, open: 1.1, high: 1.1005, low: 1.0995, close: 1.1001 },
-  ]);
+  // the bars arrive after the chart is drawn: wait for them (flaked on CI)
+  await waitFor(() => {
+    expect(chart.setData).toHaveBeenCalledWith([{ time: 60, open: 1.1, high: 1.1005, low: 1.0995, close: 1.1001 }]);
+  });
   const quotes = screen.getByRole("table", { name: "Prices" });
   const prices = within(quotes).getByRole("rowheader", { name: "EUR/USD" }).closest("tr");
   expect(prices).toHaveTextContent("1.096551.09665Open");
