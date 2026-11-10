@@ -35,3 +35,10 @@ describe("the home page text (rules AC07, AC08)", () => {
     expect(screen.getByRole("heading", { name: "Get paid" })).toBeInTheDocument();
   });
 });
+
+it("shows the approved statistics strip, and none until there is one (rule AC09)", async () => {
+  const stats = { fields: { heading: "In numbers" }, items: [{ label: "Paid to traders", value: "$1.2M+" }] };
+  renderWith(<OverviewPage />, fakeAuth({ status: "anonymous", session: null }), fakeFetch([["GET", "/catalogue", 200, []], ["GET", "/site", 200, { stats }], ["GET", "/site/status", 200, { maintenance: false, registration_open: true, registering: true, selling: true }]]));
+  expect(await screen.findByText("$1.2M+")).toBeInTheDocument();
+  expect(screen.getByText("Paid to traders")).toBeInTheDocument();
+});

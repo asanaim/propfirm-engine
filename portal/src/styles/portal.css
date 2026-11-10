@@ -2111,6 +2111,16 @@ the headline (left) and toward the next section (bottom) */
 
 .tool-tabs button.active {
   color: var(--text);
+
+/* statistics strip (rule AC09: only approved figures with evidence on file) */
+.stats ul {
+  list-style: none;
+  margin: var(--space-6) 0 0;
+  padding: var(--space-5);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-4);
+  border-radius: var(--radius-large);
   background: var(--surface);
   box-shadow: var(--shadow);
 }
@@ -2149,4 +2159,15 @@ the headline (left) and toward the next section (bottom) */
 .tool-answer strong {
   font-size: 1.5rem;
   letter-spacing: -0.01em;
+
+.stats li {
+  display: grid;
+  gap: var(--space-1);
+  text-align: center;
+}
+
+.stats strong {
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  font-weight: 720;
+  letter-spacing: -0.02em;
 }

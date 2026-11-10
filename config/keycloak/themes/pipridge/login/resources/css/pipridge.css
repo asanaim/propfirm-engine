@@ -223,3 +223,33 @@ a {
     transform: none;
   }
 }
+
+/* Continue with Google (rule AC26; shown only when the firm's keys are set) */
+#kc-social-providers {
+  margin-top: 20px;
+}
+
+#kc-social-providers h2,
+#kc-social-providers .kc-social-section-text {
+  font-size: 0.8125rem;
+  color: var(--pp-muted);
+  text-align: center;
+}
+
+#kc-social-providers .pf-v5-c-button,
+#kc-social-providers a {
+  border-radius: 999px;
+  min-height: 46px;
+  border: 1px solid var(--pp-border);
+  background: color-mix(in srgb, var(--pp-paper) 80%, transparent);
+  color: var(--pp-text);
+  font-weight: 600;
+  transition:
+    transform 220ms var(--pp-ease-spring),
+    box-shadow 220ms var(--pp-ease-out);
+}
+
+#kc-social-providers a:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--pp-shadow);
+}

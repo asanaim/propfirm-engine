@@ -2802,6 +2802,8 @@ def create_app(
                     "max_items": shape.max_items,
                     "optional": sorted(shape.optional),
                     "images": sorted(shape.images),
+                    "figures": sorted(shape.figures),
+                    "private": sorted(shape.private),
                 }
                 for name, shape in SECTIONS.items()
             },

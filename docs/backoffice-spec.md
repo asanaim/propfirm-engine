@@ -171,6 +171,22 @@ approved by a second person; figures refused as in AC08). The attempts
 count stays in code. KYC stays on: a funded account cannot open without an
 approved check. The settings hub's KYC card opens the Website screen.
 
+AC26 sign in with Google (10 Nov 2026), ready for the firm's keys: set
+GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in `.env` (the redirect URI to
+register is in `.env.example`) and the start-up setup job
+(`config/keycloak/setup.sh`) turns on "Sign in with Google" on the trader
+sign-in page. A Google sign-in is followed by the authenticator code (flow
+`otp-after-social-sign-in`, recorded as `otp` in the token's amr), so the
+second factor is never skipped. Staff pages hide the button. Without keys
+the button is off. Apple needs the Apple Developer Program and a Keycloak
+extension: not yet.
+
+AC09 statistics (10 Nov 2026), ready for real figures: a `stats` website
+section of up to four figures (such as "$500M+", "140+", "4.8/5"), each
+with the evidence that backs it (the record and where it is kept). The
+evidence is required, seen by staff and approvers, never sent to the
+public site. No figures, no strip.
+
 ## Exceptions to AC00 decided by the owners (8 Nov 2026)
 
 Decisions that stay with one person: confirming a customer block on a case

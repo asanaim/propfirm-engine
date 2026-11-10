@@ -124,17 +124,12 @@ services:
     restart: "no"
     environment:
       ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin-dev}
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - >-
-        set -e;
-        k="/opt/keycloak/bin/kcadm.sh";
-        c="--config /tmp/kcadm.config";
-        $$k config credentials $$c --server http://keycloak:8080 --realm master --user admin --password "$$ADMIN_PASSWORD";
-        $$k update realms/propfirm $$c -s loginTheme=pipridge;
-        id=$$($$k get clients $$c -r propfirm -q clientId=backoffice --fields id --format csv --noquotes);
-        $$k update clients/$$id $$c -r propfirm -s attributes.login_theme=pipridge-staff;
-        echo "pipridge sign-in themes set"
+      # Sign in with Google (rule AC26): set both in .env to show the button
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    volumes:
+      - ./config/keycloak/setup.sh:/setup.sh:ro
+    entrypoint: ["/bin/bash", "/setup.sh"]
 
   api:
     profiles: ["platform"]

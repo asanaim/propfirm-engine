@@ -16,3 +16,8 @@ empty footer band where it was */
 .pf-v5-c-login__main-footer:has(#kc-registration-container) {
   display: none;
 }
+
+/* staff sign in with their pipridge account only, never Google */
+#kc-social-providers {
+  display: none;
+}

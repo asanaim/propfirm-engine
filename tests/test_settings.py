@@ -1113,3 +1113,55 @@ def test_the_calculators_get_each_symbols_specs_without_prices() -> None:
     assert by["USD/JPY"]["pip"] == "0.01" and by["USD/JPY"]["quote_currency"] == "JPY"
     assert by["XAU/USD"]["pip_name"] == "point" and by["XAU/USD"]["contract_size"] == 100
     assert not any("bid" in i or "price" in i for i in got.json())
+
+
+# --- rule AC09: statistics only with evidence on file, never shown publicly ---------------
+
+STATS = {
+    "fields": {"heading": "pipridge in numbers"},
+    "items": [
+        {"label": "Paid to traders", "value": "$1.2M+",
+         "evidence": "Payout ledger export of 31 March 2027, filed in Finance/evidence"},
+        {"label": "Countries", "value": "140+",
+         "evidence": "Customer register by residence country, 31 March 2027"},
+    ],
+    "reason": "first figures",
+}  # fmt: skip
+
+
+def test_statistics_need_evidence_which_the_public_site_never_shows() -> None:
+    records = MemoryRecords()
+    kw: dict[str, Any] = {"records": records, "proposals": MemoryProposals(records),
+                          "tiers": OWNERS}  # fmt: skip
+    put = api("PUT", "/admin/site/stats", STATS, user="admin-1", **kw)
+    assert put.status_code == 200, put.text
+    _approve(kw, put.json()["proposal"]["id"])
+    public = api("GET", "/site", signed_in=False, **kw).json()["stats"]
+    assert public["items"] == [
+        {"label": "Paid to traders", "value": "$1.2M+"},
+        {"label": "Countries", "value": "140+"},
+    ]
+    staff = api("GET", "/admin/site", **kw).json()
+    assert staff["sections"]["stats"]["items"][0]["evidence"].startswith("Payout ledger")
+    assert staff["shapes"]["stats"]["private"] == ["evidence"]
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"label": "Paid", "value": "$1.2M+", "evidence": ""},  # no evidence
+        {"label": "Paid", "value": "lots", "evidence": "ledger"},  # not a figure
+        {"label": "Paid $5M", "value": "5M", "evidence": "ledger"},  # figure in the label
+        {"label": "Paid", "value": "$1.2M+"},  # evidence field missing
+    ],
+)
+def test_a_statistic_without_evidence_or_a_real_figure_is_refused(item: dict[str, str]) -> None:
+    with pytest.raises(PolicyError):
+        SiteSection("stats", {"heading": "In numbers"}, (item,))
+
+
+def test_no_statistics_is_allowed_and_figures_take_the_usual_forms() -> None:
+    SiteSection("stats", {"heading": "In numbers"}, ())
+    for value in ("$500M+", "140+", "98%", "4.8/5", "3.5M+", "24/7", "€2,000"):
+        SiteSection("stats", {"heading": "In numbers"},
+                    ({"label": "x", "value": value, "evidence": "on file"},))  # fmt: skip
