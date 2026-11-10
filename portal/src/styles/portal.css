@@ -2076,6 +2076,42 @@ the headline (left) and toward the next section (bottom) */
   }
 }
 
+/* --- trading calculators ------------------------------------------------- */
+.tool-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  margin: var(--space-5) 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.tool-tabs button {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 550;
+  color: var(--muted);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 160ms var(--ease-out),
+    background-color 200ms var(--ease-out),
+    box-shadow 220ms var(--ease-out),
+    transform 280ms var(--ease-spring);
+}
+
+.tool-tabs button:hover {
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.tool-tabs button.active {
+  color: var(--text);
+
 /* statistics strip (rule AC09: only approved figures with evidence on file) */
 .stats ul {
   list-style: none;
@@ -2088,6 +2124,41 @@ the headline (left) and toward the next section (bottom) */
   background: var(--surface);
   box-shadow: var(--shadow);
 }
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
+.tool-grid .field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.tool-grid input,
+.tool-grid select {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg, transparent);
+  color: var(--text);
+  font: inherit;
+}
+
+.tool-answer {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--summit) 10%, var(--surface));
+}
+
+.tool-answer strong {
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
 
 .stats li {
   display: grid;
