@@ -13,6 +13,7 @@ import { PayoutsPage } from "./pages/PayoutsPage";
 import { PolicyPage } from "./pages/PolicyPages";
 import { SecurityPage } from "./pages/SecurityPage";
 import { ShopPage } from "./pages/ShopPage";
+import { ToolsPage } from "./pages/ToolsPage";
 import { usePath } from "./router";
 
 const PAGES: Record<string, () => React.JSX.Element> = {
@@ -24,6 +25,7 @@ const PAGES: Record<string, () => React.JSX.Element> = {
   "/security": SecurityPage,
   "/notices": NoticesPage,
   "/news": NewsPage,
+  "/tools": ToolsPage,
 };
 
 const ACCOUNT = /^\/accounts\/(ACC[0-9]{8})(\/history|\/rules)?$/;

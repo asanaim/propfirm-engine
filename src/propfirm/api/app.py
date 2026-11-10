@@ -59,6 +59,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from importlib import metadata
 from typing import Annotated, Any, Literal, Protocol
 
@@ -100,6 +101,7 @@ from propfirm.journal.inputs import (
     PlaceTrailingEntry,
     SetTrailingStop,
 )
+from propfirm.market.symbols import AssetClass
 from propfirm.newsfeed.alerts import SourceAlerts, alert_view
 from propfirm.policy import (
     LOCKED_SWITCHES,
@@ -1499,6 +1501,30 @@ def create_app(
     async def health(deps: D) -> dict[str, Any]:
         head = await deps.live.head()
         return {"status": "ok", "journal_seq": head["seq"] if head else None}
+
+    @app.get("/tools/instruments")
+    async def tool_instruments(deps: D) -> list[dict[str, Any]]:
+        """What the public trading calculators need per symbol: contract size,
+        leverage, quote currency and the size of one pip (forex: the fourth
+        decimal, or the second for JPY pairs; others: one point). No prices:
+        those are licensed to signed-in users only."""
+        out = []
+        for i in (await _policy(deps)).trading.instruments:
+            forex = i.symbol.asset_class == AssetClass.FOREX
+            places = i.digits - 1 if forex else i.digits
+            out.append(
+                {
+                    "symbol": i.name,
+                    "asset_class": str(i.symbol.asset_class),
+                    "digits": i.digits,
+                    "contract_size": i.contract_size,
+                    "leverage": f"{i.leverage.numerator}/{i.leverage.denominator}",
+                    "quote_currency": i.quote_currency,
+                    "pip": f"{Decimal(1).scaleb(-places):f}",
+                    "pip_name": "pip" if forex else "point",
+                }
+            )
+        return out
 
     @app.get("/catalogue")
     async def catalogue(deps: D) -> list[dict[str, Any]]:

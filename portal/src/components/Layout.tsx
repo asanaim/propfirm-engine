@@ -41,6 +41,7 @@ show (the trader dashboard's pages appear only after sign in). */
 const PUBLIC_NAV = [
   { href: "/shop", label: "Challenges" },
   { href: "/#how", label: "How it works" },
+  { href: "/tools", label: "Tools" },
   { href: "/#faq", label: "FAQ" },
 ];
 
@@ -51,6 +52,7 @@ const NAV = [
   { href: "/funded", label: "Funded" },
   { href: "/payouts", label: "Payouts" },
   { href: "/news", label: "News" },
+  { href: "/tools", label: "Tools" },
   { href: "/security", label: "Security" },
 ];
 

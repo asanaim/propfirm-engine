@@ -1097,3 +1097,19 @@ def test_the_general_page_lists_the_fixed_basics_with_why_each_is_fixed() -> Non
     assert all(g["why_fixed"] for g in general.json())
     refused = api("GET", "/admin/general", roles=("trader",), user="u9")
     assert refused.status_code in (401, 403)
+
+
+# --- the public trading calculators' instrument list ---------------------------------------
+
+
+def test_the_calculators_get_each_symbols_specs_without_prices() -> None:
+    got = api("GET", "/tools/instruments", signed_in=False)
+    assert got.status_code == 200, got.text
+    by = {i["symbol"]: i for i in got.json()}
+    assert by["EUR/USD"] | {} == {
+        "symbol": "EUR/USD", "asset_class": "forex", "digits": 5, "contract_size": 100_000,
+        "leverage": "100/1", "quote_currency": "USD", "pip": "0.0001", "pip_name": "pip",
+    }  # fmt: skip
+    assert by["USD/JPY"]["pip"] == "0.01" and by["USD/JPY"]["quote_currency"] == "JPY"
+    assert by["XAU/USD"]["pip_name"] == "point" and by["XAU/USD"]["contract_size"] == 100
+    assert not any("bid" in i or "price" in i for i in got.json())
