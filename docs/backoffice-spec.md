@@ -118,8 +118,9 @@ FTMO's list would need a licensed calendar feed (not chosen).
 AC05 settings hub and AC06 Ctrl+K search (8 Nov 2026). In place: a System
 settings page (`/settings`, for `settings.view`) with one card per area and
 its own search box. Open areas link to their screen (payment methods,
-withdrawal methods, security, website, policy pages); General is fixed in
-the deployment; brand, notification templates, KYC form, SEO, languages,
+withdrawal methods, security, website, policy pages); General opens a read
+only page of the deployment's basics (site name, base currency, trading
+day, record time, versions), each with why it is fixed; brand, notification templates, KYC form, SEO, languages,
 extensions and maintenance say which rule builds them. The Security page
 lists the locked switches from `GET /admin/security`, read only. Ctrl+K
 (Cmd+K on a Mac), or the Search button in the top bar, opens a search from

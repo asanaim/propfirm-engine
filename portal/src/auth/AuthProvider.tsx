@@ -7,6 +7,8 @@ export interface Auth {
   session: Session | null;
   error: string | null;
   signIn: (returnTo?: string) => Promise<void>;
+  /** Keycloak's registration page (OIDC prompt=create), then back here signed in. */
+  signUp: (returnTo?: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** Enter the credentials and second factor again now (RFC 9470 step-up;
   max_age=0, so the new sign-in is fresh whatever the API's limit). */
@@ -104,6 +106,7 @@ export function AuthProvider({ manager, children }: { manager: UserManager; chil
       session: user === null ? null : sessionOf(user),
       error,
       signIn: (returnTo) => redirect(returnTo),
+      signUp: (returnTo) => redirect(returnTo, { prompt: "create" }),
       signOut: () => manager.signoutRedirect(),
       stepUp: (returnTo) => redirect(returnTo, { max_age: 0 }),
       setUpAuthenticator: (returnTo) => redirect(returnTo, { kc_action: "CONFIGURE_TOTP" }),

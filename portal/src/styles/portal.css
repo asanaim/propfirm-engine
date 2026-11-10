@@ -225,25 +225,73 @@ a {
   padding: 0;
 }
 
+/* the menu sits in one pill-shaped bar; each link is its own pill that
+   lifts toward the pointer, the current page raised with the amber pip */
+.topbar nav ul {
+  padding: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 30%), 0 1px 2px rgb(16 24 40 / 5%);
+}
+
 .topbar nav a {
+  position: relative;
   display: inline-block;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4);
   border-radius: 999px;
   color: var(--muted);
   text-decoration: none;
   font-weight: 550;
   min-height: 24px;
+  transition:
+    color 160ms var(--ease-out),
+    background-color 200ms var(--ease-out),
+    box-shadow 220ms var(--ease-out),
+    transform 280ms var(--ease-spring);
 }
 
-.topbar nav a:hover {
+.topbar nav a:hover,
+.topbar nav a:focus-visible {
   color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px) scale(1.04);
+}
+
+.topbar nav a:active {
+  transform: scale(0.97);
+  transition-duration: 90ms;
 }
 
 .topbar nav a[aria-current="page"] {
   color: var(--text);
   background: var(--surface);
-  box-shadow: var(--shadow);
-  transition: background-color 200ms var(--ease-out);
+  box-shadow: var(--shadow-raised, var(--shadow));
+}
+
+.topbar nav a[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--summit);
+  transform: translateX(-50%);
+  animation: nav-pip 420ms var(--ease-spring) backwards;
+}
+
+@keyframes nav-pip {
+  from {
+    transform: translateX(-50%) scale(0);
+  }
+}
+
+.button-small {
+  min-height: 36px;
+  padding: 0 var(--space-4);
 }
 
 .topbar-actions {
@@ -342,6 +390,34 @@ main:focus {
   padding: var(--space-6);
   box-shadow: var(--shadow);
   margin-bottom: var(--space-5);
+  animation: card-rise 520ms var(--ease-out) backwards;
+  transition:
+    box-shadow 260ms var(--ease-out),
+    transform 320ms var(--ease-spring);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-raised, var(--shadow));
+  transform: translateY(-2px);
+}
+
+.grid .card:nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.grid .card:nth-child(3) {
+  animation-delay: 120ms;
+}
+
+.grid .card:nth-child(n + 4) {
+  animation-delay: 180ms;
+}
+
+@keyframes card-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
 }
 
 .grid .card {

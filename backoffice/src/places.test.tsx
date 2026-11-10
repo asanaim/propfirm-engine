@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AdminContext, testDataProvider } from "react-admin";
 import { Route, Routes, useLocation } from "react-router-dom";
@@ -150,7 +150,9 @@ describe("the screens", () => {
       </AdminContext>,
     );
     expect(await screen.findByTestId("area-seo")).toHaveTextContent("Not built yet (AC11)");
-    expect(screen.getByTestId("area-general")).toHaveTextContent("Fixed in deployment");
+    await waitFor(() => {
+      expect(screen.getByTestId("area-general")).toHaveTextContent("Open"); // once permissions load
+    });
     await userEvent.type(screen.getByLabelText("Search settings"), "maintenance");
     expect(screen.queryByTestId("area-general")).toBeNull();
     expect(screen.getByTestId("area-maintenance")).toBeInTheDocument();
