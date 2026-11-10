@@ -1,6 +1,7 @@
 import { useEffect, useState, type SyntheticEvent } from "react";
 import { useApi, useMe } from "../api/ApiProvider";
 import type { Contract, Onboarding, OnboardingStatus } from "../api/types";
+import { useSection } from "../components/SiteStatus";
 import { useAuth } from "../auth/AuthProvider";
 import { Problem } from "../components/Problem";
 import { Button, Card, Loading, Notice } from "../components/ui";
@@ -113,6 +114,7 @@ export function OnboardingPage({ onb }: { onb: string }) {
   const [record, setRecord] = useState<Onboarding | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [round, setRound] = useState(0);
+  const kyc = useSection("kyc");
   const signedIn = auth.status === "signed_in";
   useEffect(() => {
     if (!signedIn) return;
@@ -163,13 +165,13 @@ export function OnboardingPage({ onb }: { onb: string }) {
         ))}
       </ol>
       {(record.status === "verification" || record.status === "verification_declined") && (
-        <VerifyStep record={record} onChange={setRecord} />
+        <VerifyStep record={record} onChange={setRecord} kyc={kyc} />
       )}
       {(record.status === "checks" || record.status === "review") && (
-        <Card title="Checks and review">
+        <Card title={kyc.pending_title ?? "Checks and review"}>
           <p>
-            Your identity check is done. We screen it and review your account; this usually takes up to one business
-            day. You will see the agreement here when it is ready.
+            {kyc.pending_text ??
+              "Your identity check is done. We screen it and review your account; this usually takes up to one business day. You will see the agreement here when it is ready."}
           </p>
           <Button variant="secondary" onClick={reload}>
             Check again
@@ -213,7 +215,9 @@ export function OnboardingPage({ onb }: { onb: string }) {
   );
 }
 
-function VerifyStep({ record, onChange }: { record: Onboarding; onChange: (o: Onboarding) => void }) {
+/** The identity check (rule AC15): run at the provider; the words are the
+approved `kyc` website section, else these built-in ones. */
+function VerifyStep({ record, onChange, kyc }: { record: Onboarding; onChange: (o: Onboarding) => void; kyc: Record<string, string> }) {
   const api = useApi();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -244,15 +248,16 @@ function VerifyStep({ record, onChange }: { record: Onboarding; onChange: (o: On
     }
   };
   return (
-    <Card title="Verify your identity">
+    <Card title={kyc.required_title ?? "Verify your identity"}>
       {record.status === "verification_declined" && (
         <Notice tone="error">
-          The identity check was declined. Use a valid passport, ID card or driving licence in your own name.
+          {kyc.declined_text ?? "The identity check was declined. Use a valid passport, ID card or driving licence in your own name."}
         </Notice>
       )}
       <p>
-        We check your identity document and a selfie, as regulated firms must. Your name on the document must match your
-        profile. Attempts used: {record.kyc_attempts} of 3.
+        {kyc.required_text ??
+          "We check your identity document and a selfie, as regulated firms must. Your name on the document must match your profile."}{" "}
+        Attempts used: {record.kyc_attempts} of 3.
       </p>
       {error !== null && <Problem error={error} />}
       {url === null ? (

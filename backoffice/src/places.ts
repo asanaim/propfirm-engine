@@ -122,12 +122,12 @@ export const AREAS: readonly Area[] = [
   {
     key: "kyc",
     title: "Identity checks (KYC)",
-    explains: "The fields traders fill in and the texts for required, pending and rejected. KYC stays on in production.",
+    explains: "Checks run at the identity provider (photo ID and selfie). Edit the words traders see while a check is required, pending or declined, on the Website screen. KYC stays on: no funded account without it.",
     icon: "kyc",
-    state: "planned",
-    path: null,
-    screen: null,
-    rule: "AC15",
+    state: "open",
+    path: "/site",
+    screen: "site",
+    rule: null,
     keywords: "kyc identity form fields documents",
   },
   {

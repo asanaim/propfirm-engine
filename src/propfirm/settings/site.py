@@ -45,6 +45,17 @@ SECTIONS: dict[str, Shape] = {
     "hero": Shape({"title_line_1": 80, "title_line_2": 80, "lead": 300, "button": 40}),
     "challenges": Shape({"heading": 80}),
     "how": Shape({"heading": 80, "footnote": 300}, {"title": 60, "text": 200}, 6),
+    # rule AC15 (10 Nov 2026): identity checks run at the provider (document
+    # and selfie); staff edit only the words traders see at each state
+    "kyc": Shape(
+        {
+            "required_title": 60,
+            "required_text": 400,
+            "pending_title": 60,
+            "pending_text": 400,
+            "declined_text": 300,
+        }
+    ),
     "maintenance": Shape(
         {"title": 80, "message": 600, "image": 300},
         optional=frozenset({"image"}),
