@@ -263,7 +263,7 @@ export interface SiteSection {
   fields: Record<string, string>;
   items: Record<string, string>[];
 }
-export type Site = Partial<Record<"hero" | "challenges" | "how", SiteSection>>;
+export type Site = Partial<Record<"hero" | "challenges" | "how" | "stats", SiteSection>>;
 
 /** The signed-out home page: what a challenge is, what it costs, how it works. */
 function Landing({ onSignIn, onSignUp, registering }: { onSignIn: () => void; onSignUp: () => void; registering: boolean }) {
@@ -325,6 +325,22 @@ function Landing({ onSignIn, onSignUp, registering }: { onSignIn: () => void; on
           layers={!webgl}
         />
       </section>
+
+      {site.stats !== undefined && site.stats.items.length > 0 ? (
+        <section className="stats" aria-labelledby="stats-title" data-reveal="">
+          <h2 id="stats-title" className="visually-hidden">
+            {site.stats.fields.heading ?? "In numbers"}
+          </h2>
+          <ul>
+            {site.stats.items.map((i) => (
+              <li key={`${i.label ?? ""}${i.value ?? ""}`}>
+                <strong>{i.value}</strong>
+                <span className="muted">{i.label}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {products !== null && products.length > 0 && (
         <section className="tiles" id="challenges" aria-labelledby="tiles-title">

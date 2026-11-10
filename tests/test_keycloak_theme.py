@@ -70,7 +70,20 @@ def test_the_terrain_respects_reduced_motion_and_the_font_is_open_licence() -> N
 def test_compose_mounts_the_themes_and_points_an_existing_realm_at_them() -> None:
     compose = (ROOT / "compose.yaml").read_text()
     assert "./config/keycloak/themes:/opt/keycloak/themes:ro" in compose
-    assert "loginTheme=pipridge" in compose
-    assert "attributes.login_theme=pipridge-staff" in compose
+    setup = (ROOT / "config/keycloak/setup.sh").read_text()
+    assert "loginTheme=pipridge" in setup
+    assert "attributes.login_theme=pipridge-staff" in setup
+    assert "./config/keycloak/setup.sh:/setup.sh:ro" in compose
     job = compose.split("  keycloak-theme:")[1].split("\n  api:")[0]
     assert 'profiles: ["setup"]' in job  # a one-shot job is never part of `up --wait`
+
+
+def test_google_sign_in_is_off_without_keys_and_always_asks_for_the_code() -> None:
+    setup = (ROOT / "config/keycloak/setup.sh").read_text()
+    assert 'if [[ -z "${GOOGLE_CLIENT_ID:-}" || -z "${GOOGLE_CLIENT_SECRET:-}" ]]' in setup
+    assert "postBrokerLoginFlowAlias=$FLOW" in setup  # the OTP step after Google
+    assert "provider=auth-otp-form" in setup and "REQUIRED" in setup
+    compose = (ROOT / "compose.yaml").read_text()
+    assert "GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}" in compose
+    staff = (THEMES / "pipridge-staff/login/resources/css/staff.css").read_text()
+    assert "#kc-social-providers" in staff  # staff never sign in with Google
