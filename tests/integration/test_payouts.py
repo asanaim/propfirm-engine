@@ -349,6 +349,40 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             gate_open = await p.call("POST", f"/accounts/{acc}/orders", body=trade)
             assert gate_open.status_code == 200  # paused only until the debit
 
+            # the transaction and email logs (rule AC20)
+            log = "/staff/reports/transactions"
+            outs = (await staff(p, "GET", f"{log}?type=payout", "staff-1")).json()
+            assert [(r["ref"], r["status"]) for r in outs["rows"]] == [
+                (po, "paid"),
+                ("PO00000002", "denied"),
+                ("PO00000001", "cancelled"),
+            ]
+            assert outs["totals"] == {
+                "count": 3,
+                "in_cents": 0,
+                "out_cents": done.trader_amount_cents,
+            }
+            every = (await staff(p, "GET", log, "staff-1")).json()
+            bought = [r for r in every["rows"] if r["type"] == "purchase"]
+            assert [(r["direction"], r["status"]) for r in bought] == [("in", "provisioned")]
+            assert every["totals"]["in_cents"] == bought[0]["amount_cents"] > 0
+            assert (await staff(p, "GET", f"{log}?remark=nothing-like-it", "staff-1")).json()[
+                "totals"
+            ]["count"] == 0
+            csv_text = (
+                await staff(p, "GET", f"{log}/export?type=payout&status=paid", "staff-1")
+            ).text
+            header, row = csv_text.strip().split("\r\n")
+            assert header == "ref,type,cif,acc,amount,direction,status,remark,at,settled_at"
+            cents = done.trader_amount_cents
+            assert row.startswith(f"{po},payout,CIF00000001,{acc},{cents // 100}.{cents % 100:02d}")
+            assert (await p.call("GET", f"{log}/export")).status_code == 403  # traders never
+            emails = (
+                await staff(p, "GET", "/staff/reports/emails?delivery=sent", "staff-1")
+            ).json()
+            assert [(e["ntf"], e["delivery"]) for e in emails][-1] == ("NTF00000001", "sent")
+            assert "body" not in emails[0]
+
     asyncio.run(scenario())
 
 

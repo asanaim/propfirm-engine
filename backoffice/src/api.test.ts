@@ -16,6 +16,16 @@ describe("createApi", () => {
     expect(init?.body).toBe('{"reason":"r"}');
   });
 
+  it("reads a CSV export as text, and keeps the refusal's message", async () => {
+    const csv = vi.fn<typeof fetch>(() => Promise.resolve(new Response("ref,type\r\n", { status: 200 })));
+    const api = createApi("/api", () => Promise.resolve("tok"), csv);
+    expect(await api.text?.("/staff/reports/transactions/export")).toBe("ref,type\r\n");
+    const headers = csv.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok");
+    const refused = createApi("/api", () => Promise.resolve("t"), reply(422, { detail: "over 10000 rows: narrow the filters" }));
+    await expect(refused.text?.("/x")).rejects.toMatchObject({ status: 422, message: "over 10000 rows: narrow the filters" });
+  });
+
   it("keeps the API's code, message and permission", async () => {
     const body = { detail: { code: "forbidden", message: "needs payout.pass", permission: "payout.pass" } };
     const api = createApi("/api", () => Promise.resolve(null), reply(403, body));

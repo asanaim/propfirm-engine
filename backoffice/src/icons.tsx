@@ -40,6 +40,7 @@ import {
   UserX,
   Wallet,
   Contact,
+  ArrowLeftRight,
 } from "lucide-react";
 
 export const STROKE = 1.75;
@@ -58,6 +59,7 @@ export function icon(Glyph: LucideIcon) {
 export const ICONS = {
   work: ListTodo,
   traders: Contact,
+  transactions: ArrowLeftRight,
   payouts: Wallet,
   cases: Gavel,
   onboardings: IdCard,

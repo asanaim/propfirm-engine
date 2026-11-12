@@ -31,6 +31,9 @@ ALLOWED = {
     "bucket": "a constant SQL expression chosen from INTERVALS",
     "self._summary": "the trader summary query, built from constants and the checked schema",
     "parts": "count columns built from the constant SEGMENTS and _WHERE",
+    "self._tx": "the transaction union, built from a constant and the checked schema",
+    "_SETTLED": "a constant condition: which transactions count as settled",
+    "_TOTALS": "a constant select list of the transaction totals",
 }
 
 
