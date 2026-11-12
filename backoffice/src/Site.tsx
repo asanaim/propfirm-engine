@@ -13,6 +13,7 @@ interface Shape {
   images?: string[];
   figures?: string[];
   private?: string[];
+  item_optional?: string[];
 }
 export interface SiteMode {
   maintenance: boolean;
@@ -36,6 +37,7 @@ const TITLES: Record<string, string> = {
   how: "How it works",
   kyc: "Identity check texts (KYC)",
   stats: "Statistics strip (figures with evidence)",
+  seo: "Search and link previews (SEO)",
   maintenance: "Maintenance page",
   registration_closed: "Registration closed page",
 };
@@ -85,7 +87,13 @@ function SectionEditor({ name, shape, data, onDone }: { name: string; shape: Sha
         set(e.target.value);
       }}
       helperText={
-        shape.private?.includes(key)
+        key === "path"
+          ? "A public page: /, /shop, /tools, /tools/symbols, /tools/reset, /tools/simulator or /legal/<page>"
+          : key === "robots"
+            ? "index (shown in search) or noindex; empty: index"
+            : shape.item_optional?.includes(key) && value === ""
+              ? "Optional: empty uses the site wide value"
+              : shape.private?.includes(key)
           ? "Required: the record that backs this figure and where it is kept. Approvers see it; the public site never does (rule AC09)."
           : shape.figures?.includes(key)
             ? "A figure such as $500M+, 140+, 98% or 4.8/5"

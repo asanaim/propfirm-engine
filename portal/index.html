@@ -2,14 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- the page's title, description and link preview, written by the web
+    server from the API (review D10); in development only the app's title -->
+    <!--{{ httpInclude (printf "/api/seo/head?path=%s" .OriginalReq.URL.EscapedPath) }}-->
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/brand/app-icon.svg" />
     <meta name="theme-color" content="#0f2b33" />
-    <title>pipridge</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- the page's text for readers without scripts and for search engines;
+    the app draws over it -->
+    <div id="root"><!--{{ httpInclude (printf "/api/seo/body?path=%s" .OriginalReq.URL.EscapedPath) }}--></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

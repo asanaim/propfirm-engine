@@ -55,6 +55,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -132,6 +133,15 @@ from propfirm.policy import (
 from propfirm.rules.calendar import Calendar
 from propfirm.rules.clock import NEW_YORK_17
 from propfirm.rules.news import EventScope
+from propfirm.seo import (
+    ProductText,
+    body_html,
+    dollars,
+    head_html,
+    meta,
+    robots_txt,
+    sitemap_xml,
+)
 from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.service.projector import INTERVALS
@@ -302,6 +312,7 @@ class Deps:
     traders: Traders | None = None  # traders by status, and each trader's file (AC19)
     reports: ReportSource | None = None  # transaction and email logs (AC20)
     system: SystemSource | None = None  # versions and parts for admins (AC23)
+    public_url: str | None = None  # the portal's address, for canonical links (D10)
     news: NewsDesk | None = None  # restricted-events calendar and the risk desk's actions
     source_alerts: SourceAlerts | None = None  # news sources the collector cannot read
     staff: Directory | None = None  # the staff directory; None: Keycloak roles only
@@ -3054,6 +3065,7 @@ def create_app(
                     "images": sorted(shape.images),
                     "figures": sorted(shape.figures),
                     "private": sorted(shape.private),
+                    "item_optional": sorted(shape.item_optional),
                 }
                 for name, shape in SECTIONS.items()
             },
@@ -3078,6 +3090,91 @@ def create_app(
         return await propose_setting(deps, me, setting, body.reason)
 
     # --- policy pages (rule AC10) ------------------------------------------------------
+
+    # --- the public site for search engines and link previews (D10, AC11) ----------
+
+    def _base_url(deps: Deps, request: Request) -> str:
+        """The portal's address: configured, else as the web server forwarded it."""
+        if deps.public_url:
+            return deps.public_url.rstrip("/")
+        host = request.headers.get("x-forwarded-host") or "localhost:5173"
+        scheme = request.headers.get("x-forwarded-proto") or "http"
+        if not re.fullmatch(r"[A-Za-z0-9.-]+(:[0-9]{1,5})?", host) or scheme not in (
+            "http",
+            "https",
+        ):
+            return "http://localhost:5173"
+        return f"{scheme}://{host}"
+
+    async def _seo_inputs(deps: Deps) -> tuple[dict[str, Any], list[Any]]:
+        values = token_values(await _policy(deps))
+        sections = await _settings(deps).site() if deps.settings is not None else {}
+        site = {name: rendered(s, values) for name, s in sections.items()}
+        pages = await _settings(deps).latest_pages() if deps.settings is not None else []
+        return site, pages
+
+    SEO_PATH = Annotated[str, Query(max_length=2000)]  # any path: unknown ones are private
+
+    @app.get("/seo/head")
+    async def seo_head(deps: D, request: Request, path: SEO_PATH) -> Response:
+        """The page's title, description, robots, canonical link and social
+        card, for the web server to put in its <head> (public)."""
+        site, pages = await _seo_inputs(deps)
+        slugs = [p.slug for p in pages]
+        m = meta(path, site.get("seo"), slugs, {p.slug: p.title for p in pages})
+        return Response(head_html(path, m, _base_url(deps, request)), media_type="text/html")
+
+    @app.get("/seo/body")
+    async def seo_body(deps: D, path: SEO_PATH) -> Response:
+        """The page's text before any script runs (public pages only)."""
+        policy = await _policy(deps)
+        site, pages = await _seo_inputs(deps)
+        products = []
+        for p in policy.products:
+            if not policy.catalogue.on_sale(p):
+                continue
+            first = p.rule_sets[0]
+            target = (
+                "no profit target"
+                if first.profit_target is None
+                else f"{percent_text(first.profit_target)}% profit target"
+            )
+            kind = "trailing " if first.max_loss_kind.value == "trailing" else ""
+            rules = (
+                f"{target}, {percent_text(first.daily_loss)}% daily loss, "
+                f"{percent_text(first.max_loss)}% {kind}maximum loss"
+            )
+            sizes = tuple((dollars(s), dollars(c)) for s, c in policy.catalogue.sizes(p))
+            products.append(ProductText(p.name, percent_text(p.profit_split) or "", sizes, rules))
+        split = max(
+            (p.profit_split for p in policy.products if policy.catalogue.on_sale(p)), default=None
+        )
+        page = None
+        if path.startswith("/legal/"):
+            found = next((p for p in pages if p.slug == path[len("/legal/") :]), None)
+            page = (found.title, found.body) if found else None
+        text = body_html(
+            path,
+            site,
+            products,
+            percent_text(split) or "" if split is not None else "",
+            page,
+            [p.slug for p in pages],
+        )
+        return Response(text, media_type="text/html")
+
+    @app.get("/sitemap.xml")
+    async def sitemap(deps: D, request: Request) -> Response:
+        """The public pages, for search engines (an editor's noindex left out)."""
+        site, pages = await _seo_inputs(deps)
+        seo = site.get("seo") or {}
+        hidden = [i.get("path", "") for i in seo.get("items", []) if i.get("robots") == "noindex"]
+        xml = sitemap_xml(_base_url(deps, request), [p.slug for p in pages], hidden)
+        return Response(xml, media_type="application/xml")
+
+    @app.get("/robots.txt")
+    async def robots(deps: D, request: Request) -> Response:
+        return Response(robots_txt(_base_url(deps, request)), media_type="text/plain")
 
     @app.get("/policies")
     async def policies(deps: D) -> list[dict[str, Any]]:

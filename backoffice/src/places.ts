@@ -135,12 +135,12 @@ export const AREAS: readonly Area[] = [
   {
     key: "seo",
     title: "SEO",
-    explains: "Title, description and social image per public page, with a site wide fallback and a generated sitemap.",
+    explains: "Title, description and link preview image per public page, with a site wide fallback, on the Website screen (Search and link previews). The sitemap is generated.",
     icon: "seo",
-    state: "planned",
-    path: null,
-    screen: null,
-    rule: "AC11",
+    state: "open",
+    path: "/site",
+    screen: "site",
+    rule: null,
     keywords: "seo meta sitemap search engines",
   },
   {

@@ -204,6 +204,19 @@ settings, policies and website text are read fresh each time) and
 request and a redeploy; an update button would let one admin change
 running code, against AC00).
 
+AC11 SEO and generated sitemap (13 Nov 2026, review D10). In place: the
+web server fills each portal page, before any script runs, with its title,
+description, robots, canonical link and social card, and with the page's
+text (home page, challenges on sale with their figures, tools, policy
+pages), from the API (`GET /seo/head`, `GET /seo/body`). Editors set a
+site wide title, description and card image, and per page overrides
+(path, title, description, index or noindex) in the website section
+`seo`; an empty field falls back to the site wide value, then to built in
+wording. `/sitemap.xml` lists the public pages (noindex ones left out) and
+`/robots.txt` points to it; the back office's robots.txt disallows
+everything. With the API down the portal is served as before, without the
+filled text. Not built: keywords (search engines ignore the tag).
+
 AC15 identity checks (10 Nov 2026), decided: provider only, as FTMO and
 FundedNext do. Identity checks run at the provider (Didit: photo ID and a
 selfie); there is no staff-designed upload form, so no document images are
@@ -238,7 +251,7 @@ only add restrictions; cancelling a news window still needs an admin.
 
 ## Not started
 
-AC09 evidence for claims, AC11 SEO and generated sitemap, AC18 language
+AC09 evidence for claims, AC18 language
 manager, AC21 and AC22 (tickets, extensions), AC24 price feed
 failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.

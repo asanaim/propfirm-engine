@@ -230,6 +230,7 @@ services:
       PORT: "5173"
       API_UPSTREAM: api:8000
       OIDC_ORIGIN: http://localhost:8080
+      PUBLIC_SITE: "true"  # search engines may index it (review D10)
     ports:
       - "127.0.0.1:5173:5173"
     read_only: true
@@ -248,6 +249,7 @@ services:
     environment:
       <<: *web-env
       PORT: "5174"
+      PUBLIC_SITE: "false"  # staff only: robots.txt disallows everything
     ports:
       - "127.0.0.1:5174:5174"
     read_only: true

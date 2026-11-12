@@ -376,6 +376,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             cases=cases,
             payouts=payouts,
             traders=directory,
+            public_url=config.public_url,
             reports=Reports(pool, config.customer_schema),
             system=SystemProbe(
                 pool, client, now_ms(), os.environ.get("PIPRIDGE_REVISION", ""), live.head

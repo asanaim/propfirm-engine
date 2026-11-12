@@ -8,6 +8,10 @@ import { createManager } from "./auth/session";
 import { config } from "./config";
 import "./styles/portal.css";
 
+// the web server writes each page's own title (review D10); in development
+// there is none, so the app's name
+if (document.title === "") document.title = "pipridge";
+
 const manager = createManager(config.authority, config.clientId, window.location.origin);
 
 if (window.location.pathname === "/silent") {
