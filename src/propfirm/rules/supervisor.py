@@ -62,6 +62,13 @@ from propfirm.trading.orders import OrderRequest, Side
 
 type Event = EngineEvent | RuleEvent
 
+
+def _only(account_id: str) -> Callable[[], set[str]]:
+    """An input about one account: only it can change (and any account the
+    engine's events name)."""
+    return lambda: {account_id}
+
+
 _WINDOW_FILLS = frozenset(
     {CloseReason.STOP_LOSS, CloseReason.TAKE_PROFIT, CloseReason.TRAILING_STOP}
 )
@@ -77,6 +84,18 @@ class _State:
     high_water: int
     trading_days: set[int] = field(default_factory=set)  # day ids with an opening fill
     day_pnl: dict[int, int] = field(default_factory=dict)  # realized cents per day id
+    # fixed by the rule set and the size, so worked out once (review D3)
+    daily_limit: int = field(init=False)
+    max_loss: int = field(init=False)
+    target: int | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        rules, size = self.rules, self.initial_balance
+        self.daily_limit = rules.amount(rules.daily_loss, size)
+        self.max_loss = rules.amount(rules.max_loss, size)
+        self.target = (
+            None if rules.profit_target is None else size + rules.amount(rules.profit_target, size)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,16 +145,24 @@ class RuleSupervisor:
         return events
 
     def on_price(self, update: PriceUpdate) -> list[Event]:
-        return self._run(update.receive_ts, lambda: self._engine.on_price(update))
+        symbol = update.symbol
+        return self._run(
+            update.receive_ts,
+            lambda: self._engine.on_price(update),
+            moved=lambda: self._engine.accounts_priced_by(symbol),
+        )
 
     def advance(self, ts: int) -> list[Event]:
-        return self._run(ts, lambda: self._engine.advance(ts))
+        # time alone moves no price: only accounts the engine's events name
+        return self._run(ts, lambda: self._engine.advance(ts), moved=set)
 
     def on_outage(self, ts: int) -> list[Event]:
-        return self._run(ts, lambda: self._engine.on_outage(ts))
+        return self._run(ts, lambda: self._engine.on_outage(ts), moved=set)
 
     def place_order(self, request: OrderRequest, ts: int) -> list[Event]:
-        return self._run(ts, lambda: self._engine.place_order(request, ts))
+        return self._run(
+            ts, lambda: self._engine.place_order(request, ts), moved=_only(request.account_id)
+        )
 
     def place_trailing_entry(
         self,
@@ -153,6 +180,7 @@ class RuleSupervisor:
             lambda: self._engine.place_trailing_entry(
                 order_id, account_id, symbol, side, volume, distance, step, ts
             ),
+            moved=_only(account_id),
         )
 
     def set_trailing_stop(
@@ -163,16 +191,21 @@ class RuleSupervisor:
             lambda: self._engine.set_trailing_stop(
                 order_id, account_id, position_id, distance, step, ts
             ),
+            moved=_only(account_id),
         )
 
     def cancel_order(self, account_id: str, order_id: str, ts: int) -> list[Event]:
-        return self._run(ts, lambda: self._engine.cancel_order(account_id, order_id, ts))
+        return self._run(
+            ts, lambda: self._engine.cancel_order(account_id, order_id, ts), _only(account_id)
+        )
 
     def close_position(
         self, account_id: str, position_id: str, ts: int, volume: int | None = None
     ) -> list[Event]:
         return self._run(
-            ts, lambda: self._engine.close_position(account_id, position_id, ts, volume)
+            ts,
+            lambda: self._engine.close_position(account_id, position_id, ts, volume),
+            _only(account_id),
         )
 
     def modify_stops(
@@ -186,13 +219,14 @@ class RuleSupervisor:
         return self._run(
             ts,
             lambda: self._engine.modify_stops(account_id, position_id, stop_loss, take_profit, ts),
+            _only(account_id),
         )
 
     def schedule_news(self, event_id: str, window: NewsWindow, ts: int) -> list[Event]:
-        return self._run(ts, lambda: self._engine.schedule_news(event_id, window, ts))
+        return self._run(ts, lambda: self._engine.schedule_news(event_id, window, ts), set)
 
     def cancel_news(self, event_id: str, ts: int) -> list[Event]:
-        return self._run(ts, lambda: self._engine.cancel_news(event_id, ts))
+        return self._run(ts, lambda: self._engine.cancel_news(event_id, ts), set)
 
     def reconfigure(
         self,
@@ -395,14 +429,34 @@ class RuleSupervisor:
     def _active(self) -> list[_State]:
         return [s for s in self._accounts.values() if s.status is AccountStatus.ACTIVE]
 
-    def _run(self, ts: int, action: Callable[[], list[EngineEvent]]) -> list[Event]:
+    def _run(
+        self,
+        ts: int,
+        action: Callable[[], list[EngineEvent]],
+        moved: Callable[[], set[str]] | None = None,
+    ) -> list[Event]:
+        """`moved`: the accounts whose equity, floors or target the input
+        itself can change (a price: the accounts it values; an order: its
+        account; time or a calendar change: none). Then only those, and the
+        accounts the engine's events name, are checked (review D3). Every
+        other account's equity, floors and target are as at its last check,
+        which found nothing, so checking it again would find nothing: the
+        events, and their order (opening order), are those of checking every
+        account. A trading settings change checks every account, as before."""
         events = self._roll(ts)
         engine_events = action()
         events += engine_events
         self._record(engine_events)
         events += self._news_violations(engine_events)
+        if moved is None:
+            for state in self._active():
+                events += self._check(state)
+            return events
+        check = moved()
+        check.update(a for e in engine_events if (a := getattr(e, "account_id", None)))
         for state in self._active():
-            events += self._check(state)
+            if state.account_id in check:
+                events += self._check(state)
         return events
 
     def _roll(self, ts: int) -> list[Event]:
@@ -481,16 +535,13 @@ class RuleSupervisor:
         return breached or self._pass(state, equity)
 
     def _daily_floor(self, state: _State) -> int:
-        return state.day_base - state.rules.amount(state.rules.daily_loss, state.initial_balance)
+        return state.day_base - state.daily_limit
 
     def _target(self, state: _State) -> int | None:
-        rules = state.rules
-        if rules.profit_target is None:
-            return None
-        return state.initial_balance + rules.amount(rules.profit_target, state.initial_balance)
+        return state.target
 
     def _max_floor(self, state: _State) -> int:
-        loss = state.rules.amount(state.rules.max_loss, state.initial_balance)
+        loss = state.max_loss
         if state.rules.max_loss_kind is MaxLossKind.STATIC:
             return state.initial_balance - loss
         return min(state.high_water - loss, state.initial_balance)

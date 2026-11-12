@@ -89,6 +89,7 @@ from propfirm.market.spread import NewsWindow, Quote, SpreadModel, SpreadState, 
 from propfirm.market.symbols import SymbolSpec
 from propfirm.market.types import PriceUpdate
 from propfirm.money import cents_ceil, cents_half_even
+from propfirm.trading.book import OrderBook, PositionBook
 from propfirm.trading.events import (
     AccountOpened,
     CloseReason,
@@ -208,10 +209,17 @@ class TradingEngine:
             currency = spec.quote_currency
             if currency != "USD" and currency not in self._routes:
                 self._routes[currency] = conversion_route(currency, self._instruments)
+        # symbol -> the symbols whose profit converts to US dollars through it
+        self._converted_by: dict[str, tuple[str, ...]] = {}
+        for spec in self._instruments.values():
+            route = self._routes.get(spec.quote_currency)
+            if route is not None:
+                via = route[0]
+                self._converted_by[via] = (*self._converted_by.get(via, ()), spec.name)
         self._quotes: dict[str, Quote] = {}
         self._accounts: dict[str, _Account] = {}
-        self._orders: dict[str, PendingOrder] = {}  # pending, in placement order
-        self._positions: dict[str, Position] = {}  # open, in opening order
+        self._orders = OrderBook()  # pending, in placement order (indexed)
+        self._positions = PositionBook()  # open, in opening order (indexed)
         self._used_ids: set[str] = set()
         self._locked: set[str] = set()
         self._calendar: dict[str, NewsWindow] = {}  # event id -> window, both uses
@@ -643,8 +651,9 @@ class TradingEngine:
         """Cancel the account's pending orders and reject all further trading."""
         self._account(account_id)
         events = self._advance(ts)
-        for order_id, pending in list(self._orders.items()):
-            if pending.request.account_id == account_id:
+        for pending in self._orders.of_account(account_id):  # placement order
+            order_id = pending.request.order_id
+            if order_id in self._orders:
                 del self._orders[order_id]
                 events.append(
                     OrderCancelled(self._now, order_id, account_id, RejectReason.ACCOUNT_LOCKED)
@@ -736,8 +745,8 @@ class TradingEngine:
         self._locked = set(state.locked)
         self._used_ids = set(state.used_ids)
         self._quotes = {q.symbol: q for q in state.quotes}
-        self._orders = {o.request.order_id: o for o in state.orders}
-        self._positions = {p.position_id: p for p in state.positions}
+        self._orders = OrderBook(state.orders)
+        self._positions = PositionBook(state.positions)
         self._calendar = dict(state.calendar)
         self._calendar_ids = set(state.calendar_ids)
         held = {u.symbol: u for u in state.held}
@@ -822,6 +831,15 @@ class TradingEngine:
     def free_margin(self, account_id: str) -> int:
         return self.equity(account_id) - self.used_margin(account_id)
 
+    def accounts_priced_by(self, symbol: str) -> set[str]:
+        """Accounts whose equity a new price of `symbol` can change: those
+        holding it, and those holding a symbol whose profit converts to US
+        dollars through it (EUR/JPY through USD/JPY)."""
+        out: set[str] = set()
+        for held in (symbol, *self._converted_by.get(symbol, ())):
+            out.update(self._positions.accounts_on(held))
+        return out
+
     def positions(self, account_id: str) -> tuple[Position, ...]:
         self._account(account_id)
         return tuple(self._open(account_id))
@@ -831,9 +849,7 @@ class TradingEngine:
         `trailing_orders`)."""
         self._account(account_id)
         return tuple(
-            o
-            for o in self._orders.values()
-            if isinstance(o.request, OrderRequest) and o.request.account_id == account_id
+            o for o in self._orders.of_account(account_id) if isinstance(o.request, OrderRequest)
         )
 
     def trailing_orders(self, account_id: str) -> tuple[tuple[TrailingOrder, int], ...]:
@@ -841,14 +857,14 @@ class TradingEngine:
         self._account(account_id)
         return tuple(
             (o.request, o.placed_at)
-            for o in self._orders.values()
-            if isinstance(o.request, TrailingOrder) and o.request.account_id == account_id
+            for o in self._orders.of_account(account_id)
+            if isinstance(o.request, TrailingOrder)
         )
 
     def has_working_orders(self, account_id: str) -> bool:
         """Whether any order of the account (pending or trailing) is working."""
         self._account(account_id)
-        return any(o.request.account_id == account_id for o in self._orders.values())
+        return bool(self._orders.of_account(account_id))
 
     # --- internals ----------------------------------------------------------
 
@@ -872,7 +888,7 @@ class TradingEngine:
             raise KeyError(f"unknown account {account_id!r}") from None
 
     def _open(self, account_id: str) -> list[Position]:
-        return [p for p in self._positions.values() if p.account_id == account_id]
+        return self._positions.of_account(account_id)
 
     def _reject(self, ref: str, account_id: str, reason: RejectReason) -> OrderRejected:
         return OrderRejected(self._now, ref, account_id, reason, self._version)
@@ -955,24 +971,16 @@ class TradingEngine:
     def _symbol_volume(self, account_id: str, symbol: str) -> int:
         """Open volume plus the volume of working orders that open positions
         (limit, stop and trailing entries; a trailing stop adds none)."""
-        open_volume = sum(
-            p.volume
-            for p in self._positions.values()
-            if p.account_id == account_id and p.symbol == symbol
-        )
+        open_volume = sum(p.volume for p in self._open(account_id) if p.symbol == symbol)
         working_volume = 0
-        for o in self._orders.values():
+        for o in self._orders.of_account(account_id):
             r = o.request
-            if r.account_id == account_id and r.symbol == symbol and r.volume is not None:
+            if r.symbol == symbol and r.volume is not None:
                 working_volume += r.volume
         return open_volume + working_volume
 
     def _trailing_stop_of(self, position_id: str) -> TrailingOrder | None:
-        for o in self._orders.values():
-            r = o.request
-            if isinstance(r, TrailingOrder) and r.position_id == position_id:
-                return r
-        return None
+        return self._orders.stop_of(position_id)
 
     def _trailing_placed(self, order: TrailingOrder) -> TrailingPlaced:
         return TrailingPlaced(
@@ -1075,10 +1083,8 @@ class TradingEngine:
         still move."""
         events: list[EngineEvent] = []
         in_window = self.is_blocked(quote.symbol)
-        for order_id, pending in list(self._orders.items()):
+        for order_id, pending in self._orders.on_symbol(quote.symbol):
             request = pending.request
-            if request.symbol != quote.symbol:
-                continue
             blocked = in_window and request.account_id not in self._news_exempt
             if isinstance(request, TrailingOrder):
                 if request.kind is not TrailingKind.ENTRY:
@@ -1131,9 +1137,7 @@ class TradingEngine:
 
     def _trigger_stops(self, quote: Quote) -> list[EngineEvent]:
         events: list[EngineEvent] = []
-        for position in list(self._positions.values()):
-            if position.symbol != quote.symbol:
-                continue
+        for position in self._positions.on_symbol(quote.symbol):
             if position.side is Side.BUY:
                 price = quote.bid
                 sl_hit = position.stop_loss is not None and price <= position.stop_loss
