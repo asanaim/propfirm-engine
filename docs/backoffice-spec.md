@@ -177,6 +177,22 @@ mobile unverified (Keycloak verifies email at sign up; no phone number is
 collected), login history (kept by Keycloak), support tickets (AC21) and
 the transaction log (AC20).
 
+AC20 reports (12 Nov 2026). In place: a Transactions and emails screen.
+The transaction log lists every purchase (money in) and payout (money
+out), newest first, filtered by type, status, trader, remark (product,
+discount code, failure) and UTC dates; totals count money once settled (a
+purchase paid, a payout paid). CSV export of the filtered log (at most
+10,000 rows; money from integer cents, times in UTC; cells that a
+spreadsheet would run as a formula are quoted) for staff with full view
+only; an apprentice sees the log but does not export. The email log lists
+every email sent to traders with its latest delivery state, subjects only
+(`GET /staff/reports/transactions`, `GET
+/staff/reports/transactions/export`, `GET /staff/reports/emails`).
+Proposal and approval history are the Setting proposals, Setting changes
+and Security log screens. Not covered: login history (kept by Keycloak;
+reading its events is a later step), refunds and chargebacks (no such
+records yet).
+
 AC15 identity checks (10 Nov 2026), decided: provider only, as FTMO and
 FundedNext do. Identity checks run at the provider (Didit: photo ID and a
 selfie); there is no staff-designed upload form, so no document images are
@@ -212,8 +228,7 @@ only add restrictions; cancelling a news window still needs an admin.
 ## Not started
 
 AC09 evidence for claims, AC11 SEO and generated sitemap, AC18 language
-manager, AC20 to AC22 console lists and
-reports (partly present: not checked), AC23 system pages, AC24 price feed
+manager, AC21 and AC22 (tickets, extensions), AC23 system pages, AC24 price feed
 failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.
 

@@ -50,6 +50,8 @@ money integer cents, times integer UTC milliseconds; floats are refused.
 """
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
@@ -77,7 +79,13 @@ from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
-from propfirm.customers.directory import SEGMENTS
+from propfirm.customers.directory import (
+    SEGMENTS,
+    TX_STATUSES,
+    TX_TYPES,
+    TxFilter,
+    export_rows,
+)
 from propfirm.customers.four_eyes import open_proposal, proposal_json
 from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
@@ -238,6 +246,16 @@ class Traders(Protocol):
     async def trader(self, cif: str) -> dict[str, Any] | None: ...
 
 
+class ReportSource(Protocol):
+    async def transactions(
+        self, f: TxFilter, limit: int = 100, offset: int = 0
+    ) -> dict[str, Any]: ...
+
+    async def emails(
+        self, delivery: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[dict[str, Any]]: ...
+
+
 class Customers(Protocol):
     async def cif_by_subject(self, subject: str) -> CifRecord | None: ...
 
@@ -273,6 +291,7 @@ class Deps:
     cases: Casework | None = None  # integrity, fraud and compliance cases
     payouts: Payouts | None = None  # payout wallets, requests and approvals
     traders: Traders | None = None  # traders by status, and each trader's file (AC19)
+    reports: ReportSource | None = None  # transaction and email logs (AC20)
     news: NewsDesk | None = None  # restricted-events calendar and the risk desk's actions
     source_alerts: SourceAlerts | None = None  # news sources the collector cannot read
     staff: Directory | None = None  # the staff directory; None: Keycloak roles only
@@ -1203,6 +1222,13 @@ PAYOUT_STATUS = Literal[
     "requested", "approved", "debited", "sent", "paid", "denied", "cancelled", "failed"
 ]
 CASE_STATUSES = Literal["open", "decision_pending", "actioning", "closed"]
+TX_TYPE = Literal["purchase", "payout"]
+TX_STATUS = Literal[
+    "pending", "paid", "provisioned", "failed", "requested", "approved", "debited", "sent",
+    "denied", "cancelled",
+]  # fmt: skip
+assert set(get_args(TX_TYPE)) == set(TX_TYPES) and set(get_args(TX_STATUS)) == set(TX_STATUSES)
+EXPORT_LIMIT = 10_000
 SEGMENT = Literal[
     "all", "trading", "funded", "no_account", "kyc_pending", "kyc_declined", "open_case", "blocked"
 ]
@@ -2278,6 +2304,81 @@ def create_app(
         by_cif = bool(getattr(request.state, "mask_pii", False))
         found = await d.traders(segment, q, limit, offset, cif_only=by_cif)
         return {"counts": await d.counts(), "traders": found}
+
+    def _reports(deps: Deps) -> ReportSource:
+        if deps.reports is None:
+            raise HTTPException(status_code=503, detail="reports not available")
+        return deps.reports
+
+    def _tx_filter(
+        type: TX_TYPE | None,
+        status: TX_STATUS | None,
+        cif: str | None,
+        remark: str | None,
+        since: int | None,
+        until: int | None,
+    ) -> TxFilter:
+        return TxFilter(type, status, cif, remark, since, until)
+
+    @app.get("/staff/reports/transactions")
+    async def transaction_log(
+        deps: D,
+        me: Viewer,
+        type: TX_TYPE | None = None,
+        status: TX_STATUS | None = None,
+        cif: Annotated[str | None, Query(pattern=r"^CIF[0-9]{8}$")] = None,
+        remark: Annotated[str | None, Query(min_length=2, max_length=80)] = None,
+        since: Annotated[int | None, Query(ge=0)] = None,
+        until: Annotated[int | None, Query(ge=0)] = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        """The transaction log (rule AC20): purchases (money in) and payouts
+        (money out), newest first, filtered by type, status, trader, remark
+        and time (epoch ms, `until` excluded); totals count money once
+        settled."""
+        f = _tx_filter(type, status, cif, remark, since, until)
+        return await _reports(deps).transactions(f, limit, offset)
+
+    @app.get("/staff/reports/transactions/export")
+    async def transaction_export(
+        deps: D,
+        me: Annotated[Principal, Depends(_can("staff.view"))],
+        type: TX_TYPE | None = None,
+        status: TX_STATUS | None = None,
+        cif: Annotated[str | None, Query(pattern=r"^CIF[0-9]{8}$")] = None,
+        remark: Annotated[str | None, Query(min_length=2, max_length=80)] = None,
+        since: Annotated[int | None, Query(ge=0)] = None,
+        until: Annotated[int | None, Query(ge=0)] = None,
+    ) -> Response:
+        """The filtered transaction log as CSV, at most EXPORT_LIMIT rows
+        (staff with full view; an apprentice does not export)."""
+        f = _tx_filter(type, status, cif, remark, since, until)
+        found = await _reports(deps).transactions(f, EXPORT_LIMIT + 1, 0)
+        rows = found["rows"]
+        if len(rows) > EXPORT_LIMIT:
+            raise HTTPException(
+                status_code=422, detail=f"over {EXPORT_LIMIT} rows: narrow the filters"
+            )
+        buffer = io.StringIO()
+        csv.writer(buffer, lineterminator="\r\n").writerows(export_rows(rows))
+        return Response(
+            content=buffer.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="transactions.csv"'},
+        )
+
+    @app.get("/staff/reports/emails")
+    async def email_log(
+        deps: D,
+        me: Viewer,
+        delivery: Literal["sent", "failed", "waiting"] | None = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> list[dict[str, Any]]:
+        """Emails sent to traders (rule AC20), newest first, with the latest
+        delivery state; subjects only, never bodies."""
+        return await _reports(deps).emails(delivery, limit, offset)
 
     @app.get("/staff/traders/{cif}")
     async def get_trader(

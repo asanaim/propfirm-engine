@@ -20,6 +20,7 @@ Keycloak verifies email at sign-up, and no phone number is collected. Login
 history is kept by Keycloak, not here; support tickets do not exist yet (AC21).
 """
 
+import datetime as dt
 from typing import Any
 
 import asyncpg
@@ -162,3 +163,196 @@ class TraderDirectory:
                 "SELECT kind, ts FROM {s}.cif_events WHERE cif = $1 ORDER BY id DESC LIMIT 50"
             ),
         }
+
+
+# --- reports (rule AC20) ---------------------------------------------------------------
+
+TX_TYPES = ("purchase", "payout")
+TX_STATUSES = (
+    # purchases
+    "pending",
+    "paid",
+    "provisioned",
+    "failed",
+    # payouts ("paid" and "failed" are shared)
+    "requested",
+    "approved",
+    "debited",
+    "sent",
+    "denied",
+    "cancelled",
+)
+
+# one row per money movement: a purchase (money in) or a payout (money out)
+_TRANSACTIONS = """
+SELECT ord AS ref, 'purchase' AS type, cif, acc, price_cents AS amount_cents, 'in' AS direction,
+       status, product_id || coalesce(' code ' || discount_code, '') AS remark,
+       created_at AS at, paid_at AS settled_at
+FROM {s}.orders
+UNION ALL
+SELECT po, 'payout', cif, acc, trader_amount_cents, 'out',
+       status, coalesce(failure, ''), requested_at, paid_at
+FROM {s}.payouts
+"""
+
+# money counted as moved: a purchase once paid, a payout once paid
+_SETTLED = (
+    "(type = 'purchase' AND status IN ('paid', 'provisioned'))"
+    " OR (type = 'payout' AND status = 'paid')"
+)
+_TOTALS = (
+    "SELECT count(*) AS count, "
+    f"coalesce(sum(amount_cents) FILTER (WHERE direction = 'in' AND ({_SETTLED})), 0) AS in_cents, "
+    f"coalesce(sum(amount_cents) FILTER (WHERE direction = 'out' AND ({_SETTLED})), 0) AS out_cents"
+)
+
+
+class TxFilter:
+    """The transaction log's filters; every value travels as a $n parameter."""
+
+    def __init__(
+        self,
+        type: str | None = None,
+        status: str | None = None,
+        cif: str | None = None,
+        remark: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
+    ) -> None:
+        if type is not None and type not in TX_TYPES:
+            raise ValueError(f"unknown type {type!r}")
+        if status is not None and status not in TX_STATUSES:
+            raise ValueError(f"unknown status {status!r}")
+        self.type, self.status, self.cif = type, status, cif
+        self.remark, self.since, self.until = remark, since, until
+
+    def where(self, first: int = 1) -> tuple[str, list[Any]]:
+        """A WHERE clause built from constant text, and its arguments,
+        numbered from $`first`."""
+        parts: list[str] = []
+        args: list[Any] = []
+
+        def add(clause: str, value: Any) -> None:
+            args.append(value)
+            parts.append(clause.replace("$?", "$" + str(first + len(args) - 1)))
+
+        if self.type is not None:
+            add("type = $?", self.type)
+        if self.status is not None:
+            add("status = $?", self.status)
+        if self.cif is not None:
+            add("cif = $?", self.cif)
+        if self.remark:
+            add("lower(remark) LIKE $?", f"%{self.remark.strip().lower()}%")
+        if self.since is not None:
+            add("at >= $?", self.since)
+        if self.until is not None:
+            add("at < $?", self.until)
+        return (" AND ".join(parts) or "TRUE"), args
+
+
+class Reports:
+    """Staff reports over the customer records (rule AC20): the transaction
+    log and the email log. Read only."""
+
+    def __init__(self, pool: asyncpg.Pool, schema: str) -> None:
+        self._pool, self._s = pool, check_schema(schema)
+        self._tx = _TRANSACTIONS.format(s=self._s)
+
+    async def transactions(self, f: TxFilter, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+        """Matching rows, newest first, and totals over all matching rows:
+        the count, and money in and out counted once settled."""
+        where, args = f.where(first=3)
+        rows = await self._pool.fetch(
+            f"SELECT * FROM ({self._tx}) t WHERE {where} "
+            "ORDER BY at DESC, ref DESC LIMIT $1 OFFSET $2",
+            limit,
+            offset,
+            *args,
+        )
+        where, args = f.where()
+        total = await self._pool.fetchrow(
+            f"{_TOTALS} FROM ({self._tx}) t WHERE {where}",
+            *args,
+        )
+        assert total is not None
+        return {
+            "rows": [dict(r) for r in rows],
+            "totals": {k: int(total[k]) for k in ("count", "in_cents", "out_cents")},
+        }
+
+    async def emails(
+        self, delivery: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """Emails sent to traders, newest first, with the latest delivery
+        state (sent, failed, or none yet); never the body."""
+        s = self._s
+        where = "TRUE" if delivery is None else "coalesce(delivery, 'waiting') = $3"
+        args: list[Any] = [limit, offset] + ([] if delivery is None else [delivery])
+        rows = await self._pool.fetch(
+            "SELECT * FROM (SELECT n.ntf, n.cif, n.kind, n.subject, n.created_at, "
+            f"(SELECT e.kind FROM {s}.notification_events e WHERE e.ntf = n.ntf "
+            f"ORDER BY e.id DESC LIMIT 1) AS delivery FROM {s}.notifications n) t "
+            f"WHERE {where} ORDER BY created_at DESC, ntf DESC LIMIT $1 OFFSET $2",
+            *args,
+        )
+        return [dict(r) for r in rows]
+
+
+# --- export ---------------------------------------------------------------------------
+
+EXPORT_COLUMNS = (
+    "ref",
+    "type",
+    "cif",
+    "acc",
+    "amount",
+    "direction",
+    "status",
+    "remark",
+    "at",
+    "settled_at",
+)
+
+
+def cents_text(cents: int) -> str:
+    """123456 -> "1234.56"; integer arithmetic, no rounding."""
+    sign = "-" if cents < 0 else ""
+    whole, rest = divmod(abs(cents), 100)
+    return f"{sign}{whole}.{rest:02d}"
+
+
+def utc_text(ms: int | None) -> str:
+    """Epoch ms -> "2026-11-12T08:05:00Z" (whole seconds; the milliseconds
+    are cut, not rounded); empty for none."""
+    if ms is None:
+        return ""
+    t = dt.datetime.fromtimestamp(ms // 1000, tz=dt.UTC)
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def safe_cell(text: str) -> str:
+    """A cell a spreadsheet will not run as a formula (CSV injection): text
+    starting with = + - @ or a tab or carriage return gets a leading '."""
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+def export_rows(rows: list[dict[str, Any]]) -> list[list[str]]:
+    """Transaction rows as CSV cells, header first."""
+    out = [list(EXPORT_COLUMNS)]
+    for r in rows:
+        out.append(
+            [
+                r["ref"],
+                r["type"],
+                r["cif"],
+                r["acc"] or "",
+                cents_text(int(r["amount_cents"])),
+                r["direction"],
+                r["status"],
+                safe_cell(r["remark"] or ""),
+                utc_text(r["at"]),
+                utc_text(r["settled_at"]),
+            ]
+        )
+    return out

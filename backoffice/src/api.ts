@@ -48,6 +48,8 @@ export interface Api {
   get: <T>(path: string) => Promise<T>;
   post: <T>(path: string, body?: unknown) => Promise<T>;
   put: <T>(path: string, body?: unknown) => Promise<T>;
+  /** GET a non-JSON body (a CSV export) as text. */
+  text?: (path: string) => Promise<string>;
 }
 
 export function createApi(base: string, token: TokenSource, fetcher: typeof fetch = fetch): Api {
@@ -72,7 +74,26 @@ export function createApi(base: string, token: TokenSource, fetcher: typeof fetc
     }
     return parsed as T;
   }
+  async function text(path: string): Promise<string> {
+    const headers: Record<string, string> = {};
+    const bearer = await token();
+    if (bearer !== null) headers.Authorization = `Bearer ${bearer}`;
+    const response = await fetcher(`${base}${path}`, { method: "GET", headers });
+    const body = await response.text();
+    if (!response.ok) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        parsed = null;
+      }
+      const { code, message, permission } = detailOf(parsed);
+      throw new ApiError(response.status, code, message, permission);
+    }
+    return body;
+  }
   return {
+    text,
     get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body),
     put: (path, body) => request("PUT", path, body),
