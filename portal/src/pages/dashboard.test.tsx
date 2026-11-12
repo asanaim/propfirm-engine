@@ -158,3 +158,15 @@ it("warns a funded account that a fill inside a news window can end it", async (
   renderWith(<RulesPage acc="ACC00000001" />, fakeAuth(), server(funded));
   expect(await screen.findByText(/a violation can end the account/)).toBeInTheDocument();
 });
+
+it("tells an Instant trader whether a payout moves the trailing floor", async () => {
+  const kept = { ...ACCOUNT, target_balance_cents: null, rules: { ...ACCOUNT.rules, stage: "funded" as const, max_loss_kind: "trailing" as const, floor_restarts_after_payout: false } };
+  renderWith(<RulesPage acc="ACC00000001" />, fakeAuth(), server(kept));
+  expect(await screen.findByText(/A payout does not move the floor down again/)).toBeInTheDocument();
+});
+
+it("tells an older Instant account that its floor is set again after a payout", async () => {
+  const restarts = { ...ACCOUNT, target_balance_cents: null, rules: { ...ACCOUNT.rules, stage: "funded" as const, max_loss_kind: "trailing" as const, floor_restarts_after_payout: true } };
+  renderWith(<RulesPage acc="ACC00000001" />, fakeAuth(), server(restarts));
+  expect(await screen.findByText(/After a payout the floor is set again/)).toBeInTheDocument();
+});

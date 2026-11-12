@@ -409,10 +409,16 @@ fee_refund_with_payout = 0
 
   [[products.stages]]
   stage = "funded"
-  version = 1
+  version = 2              # 2: the floor does not restart after a payout (12 Nov 2026)
   profit_target_percent = ""
   max_loss_percent = "5"
   max_loss_kind = "trailing"
+  # Owner decision K7, 12 Nov 2026 (review D1): once the trailing floor
+  # reaches the starting balance it stays there; a payout does not move it
+  # down again. A payout may not take the account to or below the floor, so
+  # leave a buffer above it to keep trading. Version 1 accounts keep the
+  # restart they were sold with.
+  floor_restarts_after_payout = false
   daily_loss_percent = "3"
   min_trading_days = 0
   consistency_percent = "50"

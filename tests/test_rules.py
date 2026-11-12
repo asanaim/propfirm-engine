@@ -63,7 +63,8 @@ def test_catalogue_matches_confirmed_configuration() -> None:
         "classic-funded-v1": None,
         "one-step-s1-v2": Fraction(10, 100),
         "one-step-funded-v1": None,
-        "instant-funded-v1": None,
+        "instant-funded-v1": None,  # retired 12 Nov 2026; open accounts keep it
+        "instant-funded-v2": None,
     }
     assert [s.stage for s in PRODUCTS["lite"]] == [Stage.S1, Stage.S2, Stage.FUNDED]
     assert INSTANT.max_loss_kind is MaxLossKind.TRAILING
@@ -73,7 +74,10 @@ def test_catalogue_matches_confirmed_configuration() -> None:
         "one-step-s1-v2",
         "one-step-funded-v1",
         "instant-funded-v1",
+        "instant-funded-v2",
     }
+    restart = {r.rsv_id for r in RULESETS.values() if not r.floor_restarts_after_payout}
+    assert restart == {"instant-funded-v2"}  # D1: only the new Instant keeps its floor
 
 
 def test_size_must_be_on_the_price_list() -> None:

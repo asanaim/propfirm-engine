@@ -364,6 +364,7 @@ class InputRejectReason(StrEnum):
     DUPLICATE_PAYOUT = "duplicate_payout"
     POSITIONS_OPEN = "positions_open"
     PAYOUT_EXCEEDS_PROFIT = "payout_exceeds_profit"
+    PAYOUT_BREACHES_FLOOR = "payout_breaches_floor"  # a floor that does not restart
 
 
 @dataclass(frozen=True, slots=True)

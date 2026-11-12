@@ -32,7 +32,7 @@ from propfirm.policy import (
     parse_policy,
     percent_text,
 )
-from propfirm.rules.products import RULESETS
+from propfirm.rules.products import PRODUCTS
 from propfirm.service.setup import policy_changes, setup_from_policy
 from propfirm.trading.events import OrderRejected, PositionOpened, TradingConfigChanged
 from propfirm.trading.instruments import SpreadAndCommission, default_instruments
@@ -58,7 +58,7 @@ def lite(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_shipped_policy_is_the_confirmed_configuration() -> None:
-    assert SHIPPED.rule_sets() == tuple(RULESETS.values())
+    assert SHIPPED.rule_sets() == tuple(r for stages in PRODUCTS.values() for r in stages)
     defaults = tuple(default_instruments().values())
     assert SHIPPED.trading.config_version == "trading-v3"  # crypto: raw spread + commission
     shipped = SHIPPED.trading.instruments

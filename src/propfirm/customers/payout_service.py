@@ -127,6 +127,9 @@ class Payouts:
             violations_cents=violations,
             pending_payout=pending is not None and pending.po != ignore,
             wallet_added_at=wallet.added_at if wallet else None,
+            kept_floor_cents=(
+                None if rules.get("floor_restarts_after_payout", True) else live["max_floor_cents"]
+            ),
         )
         return eligibility(policy, account, now)
 

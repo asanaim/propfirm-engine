@@ -17,7 +17,7 @@ from propfirm.market.symbols import SYMBOLS
 from propfirm.market.synthetic import SyntheticConfig, generate
 from propfirm.rules.events import AccountStatus
 from propfirm.rules.news import EventScope, RestrictedEvent, trade_blocks
-from propfirm.rules.products import PRODUCTS
+from propfirm.rules.products import PRODUCTS, RULESETS
 from propfirm.rules.supervisor import Event, RuleSupervisor
 from propfirm.trading.engine import TradingEngine
 from propfirm.trading.instruments import default_instruments
@@ -28,7 +28,7 @@ T0 = ny(2026, 10, 28, 16, 58)  # two minutes before the reset
 SYMS = ("EUR/USD", "USD/JPY", "XAU/USD", "BTC/USD")
 ACCOUNTS = {
     "A": (PRODUCTS["lite"][0], 500_000),
-    "B": (PRODUCTS["instant"][0], 500_000),
+    "B": (RULESETS["instant-funded-v1"], 500_000),  # retired: its replays stay
     "C": (PRODUCTS["classic"][0], 1_000_000),
 }
 
