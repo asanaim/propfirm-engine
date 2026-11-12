@@ -1,24 +1,43 @@
+import { lazy, Suspense, type ComponentType } from "react";
 import { useAuth } from "./auth/AuthProvider";
 import { Layout } from "./components/Layout";
 import { Loading, Notice } from "./components/ui";
-import { AccountPage } from "./pages/AccountPage";
-import { AccountsPage } from "./pages/AccountsPage";
-import { FundedPage, OnboardingPage } from "./pages/FundedPage";
-import { HistoryPage } from "./pages/HistoryPage";
-import { NewsPage } from "./pages/NewsPage";
-import { NoticesPage } from "./pages/NoticesPage";
-import { RulesPage } from "./pages/RulesPage";
 import { OverviewPage } from "./pages/OverviewPage";
-import { PayoutsPage } from "./pages/PayoutsPage";
-import { PolicyPage } from "./pages/PolicyPages";
-import { SecurityPage } from "./pages/SecurityPage";
 import { ShopPage } from "./pages/ShopPage";
-import { ToolsPage } from "./pages/ToolsPage";
-import { AnalysisPage } from "./pages/AnalysisPage";
-import { ResetPage, SimulatorPage, SymbolsPage } from "./pages/ToolsExtra";
+import { PolicyPage } from "./pages/PolicyPages";
 import { usePath } from "./router";
 
-const PAGES: Record<string, () => React.JSX.Element> = {
+/** A page loaded when first opened (kept light, 12 Nov 2026): the public
+home and shop come with the first download; the trading screens and their
+chart arrive when a trader opens them. */
+function later<M extends Record<string, unknown>, P extends object = object>(
+  load: () => Promise<M>,
+  name: keyof M & string,
+): ComponentType<P> {
+  return lazy(async () => {
+    const component = (await load())[name];
+    if (typeof component !== "function") throw new Error(`${name} is not a page`);
+    return { default: component as ComponentType<P> };
+  });
+}
+
+const AccountPage = later<typeof import("./pages/AccountPage"), { acc: string }>(() => import("./pages/AccountPage"), "AccountPage");
+const AccountsPage = later(() => import("./pages/AccountsPage"), "AccountsPage");
+const FundedPage = later(() => import("./pages/FundedPage"), "FundedPage");
+const OnboardingPage = later<typeof import("./pages/FundedPage"), { onb: string }>(() => import("./pages/FundedPage"), "OnboardingPage");
+const HistoryPage = later<typeof import("./pages/HistoryPage"), { acc: string }>(() => import("./pages/HistoryPage"), "HistoryPage");
+const RulesPage = later<typeof import("./pages/RulesPage"), { acc: string }>(() => import("./pages/RulesPage"), "RulesPage");
+const NewsPage = later(() => import("./pages/NewsPage"), "NewsPage");
+const NoticesPage = later(() => import("./pages/NoticesPage"), "NoticesPage");
+const PayoutsPage = later(() => import("./pages/PayoutsPage"), "PayoutsPage");
+const SecurityPage = later(() => import("./pages/SecurityPage"), "SecurityPage");
+const ToolsPage = later(() => import("./pages/ToolsPage"), "ToolsPage");
+const AnalysisPage = later(() => import("./pages/AnalysisPage"), "AnalysisPage");
+const SymbolsPage = later(() => import("./pages/ToolsExtra"), "SymbolsPage");
+const ResetPage = later(() => import("./pages/ToolsExtra"), "ResetPage");
+const SimulatorPage = later(() => import("./pages/ToolsExtra"), "SimulatorPage");
+
+const PAGES: Record<string, ComponentType> = {
   "/": OverviewPage,
   "/accounts": AccountsPage,
   "/shop": ShopPage,
@@ -30,7 +49,7 @@ const PAGES: Record<string, () => React.JSX.Element> = {
   "/tools": ToolsPage,
   "/analysis": AnalysisPage,
   "/tools/symbols": SymbolsPage,
-  "/tools/reset": () => <ResetPage />,
+  "/tools/reset": ResetPage,
   "/tools/simulator": SimulatorPage,
 };
 
@@ -71,5 +90,9 @@ export function App() {
   else if (onb !== undefined) content = <OnboardingPage key={onb} onb={onb} />;
   else if (Page === undefined) content = <Notice tone="error">This page does not exist.</Notice>;
   else content = <Page />;
-  return <Layout>{content}</Layout>;
+  return (
+    <Layout>
+      <Suspense fallback={<Loading label="Loading" />}>{content}</Suspense>
+    </Layout>
+  );
 }

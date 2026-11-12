@@ -76,6 +76,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: node ../scripts/size-budget.mjs dist 130000  # first download, gzip
 
   backoffice:
     runs-on: ubuntu-24.04
@@ -94,6 +95,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: node ../scripts/size-budget.mjs dist 330000  # first download, gzip
 
   # P2 step 7a: dependencies, code, secrets and the runtime image
   security:
