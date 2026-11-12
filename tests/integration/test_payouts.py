@@ -70,15 +70,20 @@ def test_a_funded_accounts_payable_profit_and_checks(
             )
             assert pnl > 25_000
 
+            # Instant version 2: the floor locked at the starting balance stays
+            # there after a payout, so the account must stay one cent above it
+            payable = pnl - 1
+
             async def settled() -> Any:
                 view = (await payout()).json()
-                return view if view["payable_cents"] == pnl else None
+                return view if view["payable_cents"] == payable else None
 
             now = await eventually(settled)
-            assert (now["split_percent"], now["trader_share_cents"]) == ("80", pnl * 4 // 5)
-            assert now["firm_share_cents"] == pnl - pnl * 4 // 5
+            assert (now["split_percent"], now["trader_share_cents"]) == ("80", payable * 4 // 5)
+            assert now["firm_share_cents"] == payable - payable * 4 // 5
             checks = {c["name"]: c["status"] for c in now["checks"]}
             assert checks == {
+                "floor": "pass",
                 "funded": "pass",
                 "waiting_period": "fail",  # funded today
                 "trading_days": "pass",
@@ -111,11 +116,17 @@ OTHER = "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb"
 
 def instant_without_consistency() -> Policy:
     """The Instant funded stage without its consistency rule, so one trading
-    day can be paid out."""
+    day can be paid out, and with the retired version 1 floor (it restarts
+    after a payout), so the whole profit can be paid; the floor that stays
+    (version 2) has its own tests (tests/test_instant_floor.py and the
+    payable profit test above)."""
     policy = load_policy()
     instant = policy.product("instant")
     rule_sets = tuple(
-        replace(r, consistency=None) if r.stage is Stage.FUNDED else r for r in instant.rule_sets
+        replace(r, rsv_id="instant-funded-v1", consistency=None, floor_restarts_after_payout=True)
+        if r.stage is Stage.FUNDED
+        else r
+        for r in instant.rule_sets
     )
     products = tuple(
         replace(p, rule_sets=rule_sets) if p.id == "instant" else p for p in policy.products

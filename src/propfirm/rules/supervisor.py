@@ -17,6 +17,8 @@ Floors (all in integer cents, compared at-or-below):
 - daily floor = daily base - daily limit
 - static max floor = initial balance - max loss
 - trailing max floor = min(high-water mark - max loss, initial balance)
+  A payout lowers the high-water mark by the amount paid (the floor
+  restarts) only on rule sets with `floor_restarts_after_payout`.
 
 A breach closes every position at the current prices (gaps fill at the
 actual price; the extra loss is recorded, not capped) and locks the account.
@@ -284,6 +286,11 @@ class RuleSupervisor:
             return "positions_open"
         if amount_cents > engine.balance(account_id) - state.initial_balance:
             return "payout_exceeds_profit"  # the balance never goes below the baseline
+        # a floor that stays put: the account must stay above it (flat, so
+        # equity is the balance)
+        kept = not state.rules.floor_restarts_after_payout
+        if kept and engine.balance(account_id) - amount_cents <= self._max_floor(state):
+            return "payout_breaches_floor"
         return None
 
     def debit_payout(self, account_id: str, amount_cents: int, payout: str, ts: int) -> list[Event]:
@@ -295,7 +302,8 @@ class RuleSupervisor:
         events = self._roll(ts)
         self._engine.debit_payout(account_id, amount_cents, payout, ts)
         state.day_base -= amount_cents
-        state.high_water -= amount_cents
+        if state.rules.floor_restarts_after_payout:
+            state.high_water -= amount_cents  # the floor restarts below the new balance
         events.append(
             PayoutDebited(
                 self._engine.now,

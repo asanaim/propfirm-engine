@@ -287,6 +287,8 @@ def rule_set_view(r: RuleSet) -> dict[str, Any]:
         "flat_to_pass": r.flat_to_pass,  # no open position or pending order to pass
         "tie_rule": r.tie_rule.value,  # a breach and a pass on the same check
         "news_restricted": r.news_restricted,  # restricted news windows bind this stage
+        # trailing loss: a payout restarts the floor below the new balance
+        "floor_restarts_after_payout": r.floor_restarts_after_payout,
     }
 
 
@@ -330,6 +332,11 @@ class _Table:
         if not isinstance(value, list) or not value:
             raise PolicyError(f"{self.name(key)} must be a non-empty list of tables")
         return [_Table(v, f"{self.name(key)}[{i}]") for i, v in enumerate(value)]
+
+    def optional_boolean(self, key: str, default: bool) -> bool:
+        """A switch that may be left out (`default` then); added after
+        policy files existed."""
+        return self.boolean(key) if key in self._data else default
 
     def boolean(self, key: str) -> bool:
         value = self._get(key)
@@ -813,4 +820,5 @@ def _rule_set(
         consistency_at_pass=t.boolean("consistency_at_pass"),
         sizes_cents=sizes,
         news_restricted=t.boolean("news_restricted"),
+        floor_restarts_after_payout=t.optional_boolean("floor_restarts_after_payout", True),
     )

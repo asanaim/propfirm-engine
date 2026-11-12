@@ -32,7 +32,10 @@ Eligibility, all of which must hold (M18):
 - no case not closed (integrity, fraud, compliance: M16, M17, M20); the
   detail never says more than "held for review" (no tipping off).
 - no payout of the account already being processed;
-- a payout wallet, past its cooling-off period.
+- a payout wallet, past its cooling-off period;
+- floor (rule sets whose trailing floor does not restart, review D1): the
+  payout leaves the closed balance above the max loss floor, so P is at
+  most the balance less V less the floor less one cent.
 The amount leaving the account is P + V (G + V when a maximum caps the
 trader's share: G = the share paid / s, rounded up to the cent; the rest of
 P stays payable).
@@ -101,6 +104,9 @@ class FundedAccount:
     # payouts (3d)
     pending_payout: bool = False  # a payout of this account requested, not yet debited
     wallet_added_at: int | None = None  # the customer's payout wallet; None: none
+    # the max loss floor when the rule set keeps it after a payout (Instant
+    # from version 2, review D1); None: the floor restarts, or is static
+    kept_floor_cents: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +148,12 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
     measured = account.balance_cents if payouts.basis == "closed_balance" else account.equity_cents
     violations = account.violations_cents
     payable = max(0, measured - account.baseline_cents - violations)
+    room: int | None = None
+    if account.kept_floor_cents is not None:
+        # the floor does not move with the payout: what leaves (P + V) must
+        # keep the closed balance above it (a breach is at or below)
+        room = max(0, account.balance_cents - violations - account.kept_floor_cents - 1)
+        payable = min(payable, room)
     split = account.product.profit_split
     trader_share = share_floor(payable, split)
     payout_number = account.payouts_paid + 1
@@ -201,6 +213,13 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
             f"best day {best} of {total} cents; at most {percent_text(share)} %",
         )
 
+    if room is not None and account.kept_floor_cents is not None:
+        check(
+            "floor",
+            room > 0,
+            f"the loss floor stays at {account.kept_floor_cents} cents after a payout; "
+            f"at most {room} cents of profit can leave while the account stays above it",
+        )
     check(
         "minimum",
         amount >= payouts.minimum_cents,

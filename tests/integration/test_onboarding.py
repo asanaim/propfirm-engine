@@ -184,7 +184,7 @@ def test_an_instant_account_opens_only_after_the_agreement_is_signed(
             assert (onboarding["source"], onboarding["ord"], onboarding["rsv_id"]) == (
                 "order",
                 order["ord"],
-                "instant-funded-v1",
+                "instant-funded-v2",
             )
             mine = await verify(p, onboarding["onb"])
             assert (mine["status"], mine["acc"]) == ("signature", "ACC00000001")

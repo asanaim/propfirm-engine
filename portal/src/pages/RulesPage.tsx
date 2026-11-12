@@ -69,6 +69,10 @@ export function RulesPage({ acc }: { acc: string }) {
             {r.max_loss_kind === "static"
               ? "the account is breached when equity falls to or below the starting balance minus the maximum loss."
               : "the floor follows the highest equity reached, minus the maximum loss, and never rises above the starting balance."}
+            {r.max_loss_kind === "trailing" &&
+              (r.floor_restarts_after_payout === false
+                ? " A payout does not move the floor down again: once it reaches the starting balance it stays there, so a payout must leave the account above it."
+                : " After a payout the floor is set again from the new balance.")}
           </li>
           {a.target_balance_cents !== null && (
             <li>

@@ -15,6 +15,7 @@ export interface Stage {
   flat_to_pass: boolean; // no open position or pending order to pass
   tie_rule: "breach_wins" | "pass_wins";
   news_restricted: boolean; // restricted news windows bind this stage (funded only, as FTMO)
+  floor_restarts_after_payout?: boolean; // trailing loss: a payout lowers the floor again (older Instant only)
 }
 
 export interface Product {

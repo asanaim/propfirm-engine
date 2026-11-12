@@ -10,6 +10,9 @@ fractions of the initial balance.
 | 1-Step  | S1 FND | 10% | 6% static | 3% | best day <= 50% of profit |
 | Instant | FND | none | 5% trailing, stops at start | 3% | best day <= 50% of profit |
 
+Instant from 12 Nov 2026 (policy version 2): the trailing floor does not
+restart after a payout (review D1); version 1 accounts keep the restart.
+
 Decisions taken here:
 - D10 [CONFIRMED 29 Oct 2026]: the target is measured on closed balance.
 - D11 [CONFIRMED 29 Oct 2026]: a breach wins over a pass in the same check.
@@ -22,7 +25,7 @@ Decisions taken here:
   Instant it gates payouts, which come later.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from fractions import Fraction
 
@@ -76,6 +79,12 @@ class RuleSet:
     # FTMO: funded accounts only; evaluations are exempt [decided 2026-10-31].
     # Added after records existed: True (every phase) for older rule sets.
     news_restricted: bool = added_field(True)
+    # Trailing max loss only: whether a payout lowers the high-water mark by
+    # the amount paid, so the floor restarts below the new balance (True:
+    # the rule sets before 12 Nov 2026). False [decided 12 Nov 2026, review
+    # D1]: the floor stays where it was; a payout may not take the account
+    # to or below it. Added after records existed: True for older rule sets.
+    floor_restarts_after_payout: bool = added_field(True)
 
     def __post_init__(self) -> None:
         require_text("rsv_id", self.rsv_id)
@@ -97,6 +106,10 @@ class RuleSet:
             raise ValueError("consistency_at_pass needs a consistency share")
         if not isinstance(self.news_restricted, bool):
             raise TypeError("news_restricted must be a bool")
+        if not isinstance(self.floor_restarts_after_payout, bool):
+            raise TypeError("floor_restarts_after_payout must be a bool")
+        if not self.floor_restarts_after_payout and self.max_loss_kind is not MaxLossKind.TRAILING:
+            raise ValueError("only a trailing max loss has a floor that could restart")
         if not self.sizes_cents:
             raise ValueError("sizes_cents must not be empty")
         for size in self.sizes_cents:
@@ -170,6 +183,23 @@ def _one_step(stage: Stage, target: Fraction | None) -> RuleSet:
     )
 
 
+_INSTANT_V1 = RuleSet(
+    rsv_id="instant-funded-v1",
+    product="instant",
+    stage=Stage.FUNDED,
+    profit_target=None,
+    max_loss=_P(5, 100),
+    max_loss_kind=MaxLossKind.TRAILING,
+    daily_loss=_P(3, 100),
+    min_trading_days=0,
+    consistency=_P(1, 2),
+    consistency_at_pass=False,
+    sizes_cents=_INSTANT_SIZES,
+)
+# owner decision K7, 12 Nov 2026 (review D1): the floor does not restart
+_INSTANT_V2 = replace(_INSTANT_V1, rsv_id="instant-funded-v2", floor_restarts_after_payout=False)
+
+# The rule sets on sale, per product, in stage order.
 PRODUCTS: dict[str, tuple[RuleSet, ...]] = {
     "lite": (
         _lite(Stage.S1, _P(6, 100)),
@@ -182,21 +212,13 @@ PRODUCTS: dict[str, tuple[RuleSet, ...]] = {
         _classic(Stage.FUNDED, None),
     ),
     "one-step": (_one_step(Stage.S1, _P(10, 100)), _one_step(Stage.FUNDED, None)),
-    "instant": (
-        RuleSet(
-            rsv_id="instant-funded-v1",
-            product="instant",
-            stage=Stage.FUNDED,
-            profit_target=None,
-            max_loss=_P(5, 100),
-            max_loss_kind=MaxLossKind.TRAILING,
-            daily_loss=_P(3, 100),
-            min_trading_days=0,
-            consistency=_P(1, 2),
-            consistency_at_pass=False,
-            sizes_cents=_INSTANT_SIZES,
-        ),
-    ),
+    "instant": (_INSTANT_V2,),
 }
 
-RULESETS: dict[str, RuleSet] = {r.rsv_id: r for stages in PRODUCTS.values() for r in stages}
+# Versions no longer sold; accounts opened on them keep them.
+RETIRED: tuple[RuleSet, ...] = (_INSTANT_V1,)
+
+# every version, current and retired, by rule-set id
+RULESETS: dict[str, RuleSet] = {
+    r.rsv_id: r for r in (*(r for stages in PRODUCTS.values() for r in stages), *RETIRED)
+}
