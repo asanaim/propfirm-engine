@@ -8,6 +8,19 @@ without a CIF. Every request reads the policy in force (`PolicySource`).
 Ordering: AML screening at the first purchase (CC-6), then the price from
 the policy (pricing), then an invoice from the payment provider.
 
+What may be bought (review D4, owner decisions of 12 Nov 2026), checked
+before the invoice:
+- the product and the size are on sale (`catalogue`);
+- the allocation cap (`scaling.max_allocation_cents`, $400,000): the sizes
+  of the trader's committed capital plus the new order may not exceed it.
+  Committed: every order whose account is open or has passed and waits for
+  its next stage, every order paid and not yet opened, and every order not
+  yet paid for up to `catalogue.unpaid_hold_hours`. A breached or voided
+  account no longer counts;
+- one Instant account per trader (`catalogue.one_instant_funding_per_
+  trader`): none of the trader's committed orders is a product sold
+  straight to a funded account.
+
 Every step is an event in the order's append-only history
 (`customers.history`); the order's status is a cache of that history.
 
@@ -36,7 +49,7 @@ from propfirm.customers.pricing import DiscountKind, PricingError, price
 from propfirm.customers.providers import PaymentProvider, Screener
 from propfirm.customers.store import CifRecord, CustomerStore, OrderRecord
 from propfirm.journal.inputs import Input, OpenAccount
-from propfirm.policy import PolicySource, stage_of
+from propfirm.policy import Policy, PolicySource, instant_funding, stage_of
 from propfirm.rules.products import Stage
 from propfirm.service.gateway import Outcome
 
@@ -45,6 +58,17 @@ class Submitter(Protocol):
     async def publish(self, item: Input) -> str: ...
 
     async def outcome(self, entry_id: str, wait_s: float) -> Outcome: ...
+
+
+class AccountStatuses(Protocol):
+    """The engine's live view of an account (its `status`)."""
+
+    async def account(self, account_id: str) -> dict[str, Any] | None: ...
+
+
+# an account in one of these still holds its capital: open, or passed and
+# waiting for its next stage
+_HOLDING = ("active", "passed")
 
 
 class FundedGate(Protocol):
@@ -81,10 +105,12 @@ class Checkout:
         wait_s: float = 5.0,
         funded: FundedGate | None = None,
         cases: Casework | None = None,
+        live: AccountStatuses | None = None,
     ) -> None:
         """`funded` holds funded orders until onboarding is done (None: they
         open at payment, as before step 3b; tests only)."""
         self._store = store
+        self._live = live  # None: open accounts are counted from the records alone
         self._policy = policy
         self._payments = payments
         self._screener = screener
@@ -141,10 +167,12 @@ class Checkout:
         """Create an order and its invoice; return (order, payment URL)."""
         if cif.status != "registered":
             raise CheckoutError("blocked", "this customer cannot buy")
+        policy = await self._policy.current()
         try:
-            product = (await self._policy.current()).product(product_id)
+            product = policy.product(product_id)
         except KeyError:
             raise CheckoutError("unknown_product", f"no product {product_id!r}") from None
+        await self._check_offer(policy, cif.cif, product_id, size_cents, ts)
         if not await self._store.screened_clear(cif.cif):
             screening = await self._screener.screen(
                 cif.full_name, cif.date_of_birth.isoformat(), cif.residence_country
@@ -185,6 +213,58 @@ class Checkout:
         invoice = await self._payments.create_invoice(order.ord, order.price_cents)
         stored = await self._store.set_provider_ref(order.ord, invoice.provider_ref, ts)
         return stored, invoice.pay_url
+
+    async def committed(self, cif: str, now: int, hold_hours: int) -> list[OrderRecord]:
+        """The trader's orders that hold capital now (see the module text)."""
+        accounts: dict[str, list[str]] = {}
+        for account in await self._store.accounts_for(cif):
+            accounts.setdefault(account.ord, []).append(account.acc)
+        ended = await self._store.ended_orders(cif)
+        held = []
+        for order in await self._store.orders_for(cif):
+            if order.status == "failed" or order.ord in ended:
+                continue
+            if order.status == "pending":
+                if now - order.created_at < hold_hours * 3_600_000:
+                    held.append(order)
+                continue
+            opened = accounts.get(order.ord, [])
+            if not opened:
+                held.append(order)  # paid, not opened yet (Instant: until signed)
+                continue
+            latest = max(opened)  # the order's newest account: its current stage
+            view = await self._live.account(latest) if self._live is not None else None
+            if view is None or view.get("status") in _HOLDING:
+                held.append(order)
+        return held
+
+    async def _check_offer(
+        self, policy: Policy, cif: str, product_id: str, size_cents: int, ts: int
+    ) -> None:
+        """Refuse what is not on sale, over the allocation cap, or a second
+        Instant account (review D4)."""
+        catalogue = policy.catalogue
+        product = policy.product(product_id)
+        if product.id in catalogue.products_off:
+            raise CheckoutError("not_on_sale", f"{product.name} is not on sale")
+        if size_cents in catalogue.sizes_off:
+            raise CheckoutError("size_off", "this account size is not on sale")
+        held = await self.committed(cif, ts, catalogue.unpaid_hold_hours)
+        if catalogue.one_instant_funding_per_trader and instant_funding(product):
+            for order in held:
+                other = next((p for p in policy.products if p.id == order.product_id), None)
+                if other is not None and instant_funding(other):
+                    raise CheckoutError(
+                        "one_instant", f"one {product.name} account at a time: {order.ord} holds it"
+                    )
+        cap = policy.scaling.max_allocation_cents
+        total = sum(o.size_cents for o in held) + size_cents
+        if total > cap:
+            raise CheckoutError(
+                "allocation_cap",
+                f"your accounts would total ${total // 100:,}; "
+                f"the most one trader may hold at once is ${cap // 100:,}",
+            )
 
     # --- payment and provisioning ---------------------------------------------------
 

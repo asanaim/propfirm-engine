@@ -81,6 +81,20 @@ split_after_step = 2           # from this step the split below applies
 split_percent_after = "90"
 max_allocation_cents = 40000000  # $400,000 per trader
 
+[catalogue]
+# What is on sale (review D4; owner decisions K2 and K4, 12 Nov 2026).
+# Owners and admins switch products and sizes on and off in the back office
+# (a second admin or owner approves); these are the starting values.
+# Accounts already bought keep their product and rules.
+products_off = ["classic"]     # K2: Lite, 1-Step and Instant are sold; Classic is off
+sizes_off = []                 # sizes in cents, e.g. [500000] for 5K
+# An Instant account (straight to funded) is held once per trader at a time.
+one_instant_funding_per_trader = true
+# The allocation cap is scaling.max_allocation_cents ($400,000): the funded
+# capital of a trader's accounts that are open, passed and waiting, paid
+# and not yet opened, or ordered and unpaid for up to this many hours.
+unpaid_hold_hours = 24
+
 [trading]
 config_version = "trading-v3"
 delay_threshold_ms = 2000      # older updates freeze the symbol
@@ -278,7 +292,7 @@ sizes_cents = [500000, 1000000, 2500000, 5000000, 10000000, 20000000]
 prices_cents = [2400, 4400, 9900, 17900, 31900, 63900]
 profit_split_percent = "80"
 code_discount_max_percent = "10"
-repeat_discount_percent = ["10", "15"]  # 2nd and 3rd account
+repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 0     # 0: no fee refund
 
   [[products.stages]]
@@ -324,7 +338,7 @@ sizes_cents = [1000000, 2500000, 5000000, 10000000, 20000000]
 prices_cents = [5400, 11900, 20900, 40900, 79900]
 profit_split_percent = "80"
 code_discount_max_percent = "10"
-repeat_discount_percent = ["10", "15"]
+repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 0
 
   [[products.stages]]
@@ -370,7 +384,7 @@ sizes_cents = [500000, 1000000, 2500000, 5000000, 10000000, 20000000]
 prices_cents = [3700, 7900, 19900, 29900, 49900, 99900]
 profit_split_percent = "80"
 code_discount_max_percent = "10"
-repeat_discount_percent = ["10", "15"]
+repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 3     # refunded with the 3rd payout
 
   [[products.stages]]
@@ -404,7 +418,7 @@ sizes_cents = [500000, 1000000, 2500000]
 prices_cents = [10900, 19900, 47900]
 profit_split_percent = "80"
 code_discount_max_percent = "0"  # no codes on Instant
-repeat_discount_percent = ["10", "10"]
+repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 0
 
   [[products.stages]]

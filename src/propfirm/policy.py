@@ -162,6 +162,39 @@ class ProductPolicy:
         return next((r for r in self.rule_sets if r.stage is stage), None)
 
 
+@dataclass(frozen=True, slots=True)
+class CataloguePolicy:
+    """What is on sale, and the limits on buying it (review D4, owner
+    decisions K2 of 12 Nov 2026). Products and sizes switched off are not
+    sold; accounts already bought keep their product and rules.
+
+    - products_off, sizes_off: switched off (owners or admins change them
+      under the two-person rule; the file holds the starting values);
+    - one_instant_funding_per_trader: a product sold straight to a funded
+      account (no evaluation stage) may be held once per trader at a time;
+    - unpaid_hold_hours: an order not yet paid counts against the
+      allocation cap for this long, so two invoices cannot both pass it.
+    The allocation cap itself is `scaling.max_allocation_cents`, the figure
+    the contract and the website state."""
+
+    products_off: frozenset[str] = frozenset()
+    sizes_off: frozenset[int] = frozenset()
+    one_instant_funding_per_trader: bool = False
+    unpaid_hold_hours: int = 24
+
+    def on_sale(self, product: ProductPolicy) -> bool:
+        return product.id not in self.products_off and bool(self.sizes(product))
+
+    def sizes(self, product: ProductPolicy) -> tuple[tuple[int, int], ...]:
+        """(size, price) of the product's sizes on sale."""
+        return tuple((s, p) for s, p in product.prices_cents if s not in self.sizes_off)
+
+
+def instant_funding(product: ProductPolicy) -> bool:
+    """A product sold straight to a funded account (no evaluation)."""
+    return product.rule_sets[0].stage is Stage.FUNDED
+
+
 PAYOUT_BASES = ("closed_balance", "equity")
 _TEMPLATE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 DISCLOSURES = ("simulated", "live")
@@ -204,6 +237,7 @@ class Policy:
     contract: ContractPolicy
     cases: CasePolicy
     staff: StaffPolicy = field(default_factory=StaffPolicy)
+    catalogue: CataloguePolicy = field(default_factory=CataloguePolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         return tuple(r for p in self.products for r in p.rule_sets)
@@ -413,6 +447,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             contract=_contract(root.table("contract")),
             cases=_cases(root.table("cases")),
             staff=_staff(root.table("staff")),
+            catalogue=_catalogue(root.table("catalogue")),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -423,11 +458,43 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
     ids = [p.id for p in policy.products]
     if len(set(ids)) != len(ids):
         raise PolicyError("product ids must be unique")
+    check_catalogue(policy, policy.catalogue.products_off, policy.catalogue.sizes_off)
     refunds = [c for p in policy.products if p.fee_refund_with_payout for _, c in p.prices_cents]
     if policy.payouts.maximum_cents and policy.payouts.maximum_cents < max(refunds, default=0):
         # the fee refund is paid with a payout and counts towards its maximum
         raise PolicyError("payouts.maximum_cents must be 0 or at least every refundable fee")
     return policy
+
+
+def _catalogue(t: _Table) -> CataloguePolicy:
+    off = t.texts("products_off")
+    sizes = t.integers("sizes_off", 1)
+    policy = CataloguePolicy(
+        products_off=frozenset(off),
+        sizes_off=frozenset(sizes),
+        one_instant_funding_per_trader=t.boolean("one_instant_funding_per_trader"),
+        unpaid_hold_hours=t.integer("unpaid_hold_hours", 1),
+    )
+    t.done()
+    if len(set(off)) != len(off) or len(set(sizes)) != len(sizes):
+        raise PolicyError("catalogue: a product or size is listed twice")
+    return policy
+
+
+def all_sizes(policy: Policy) -> tuple[int, ...]:
+    """Every account size any product has a price for, ascending."""
+    return tuple(sorted({s for p in policy.products for s, _ in p.prices_cents}))
+
+
+def check_catalogue(
+    policy: Policy, products_off: frozenset[str], sizes_off: frozenset[int]
+) -> None:
+    """PolicyError unless every product and size switched off exists."""
+    ids = {p.id for p in policy.products}
+    if unknown := sorted(products_off - ids):
+        raise PolicyError(f"catalogue: unknown products {unknown}")
+    if unknown_sizes := sorted(sizes_off - set(all_sizes(policy))):
+        raise PolicyError(f"catalogue: no product has the sizes {unknown_sizes} (cents)")
 
 
 @dataclass(frozen=True, slots=True)

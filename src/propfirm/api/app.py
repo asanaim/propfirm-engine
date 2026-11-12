@@ -115,11 +115,15 @@ from propfirm.market.symbols import AssetClass
 from propfirm.newsfeed.alerts import SourceAlerts, alert_view
 from propfirm.policy import (
     LOCKED_SWITCHES,
+    CataloguePolicy,
     Policy,
     PolicyError,
     PolicySource,
     ProductPolicy,
     StaffPolicy,
+    all_sizes,
+    check_catalogue,
+    instant_funding,
     parse_countries,
     percent_text,
     rule_set_view,
@@ -154,6 +158,7 @@ from propfirm.settings.notices import (
     NoticeWrapper,
     utc_text,
 )
+from propfirm.settings.offering import Offering
 from propfirm.settings.overlay import (
     PAGE_SLUG,
     CountryGating,
@@ -609,6 +614,14 @@ class NoticeWrapperBody(_Body):
     reason: Reason
 
 
+class OfferingBody(_Body):
+    products_off: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=40)]], Field(max_length=50)
+    ]
+    sizes_off: Annotated[list[Annotated[int, Field(ge=1)]], Field(max_length=50)]
+    reason: Reason
+
+
 class SiteModeBody(_Body):
     maintenance: StrictBool
     registration_open: StrictBool
@@ -647,7 +660,9 @@ class StageLimitsBody(_Body):
 # --- views ----------------------------------------------------------------------------
 
 
-def product_view(p: ProductPolicy) -> dict[str, Any]:
+def product_view(p: ProductPolicy, catalogue: CataloguePolicy | None = None) -> dict[str, Any]:
+    """A product as the shop shows it; with `catalogue`, only the sizes on sale."""
+    sizes = p.prices_cents if catalogue is None else catalogue.sizes(p)
     return {
         "id": p.id,
         "name": p.name,
@@ -655,7 +670,7 @@ def product_view(p: ProductPolicy) -> dict[str, Any]:
         "code_discount_max_percent": percent_text(p.code_discount_max),
         "repeat_discount_percent": [percent_text(d) for d in p.repeat_discounts],
         "fee_refund_with_payout": p.fee_refund_with_payout or None,
-        "sizes": [{"size_cents": s, "price_cents": c} for s, c in p.prices_cents],
+        "sizes": [{"size_cents": s, "price_cents": c} for s, c in sizes],
         "stages": [rule_set_view(r) for r in p.rule_sets],
     }
 
@@ -1585,8 +1600,11 @@ def create_app(
 
     @app.get("/catalogue")
     async def catalogue(deps: D) -> list[dict[str, Any]]:
-        """Products in force: sizes, prices, terms, targets and loss limits."""
-        return [product_view(p) for p in (await _policy(deps)).products]
+        """Products on sale: sizes on sale, prices, terms, targets and loss
+        limits (review D4: products and sizes switched off are not shown)."""
+        policy = await _policy(deps)
+        on_sale = [p for p in policy.products if policy.catalogue.on_sale(p)]
+        return [product_view(p, policy.catalogue) for p in on_sale]
 
     @app.get("/access")
     async def access(deps: D) -> dict[str, Any]:
@@ -2966,6 +2984,43 @@ def create_app(
         """New text around every email body ({body} once), by proposal."""
         try:
             setting = NoticeWrapper(channel, body.text)
+        except PolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await propose_setting(deps, me, setting, body.reason)
+
+    @app.get("/admin/offering")
+    async def admin_offering(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """Products and account sizes, each on sale or switched off, with the
+        allocation cap and the one-Instant rule (review D4)."""
+        policy = await _policy(deps)
+        c = policy.catalogue
+        return {
+            "products": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "on": p.id not in c.products_off,
+                    "instant": instant_funding(p),
+                    "sizes": [
+                        {"size_cents": s, "price_cents": price, "on": s not in c.sizes_off}
+                        for s, price in p.prices_cents
+                    ],
+                }
+                for p in policy.products
+            ],
+            "sizes": [{"size_cents": s, "on": s not in c.sizes_off} for s in all_sizes(policy)],
+            "allocation_cap_cents": policy.scaling.max_allocation_cents,
+            "one_instant_funding_per_trader": c.one_instant_funding_per_trader,
+            "unpaid_hold_hours": c.unpaid_hold_hours,
+        }
+
+    @app.put("/admin/offering")
+    async def propose_offering(deps: D, me: SettingsChanger, body: OfferingBody) -> dict[str, Any]:
+        """Switch products or account sizes off (or on again): a proposal a
+        second admin or owner approves (rule AC00). Stops new sales only."""
+        setting = Offering(frozenset(body.products_off), frozenset(body.sizes_off))
+        try:
+            check_catalogue(await _policy(deps), setting.products_off, setting.sizes_off)
         except PolicyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return await propose_setting(deps, me, setting, body.reason)

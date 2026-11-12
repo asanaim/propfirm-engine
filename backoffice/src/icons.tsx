@@ -40,6 +40,7 @@ import {
   UserX,
   Wallet,
   Contact,
+  Boxes,
   ArrowLeftRight,
   Server,
 } from "lucide-react";
@@ -95,5 +96,6 @@ export const ICONS = {
   extensions: Puzzle,
   maintenance: Wrench,
   security: LockKeyhole,
+  offering: Boxes,
   system: Server,
 } satisfies Record<string, LucideIcon>;
