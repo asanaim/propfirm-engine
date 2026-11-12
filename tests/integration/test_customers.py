@@ -156,6 +156,7 @@ async def platform(
     cases = Casework(
         CaseStore(pool, config.customer_schema, config.schema), store, settings, gateway, wait_s
     )
+    live = LiveReader(client, config.live_prefix)
     checkout = Checkout(
         store,
         settings,
@@ -165,6 +166,7 @@ async def platform(
         wait_s,
         funded=onboardings if funded else None,
         cases=cases,
+        live=live,
     )
     onboarding = (
         Onboarding(
@@ -189,7 +191,6 @@ async def platform(
         wait_s,
         cases=cases,
     )
-    live = LiveReader(client, config.live_prefix)
     mailer = SandboxMailer()
     notifications = Notifications(NotificationStore(pool, config.customer_schema), mailer)
     payouts = Payouts(
@@ -371,7 +372,8 @@ def test_register_buy_pay_and_trade(database_url: str, valkey_url: str, pg_schem
             assert (await p.call("POST", f"/accounts/{acc}/orders", "u2", trade)).status_code == 404
 
             second = (await p.call("POST", "/orders", body=LITE_10K)).json()  # nothing paid yet
-            assert second["discount_kind"] == "repeat" and second["price_cents"] == 3_960
+            # K4 (12 Nov 2026): no repeat discount, the list price
+            assert second["discount_kind"] == "none" and second["price_cents"] == 4_400
             coded = await p.call("POST", "/orders", body={**LITE_10K, "code": "WELCOME10"})
             assert coded.status_code == 422  # codes are for first accounts only
 

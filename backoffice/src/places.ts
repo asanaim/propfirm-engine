@@ -166,6 +166,17 @@ export const AREAS: readonly Area[] = [
     keywords: "extensions plugins chat captcha analytics",
   },
   {
+    key: "offering",
+    title: "Products and sizes",
+    explains: "Switch products and account sizes on or off for sale, with the $400,000 allocation cap and one Instant account per trader. A second person approves.",
+    icon: "offering",
+    state: "open",
+    path: "/offering",
+    screen: "offering",
+    rule: null,
+    keywords: "products sizes catalogue 10k 25k 50k 100k 200k 400k allocation cap instant classic on sale",
+  },
+  {
     key: "maintenance",
     title: "Maintenance",
     explains: "Maintenance mode and closing registration, and the page shown for each with its own message and image. A second person approves.",

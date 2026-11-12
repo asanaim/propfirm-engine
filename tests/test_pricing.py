@@ -1,5 +1,6 @@
 """Prices and discounts from the policy file, and the age check."""
 
+from dataclasses import replace
 from datetime import date
 from fractions import Fraction
 
@@ -12,6 +13,10 @@ from propfirm.policy import load_policy
 POLICY = load_policy()
 LITE = POLICY.product("lite")
 INSTANT = POLICY.product("instant")
+# the mechanism, on products that grant repeat discounts (the shipped policy
+# grants none since owner decision K4 of 12 Nov 2026)
+REPEATING = replace(LITE, repeat_discounts=(Fraction(10, 100), Fraction(15, 100)))
+REPEATING_INSTANT = replace(INSTANT, repeat_discounts=(Fraction(10, 100), Fraction(10, 100)))
 TEN = Fraction(1, 10)
 
 
@@ -50,11 +55,13 @@ def test_codes_that_do_not_apply(product: object, prior: int, code: Fraction) ->
 @pytest.mark.parametrize(
     ("product", "prior", "share"),
     [
-        (LITE, 1, Fraction(10, 100)),  # 2nd account
-        (LITE, 2, Fraction(15, 100)),  # 3rd
-        (LITE, 3, Fraction(0)),  # 4th: the record defines no discount
-        (INSTANT, 1, Fraction(10, 100)),
-        (INSTANT, 2, Fraction(10, 100)),
+        (REPEATING, 1, Fraction(10, 100)),  # 2nd account
+        (REPEATING, 2, Fraction(15, 100)),  # 3rd
+        (REPEATING, 3, Fraction(0)),  # 4th: the record defines no discount
+        (REPEATING_INSTANT, 1, Fraction(10, 100)),
+        (REPEATING_INSTANT, 2, Fraction(10, 100)),
+        (LITE, 1, Fraction(0)),  # K4: no repeat discount on sale
+        (INSTANT, 2, Fraction(0)),
     ],
 )
 def test_repeat_account_discounts(product: object, prior: int, share: Fraction) -> None:
@@ -68,7 +75,7 @@ def test_repeat_account_discounts(product: object, prior: int, share: Fraction) 
 
 def test_discount_rounds_down_to_the_cent() -> None:
     assert discount_floor(999, Fraction(15, 100)) == 149  # 149.85
-    quote = price(LITE, 20_000_000, 2)  # 15% of $639.00 = $95.85 exactly
+    quote = price(REPEATING, 20_000_000, 2)  # 15% of $639.00 = $95.85 exactly
     assert (quote.discount_cents, quote.price_cents) == (9_585, 54_315)
 
 
@@ -89,3 +96,9 @@ def test_unknown_size_is_refused() -> None:
 )
 def test_age(born: date, today: date, age: int) -> None:
     assert age_on(born, today) == age
+
+
+def test_no_product_on_sale_grants_a_repeat_discount() -> None:
+    """Owner decision K4 (12 Nov 2026, review D7): a second account for a
+    hedged pair is not sold cheaper."""
+    assert all(p.repeat_discounts == () for p in POLICY.products)

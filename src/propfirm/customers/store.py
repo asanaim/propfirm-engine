@@ -1032,6 +1032,17 @@ class CustomerStore:
         )
         return [_order(r) for r in rows]
 
+    async def ended_orders(self, cif: str) -> set[str]:
+        """The trader's orders whose passed account will not go on: its
+        progression was denied or blocked (the account holds no
+        capital any more)."""
+        rows = await self._pool.fetch(
+            f"SELECT DISTINCT ord FROM {self._s}.progressions "
+            "WHERE cif = $1 AND status IN ('denied', 'blocked')",
+            cif,
+        )
+        return {r["ord"] for r in rows}
+
     async def accounts_for(self, cif: str) -> list[AccountRecord]:
         rows = await self._pool.fetch(
             f"SELECT * FROM {self._s}.accounts WHERE cif = $1 ORDER BY acc", cif

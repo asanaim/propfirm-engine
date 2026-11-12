@@ -32,6 +32,8 @@ from typing import Any
 from propfirm.policy import (
     Policy,
     PolicyError,
+    all_sizes,
+    check_catalogue,
     parse_countries,
     parse_percent,
     percent_text,
@@ -59,6 +61,7 @@ from propfirm.settings.notices import (
     wrapper_from_json,
     wrapper_json,
 )
+from propfirm.settings.offering import OFFERING, Offering, offering_from_json, offering_json
 from propfirm.settings.site import (
     SITE_MODE,
     SITE_SECTION,
@@ -146,6 +149,7 @@ type Setting = (
     | NoticeWrapper
     | PaymentMethod
     | MethodSecret
+    | Offering
 )
 
 
@@ -178,11 +182,14 @@ def limits_rule_set(base: RuleSet, limits: StageLimits, change_id: int) -> RuleS
 def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
     """The policy in force: the file with the latest change of each setting."""
     gating: CountryGating | None = None
+    offering: Offering | None = None
     limits: dict[tuple[str, Stage], SettingChange] = {}
     for change in sorted(changes, key=lambda c: c.id):
         match change.setting:
             case CountryGating() as value:
                 gating = value
+            case Offering() as value:
+                offering = value
             case StageLimits() as value:
                 limits[(value.product_id, value.stage)] = change
             case (
@@ -211,7 +218,19 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
                 rule_set = limits_rule_set(rule_set, latest.setting, latest.id)
             rule_sets.append(rule_set)
         products.append(replace(product, rule_sets=tuple(rule_sets)))
-    return replace(base, access=access, products=tuple(products))
+    catalogue = base.catalogue
+    if offering is not None:
+        try:
+            check_catalogue(base, offering.products_off, offering.sizes_off)
+        except PolicyError:
+            # a product or size the file no longer has: switch off what still exists
+            ids = {p.id for p in base.products}
+            sizes = set(all_sizes(base))
+            offering = Offering(offering.products_off & ids, offering.sizes_off & sizes)
+        catalogue = replace(
+            catalogue, products_off=offering.products_off, sizes_off=offering.sizes_off
+        )
+    return replace(base, access=access, products=tuple(products), catalogue=catalogue)
 
 
 def policy_pages(changes: Iterable[SettingChange]) -> dict[str, list[PageVersion]]:
@@ -321,6 +340,8 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
             return PAYMENT_METHOD, method_json(setting)
         case MethodSecret():
             return METHOD_SECRET, secret_json(setting)
+        case Offering():
+            return OFFERING, offering_json(setting)
         case PolicyPage():
             return POLICY_PAGE, {"slug": setting.slug, "title": setting.title, "body": setting.body}
 
@@ -361,6 +382,8 @@ def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
         return method_from_json(value)
     if kind == METHOD_SECRET:
         return secret_from_json(value)
+    if kind == OFFERING:
+        return offering_from_json(value)
     if kind == POLICY_PAGE:
         slug, title, body = value["slug"], value["title"], value["body"]
         if not all(isinstance(v, str) for v in (slug, title, body)):

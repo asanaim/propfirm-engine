@@ -41,7 +41,10 @@ def quick_lite() -> Policy:
         )
 
     products = tuple(replace(p, rule_sets=quick(p.rule_sets)) for p in policy.products)
-    return replace(policy, products=products)
+    # every product on sale, Classic included (off in the shipped catalogue,
+    # K2): accounts bought before keep progressing
+    catalogue = replace(policy.catalogue, products_off=frozenset())
+    return replace(policy, products=products, catalogue=catalogue)
 
 
 class Market:

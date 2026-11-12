@@ -247,6 +247,22 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             'notice_wrapper'));
         """,
     ),
+    (
+        13,
+        """
+        -- review D4 (12 Nov 2026): products and account sizes on sale
+        ALTER TABLE {s}.changes DROP CONSTRAINT changes_kind_check;
+        ALTER TABLE {s}.changes ADD CONSTRAINT changes_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret', 'site_mode', 'notice_template',
+            'notice_wrapper', 'offering'));
+        ALTER TABLE {s}.proposals DROP CONSTRAINT proposals_kind_check;
+        ALTER TABLE {s}.proposals ADD CONSTRAINT proposals_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret', 'site_mode', 'notice_template',
+            'notice_wrapper', 'offering'));
+        """,
+    ),
 )
 
 

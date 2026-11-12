@@ -5,6 +5,7 @@ the Didit webhook; the record's protection."""
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import date
 from typing import Any, cast
 
@@ -14,6 +15,8 @@ import pytest
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycDecision, KycSession, SandboxKyc, didit_signature
 from propfirm.customers.providers import SandboxScreener
+from propfirm.journal.inputs import VoidAccount
+from propfirm.policy import Policy, load_policy
 from propfirm.service.feeder import now_ms
 from tests.integration.test_customers import ADULT, LITE_10K, Platform, eventually, platform
 from tests.integration.test_progression import STAFF, Market, quick_lite
@@ -204,6 +207,17 @@ def test_an_instant_account_opens_only_after_the_agreement_is_signed(
             ]
             await eventually(lambda: p.live.account("ACC00000001"))
 
+            # one Instant account at a time (review D4): a second is refused
+            # while the first is open, and sold once it has ended
+            refused = await p.call("POST", "/orders", body=INSTANT_5K)
+            assert (refused.status_code, refused.json()["detail"]["code"]) == (422, "one_instant")
+            await p.writer.publish(VoidAccount("ACC00000001", "CAS00000001", now_ms()))
+
+            async def ended() -> Any:
+                view = await p.live.account("ACC00000001")
+                return view if view and view["status"] == "voided" else None
+
+            await eventually(ended)
             again = (await p.call("POST", "/orders", body=INSTANT_5K)).json()
             await p.call("POST", again["pay_url"])
             second = (await p.call("GET", "/me")).json()["onboardings"][1]
@@ -214,11 +228,22 @@ def test_an_instant_account_opens_only_after_the_agreement_is_signed(
     asyncio.run(scenario())
 
 
+def several_instant() -> Policy:
+    """The shipped policy, allowing several Instant accounts per trader (the
+    test needs three onboardings at once)."""
+    policy = load_policy()
+    return replace(
+        policy, catalogue=replace(policy.catalogue, one_instant_funding_per_trader=False)
+    )
+
+
 def test_a_different_identity_goes_to_an_employee(
     database_url: str, valkey_url: str, pg_schema: str
 ) -> None:
     async def scenario() -> None:
-        async with platform(database_url, valkey_url, pg_schema, funded=True) as p:
+        async with platform(
+            database_url, valkey_url, pg_schema, several_instant(), funded=True
+        ) as p:
             await p.call("POST", "/me", body=ADULT)
             for _ in range(3):
                 order = (await p.call("POST", "/orders", body=INSTANT_5K)).json()

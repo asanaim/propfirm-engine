@@ -262,6 +262,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(asyncio.create_task(_cutoffs_forever(cutoffs)))
         oversight = Oversight(pool, config.staff_schema, config.customer_schema, staff.store, desk)
         tasks.append(asyncio.create_task(_oversight_forever(oversight, settings)))
+        live = LiveReader(client, config.live_prefix)
         checkout = None
         if config.sandbox:
             checkout = Checkout(
@@ -272,6 +273,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 gateway,
                 funded=onboardings,
                 cases=cases,
+                live=live,
             )
         kyc: KycProvider | None = None
         screener: Screener | None = None
@@ -296,7 +298,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 cases=cases,
             )
         lifecycle = Lifecycle(progressions, settings, gateway, cases=cases)
-        live = LiveReader(client, config.live_prefix)
         mailer: Mailer | None = None
         if config.smtp_host:
             assert config.mail_from is not None

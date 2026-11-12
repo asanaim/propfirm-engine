@@ -11,6 +11,7 @@ import { ICONS, icon } from "./icons";
 import { Login } from "./Login";
 import { PolicyPages } from "./Policies";
 import { TradersPage } from "./Traders";
+import { OfferingPage } from "./Offering";
 import { ReportsPage } from "./Transactions";
 import { SystemPage } from "./System";
 import { SiteEditorPage } from "./Site";
@@ -64,6 +65,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
               {screens.has("changes") ? <Resource name="changes" icon={icon(ICONS.changes)} options={{ label: "Setting changes" }} list={ChangeList} /> : null}
               <CustomRoutes>
                 {screens.has("traders") ? <Route path="/traders" element={<TradersPage />} /> : null}
+                {screens.has("offering") ? <Route path="/offering" element={<OfferingPage />} /> : null}
                 {screens.has("transactions") ? <Route path="/transactions" element={<ReportsPage />} /> : null}
                 {screens.has("system") ? <Route path="/system" element={<SystemPage />} /> : null}
                 {screens.has("anomalies") ? <Route path="/anomalies" element={<AnomalyReport />} /> : null}
