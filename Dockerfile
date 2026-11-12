@@ -45,5 +45,9 @@ RUN uv sync --frozen --no-dev \
     && useradd --system --uid 10001 --gid pipridge --no-create-home \
         --home-dir /nonexistent --shell /usr/sbin/nologin pipridge \
     && install -d -o pipridge -g pipridge -m 0750 /var/lib/propfirm
+# the build shown to admins (rule AC23): `git rev-parse --short HEAD`, passed
+# by compose from PIPRIDGE_REVISION; last, so a new revision reuses every layer
+ARG PIPRIDGE_REVISION=unknown
+ENV PIPRIDGE_REVISION=$PIPRIDGE_REVISION
 USER 10001:10001
 CMD ["/opt/venv/bin/python", "-m", "propfirm.service.engine"]

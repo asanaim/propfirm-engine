@@ -188,6 +188,17 @@ export const AREAS: readonly Area[] = [
     keywords: "security mfa switches locked kyc screening",
   },
   {
+    key: "system",
+    title: "System information",
+    explains: "What is running: application version and build, Python, the database and Valkey, and the engine journal. Admins and owners. Updates arrive by a reviewed release, not from here.",
+    icon: "system",
+    state: "open",
+    path: "/system",
+    screen: "system",
+    rule: null,
+    keywords: "version server database valkey python build uptime cache updates",
+  },
+  {
     key: "website",
     title: "Website",
     explains: "The public website's sections; figures come from product data.",

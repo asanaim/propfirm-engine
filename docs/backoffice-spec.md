@@ -193,6 +193,17 @@ and Security log screens. Not covered: login history (kept by Keycloak;
 reading its events is a later step), refunds and chargebacks (no such
 records yet).
 
+AC23 system pages (12 Nov 2026). In place: a System information card on
+the settings hub, admins and owners only (`GET /admin/system`): the
+application version and build (`PIPRIDGE_REVISION`, passed by compose),
+Python, PostgreSQL and Valkey versions with whether each answers, when the
+API started, and the engine journal's head. Not built, deliberately:
+"cache clearing" (no cache holds anything staff could need to drop:
+settings, policies and website text are read fresh each time) and
+"updates" from the console (code changes arrive by a reviewed pull
+request and a redeploy; an update button would let one admin change
+running code, against AC00).
+
 AC15 identity checks (10 Nov 2026), decided: provider only, as FTMO and
 FundedNext do. Identity checks run at the provider (Didit: photo ID and a
 selfie); there is no staff-designed upload form, so no document images are
@@ -228,7 +239,7 @@ only add restrictions; cancelling a news window still needs an admin.
 ## Not started
 
 AC09 evidence for claims, AC11 SEO and generated sitemap, AC18 language
-manager, AC21 and AC22 (tickets, extensions), AC23 system pages, AC24 price feed
+manager, AC21 and AC22 (tickets, extensions), AC24 price feed
 failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.
 

@@ -16,6 +16,7 @@ import pytest
 import valkey.asyncio as avalkey
 
 from propfirm.api.app import Deps, create_app
+from propfirm.api.system import SystemProbe
 from propfirm.audit.store import AuditStore
 from propfirm.audit.store import migrate as migrate_audit
 from propfirm.customers.cases_store import CaseStore
@@ -233,6 +234,7 @@ async def platform(
         payouts=payouts,
         traders=TraderDirectory(pool, config.customer_schema),
         reports=Reports(pool, config.customer_schema),
+        system=SystemProbe(pool, client, 1_000, "test-build", live.head),
         staff=staff,
         desk=desk,
         cutoffs=cutoffs,

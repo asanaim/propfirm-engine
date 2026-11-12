@@ -256,6 +256,10 @@ class ReportSource(Protocol):
     ) -> list[dict[str, Any]]: ...
 
 
+class SystemSource(Protocol):
+    async def info(self) -> dict[str, Any]: ...
+
+
 class Customers(Protocol):
     async def cif_by_subject(self, subject: str) -> CifRecord | None: ...
 
@@ -292,6 +296,7 @@ class Deps:
     payouts: Payouts | None = None  # payout wallets, requests and approvals
     traders: Traders | None = None  # traders by status, and each trader's file (AC19)
     reports: ReportSource | None = None  # transaction and email logs (AC20)
+    system: SystemSource | None = None  # versions and parts for admins (AC23)
     news: NewsDesk | None = None  # restricted-events calendar and the risk desk's actions
     source_alerts: SourceAlerts | None = None  # news sources the collector cannot read
     staff: Directory | None = None  # the staff directory; None: Keycloak roles only
@@ -3779,6 +3784,18 @@ def create_app(
             raise HTTPException(status_code=403, detail="admins and owners read the report")
         policy = oversight_policy(await _staff_policy(deps))
         return await oversight(deps).anomalies(deps.clock() - days * DAY_MS, policy)
+
+    @app.get("/admin/system")
+    async def system_info(deps: D, me: Employee) -> dict[str, Any]:
+        """What is running (rule AC23): application version and build,
+        Python, PostgreSQL and Valkey, the API's start and the journal head
+        (admins and owners)."""
+        access = await _staff_access(deps, me)
+        if access.tier is None or access.tier < Tier.ADMIN:
+            raise HTTPException(status_code=403, detail="admins and owners read system information")
+        if deps.system is None:
+            raise HTTPException(status_code=503, detail="system information not available")
+        return await deps.system.info()
 
     @app.get("/staff/audit")
     async def audit_log(
