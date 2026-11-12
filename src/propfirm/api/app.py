@@ -67,6 +67,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Reques
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints
 
+from propfirm.analysis import analyse, trades_from
 from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
 from propfirm.audit.chain import AuditEvent
 from propfirm.audit.http import UNMATCHED, audited, clean, client_ip
@@ -1574,6 +1575,35 @@ def create_app(
         except PayoutRefused as exc:
             raise _payout_refused(exc) from exc
         return wallet_view(wallet)
+
+    @app.get("/me/analysis")
+    async def my_analysis(
+        deps: D,
+        me: Trader,
+        account: Annotated[str | None, Query(pattern=r"^ACC[0-9]{8}$")] = None,
+        since: Annotated[int, Query(ge=0)] = 0,
+        until: Annotated[int | None, Query(ge=0)] = None,
+    ) -> dict[str, Any]:
+        """Trader's analysis: figures from the trader's own closed trades,
+        over all their accounts or one, in [since, until) (ms UTC)."""
+        cif = await _cif(deps, me)
+        owned = (
+            [a.acc for a in await deps.customers.accounts_for(cif.cif)] if deps.customers else []
+        )
+        if account is not None:
+            if account not in owned:
+                raise HTTPException(status_code=404, detail="unknown account")
+            owned = [account]
+        events: list[dict[str, Any]] = []
+        for acc in owned:
+            after = 0
+            while True:
+                page = await deps.history.account_events(acc, after, 1_000)
+                events += page
+                if len(page) < 1_000:
+                    break
+                after = int(page[-1]["seq"])
+        return {"accounts": owned, **analyse(trades_from(events), since, until)}
 
     @app.get("/me/wallet")
     async def my_wallet(deps: D, me: Trader) -> dict[str, Any]:
