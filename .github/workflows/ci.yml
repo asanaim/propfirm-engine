@@ -43,7 +43,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.6"
-      - run: uv python install 3.14
+      - run: uv python install 3.15
       - run: uv sync --frozen
       - run: uv run --frozen ruff check .
       - run: uv run --frozen ruff format --check .
@@ -105,7 +105,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.6"
-      - run: uv python install 3.14
+      - run: uv python install 3.15
       - name: Python dependencies (pip-audit, every group, hashes required)
         run: |
           uv export --frozen --all-groups --format requirements-txt --no-emit-project \

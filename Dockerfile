@@ -5,7 +5,7 @@
 # pinned by digest; Debian security fixes published since the image was built
 # are installed on top (the upgrade below), so a fix does not wait for a new
 # digest. Grype in CI checks the result.
-FROM python:3.14.10-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS base
+FROM python:3.15.2-slim@sha256:e97b88e416c3c01eb427b21fd8cd3ebf006e6ee38afcfcc3cae1c54ee2ab0a75 AS base
 RUN apt-get update \
     && apt-get -y --no-install-recommends upgrade \
     && rm -rf /var/lib/apt/lists/*

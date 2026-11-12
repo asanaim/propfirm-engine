@@ -18,7 +18,7 @@ Specification: *Prop Firm Operating Engine — End-to-End Functional Outline*
 
 | Part | Version |
 | --- | --- |
-| Python | 3.14 |
+| Python | 3.15 |
 | PostgreSQL | 18.6 (container) |
 | Valkey | 9.1.3 (container) |
 | Package manager | uv 0.13.6 |
