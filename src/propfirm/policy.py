@@ -638,6 +638,15 @@ def _trading(t: _Table) -> TradingPolicy:
     delay = t.integer("delay_threshold_ms")
     gap = t.integer("gap_threshold_ms", 1)
     by_symbol = t.mapping("gap_threshold_ms_by_symbol")
+    quote_age = t.integer("quote_age_ms")
+    age_by_symbol = t.mapping("quote_age_ms_by_symbol")
+    sanity_t = t.table("sanity")
+    sanity = (
+        sanity_t.integer("multiple"),
+        sanity_t.integer("min_basis_points"),
+        sanity_t.integer("min_changes", 1),
+    )
+    sanity_t.done()
     leverage_t, caps_t, spread_t = t.table("leverage"), t.table("lot_caps"), t.table("spread")
     commission_t = t.table("commission")
     t.done()
@@ -691,12 +700,25 @@ def _trading(t: _Table) -> TradingPolicy:
         )
     mins_t.done()
     names = {s.name for s in LAUNCH_SYMBOLS}
-    for name, ms in by_symbol.items():
-        if name not in names:
-            raise PolicyError(f"trading.gap_threshold_ms_by_symbol: unknown symbol {name!r}")
-        if isinstance(ms, bool) or not isinstance(ms, int) or ms < 1:
-            raise PolicyError(f"trading.gap_threshold_ms_by_symbol.{name} must be >= 1")
-    guard = GuardConfig(delay, gap, dict(sorted(by_symbol.items())) or None)
+    for key, table in (
+        ("gap_threshold_ms_by_symbol", by_symbol),
+        ("quote_age_ms_by_symbol", age_by_symbol),
+    ):
+        for name, ms in table.items():
+            if name not in names:
+                raise PolicyError(f"trading.{key}: unknown symbol {name!r}")
+            if isinstance(ms, bool) or not isinstance(ms, int) or ms < 1:
+                raise PolicyError(f"trading.{key}.{name} must be >= 1")
+    guard = GuardConfig(
+        delay,
+        gap,
+        dict(sorted(by_symbol.items())) or None,
+        default_quote_age_ms=quote_age,
+        quote_age_ms=dict(sorted(age_by_symbol.items())) or None,
+        sanity_multiple=sanity[0],
+        sanity_min_bp=sanity[1],
+        sanity_min_changes=sanity[2],
+    )
     return TradingPolicy(config_version, tuple(instruments), guard)
 
 

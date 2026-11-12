@@ -81,6 +81,7 @@ from dataclasses import dataclass, replace
 from fractions import Fraction
 
 from propfirm._checks import is_int, require_int, require_text
+from propfirm.journal.codec import added_field
 from propfirm.ledger import Ledger, transfer
 from propfirm.market.guards import FeedGuards, GuardChange, GuardConfig, GuardState
 from propfirm.market.sequence import SeqStatus, SequenceTracker
@@ -102,6 +103,8 @@ from propfirm.trading.events import (
     OrderRejected,
     PositionClosed,
     PositionOpened,
+    PriceHeld,
+    PriceReleased,
     RejectReason,
     StaleUpdate,
     StopsModified,
@@ -168,6 +171,9 @@ class EngineState:
     config_version: str  # the trading settings in force (they can change by input)
     instruments: tuple[InstrumentSpec, ...]  # configured order
     guard: GuardConfig
+    # updates held by the sanity filter, one per symbol at most (configured
+    # order); added after records existed: none before
+    held: tuple[PriceUpdate, ...] = added_field(())
 
 
 class _NoRate(Exception):
@@ -210,6 +216,7 @@ class TradingEngine:
         self._locked: set[str] = set()
         self._calendar: dict[str, NewsWindow] = {}  # event id -> window, both uses
         self._calendar_ids: set[str] = set()
+        self._held: dict[str, PriceUpdate] = {}  # sanity filter: one update per symbol
         # accounts whose rule set is not news-restricted (evaluations): set by
         # the rules supervisor from each account's rule set, so not engine state
         self._news_exempt: set[str] = set()
@@ -261,6 +268,9 @@ class TradingEngine:
             events.append(StaleUpdate(self._now, symbol, update.seq, lag))
             return events
         model = self._spreads[symbol]
+        held = self._sanity(update, model, events)
+        if held:
+            return events
         model.observe(update.price)
         quote = model.quote(
             symbol,
@@ -275,6 +285,25 @@ class TradingEngine:
         events.extend(self._trigger_orders(quote))
         events.extend(self._trigger_stops(quote))
         return events
+
+    def _sanity(self, update: PriceUpdate, model: SpreadModel, events: list[EngineEvent]) -> bool:
+        """The sanity filter (review D9); True: `update` is held, not applied.
+        Appends what it decided to `events`."""
+        guard = self._guards.config
+        symbol, last, changes = update.symbol, model.last, model.changes()
+        held = self._held.pop(symbol, None)
+        if held is not None:
+            # the held update is decided by this one: a normal move from it
+            # confirms it; anything else drops it as an error
+            confirmed = not guard.out_of_line(update.price, held.price, changes)
+            events.append(PriceReleased(self._now, symbol, held.seq, confirmed))
+            if confirmed:
+                return False
+        if last is None or not guard.out_of_line(update.price, last, changes):
+            return False
+        self._held[symbol] = update
+        events.append(PriceHeld(self._now, symbol, update.seq, update.price, last))
+        return True
 
     def advance(self, ts: int) -> list[EngineEvent]:
         """Move engine time forward; freezes symbols whose updates are overdue."""
@@ -450,6 +479,9 @@ class TradingEngine:
             events.append(self._reject(position_id, account_id, RejectReason.INVALID_VOLUME))
             return events
         quote = self._quotes[position.symbol]
+        if self._stale(quote):
+            events.append(self._reject(position_id, account_id, RejectReason.STALE_QUOTE))
+            return events
         events.extend(self._close(position, amount, quote, CloseReason.CLIENT))
         return events
 
@@ -673,6 +705,7 @@ class TradingEngine:
             config_version=self._version,
             instruments=tuple(self._instruments.values()),
             guard=self._guards.config,
+            held=tuple(u for s in self._instruments if (u := self._held.get(s)) is not None),
         )
 
     def restore(self, state: EngineState) -> None:
@@ -707,6 +740,10 @@ class TradingEngine:
         self._positions = {p.position_id: p for p in state.positions}
         self._calendar = dict(state.calendar)
         self._calendar_ids = set(state.calendar_ids)
+        held = {u.symbol: u for u in state.held}
+        if len(held) != len(state.held) or not set(held) <= known:
+            raise ValueError("bad held updates")
+        self._held = held
         if not set(self._calendar) <= self._calendar_ids:
             raise ValueError("scheduled event without an id record")
 
@@ -840,6 +877,12 @@ class TradingEngine:
     def _reject(self, ref: str, account_id: str, reason: RejectReason) -> OrderRejected:
         return OrderRejected(self._now, ref, account_id, reason, self._version)
 
+    def _stale(self, quote: Quote) -> bool:
+        """Whether `quote` is older than its symbol's quote age limit at
+        engine time (review D2); never with no limit set."""
+        limit = self._guards.config.quote_age_limit(quote.symbol)
+        return limit > 0 and self._now - quote.receive_ts > limit
+
     def _check_new_order(self, request: OrderRequest) -> RejectReason | None:
         account = self._accounts.get(request.account_id)
         if account is None:
@@ -866,6 +909,8 @@ class TradingEngine:
             return RejectReason.SYMBOL_VOLUME_CAP
         quote = self._quotes[request.symbol]
         if request.order_type is OrderType.MARKET:
+            if self._stale(quote):
+                return RejectReason.STALE_QUOTE
             exit_price = quote.bid if request.side is Side.BUY else quote.ask
             if not _valid_stops(request.side, exit_price, request.stop_loss, request.take_profit):
                 return RejectReason.INVALID_STOPS

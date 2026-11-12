@@ -1,4 +1,6 @@
-import { parseLots, parsePrice, rejection } from "./price";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { parseLots, parsePrice, REJECTIONS, rejection } from "./price";
 
 it("reads prices as integer points with the symbol's digits", () => {
   expect(parsePrice("1.10005", 5)).toBe(110_005);
@@ -22,6 +24,15 @@ it("reads lots in hundredths", () => {
 
 it("explains an engine refusal", () => {
   expect(rejection("insufficient_margin")).toBe("Not enough free margin for this order.");
+  expect(rejection("stale_quote")).toMatch(/Try again on the next price/);
   expect(rejection("something_new")).toBe("Refused: something_new.");
   expect(rejection(undefined)).toBe("Refused.");
+});
+
+it("words every reason the engine refuses an order for", () => {
+  const source = readFileSync(resolve(__dirname, "../../../src/propfirm/trading/events.py"), "utf8");
+  const block = source.slice(source.indexOf("class RejectReason"), source.indexOf("class CloseReason"));
+  const reasons = [...block.matchAll(/= "([a-z_]+)"/g)].map((m) => m[1]);
+  expect(reasons.length).toBeGreaterThan(10);
+  for (const r of reasons) expect(REJECTIONS[r ?? ""], r).toBeDefined();
 });

@@ -82,10 +82,26 @@ split_percent_after = "90"
 max_allocation_cents = 40000000  # $400,000 per trader
 
 [trading]
-config_version = "trading-v3"
+config_version = "trading-v4"  # v4: quote age limit and sanity filter (12 Nov 2026)
 delay_threshold_ms = 2000      # older updates freeze the symbol
 gap_threshold_ms = 60000       # no update for longer freezes the symbol
 gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
+# Review D2: a market order or a close is refused while the symbol's last
+# price is older than this; the trader tries again on a newer price. 0: off.
+# [DEFAULT] to calibrate per symbol from the feed trial (the 99th
+# percentile gap between updates).
+quote_age_ms = 3000
+quote_age_ms_by_symbol = {}    # e.g. { "XRP/USD" = 10000 }
+
+[trading.sanity]
+# Review D9: an update that moves more than BOTH `multiple` times the median
+# of the recent price changes (once there are `min_changes` of them) AND
+# `min_basis_points` of the last price is held: it fills, triggers and
+# breaches nothing until the next update shows whether the move was real.
+# multiple = 0: off.
+multiple = 8
+min_basis_points = 50          # 0.5 %
+min_changes = 5
 
 [trading.leverage]             # "100" means 1:100
 forex = "100"

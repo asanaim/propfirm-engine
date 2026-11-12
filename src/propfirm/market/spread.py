@@ -213,6 +213,15 @@ class SpreadModel:
         self._changes = deque(state.changes, maxlen=self._config.window)
         self._last = state.last
 
+    @property
+    def last(self) -> int | None:
+        """The last applied price."""
+        return self._last
+
+    def changes(self) -> tuple[int, ...]:
+        """The recent absolute price changes, oldest first."""
+        return tuple(self._changes)
+
     def observe(self, price: int) -> None:
         require_int("price", price, minimum=1)
         if self._last is not None:

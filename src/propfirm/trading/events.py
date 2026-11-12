@@ -31,6 +31,7 @@ class RejectReason(StrEnum):
     NEWS_WINDOW = "news_window"
     INVALID_TRAILING = "invalid_trailing"  # distance or step below 1, or no level >= 1
     POSITION_CLOSED = "position_closed"  # a trailing stop whose position closed
+    STALE_QUOTE = "stale_quote"  # the last applied price is older than the quote age limit
 
 
 class CloseReason(StrEnum):
@@ -210,6 +211,31 @@ class StaleUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class PriceHeld:
+    """A fresh update out of line with the market (the sanity filter): not
+    applied, so it fills, triggers and breaches nothing, until the next
+    update shows whether the move was real (review D9)."""
+
+    ts: int
+    symbol: str
+    seq: int
+    price: int
+    reference: int  # the last applied price it was compared with
+
+
+@dataclass(frozen=True, slots=True)
+class PriceReleased:
+    """The held update `seq` is decided by the next one: `confirmed` (the
+    move was real; the next update is applied) or not (dropped as an error;
+    the next update is applied from the last good price)."""
+
+    ts: int
+    symbol: str
+    seq: int
+    confirmed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class NewsScheduled:
     """A restricted event entered the calendar: no trades on `symbols` and
     wider spreads while engine time is in [start_ts, end_ts)."""
@@ -255,6 +281,8 @@ type EngineEvent = (
     | FeedGap
     | DuplicateUpdate
     | StaleUpdate
+    | PriceHeld
+    | PriceReleased
     | NewsScheduled
     | NewsCancelled
     | TradingConfigChanged

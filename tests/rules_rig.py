@@ -35,13 +35,15 @@ class RulesRig:
         start: int,
         news: Iterable[RestrictedEvent] = (),
         spread_windows: Iterable[NewsWindow] = (),
+        guard: GuardConfig | None = None,
     ) -> None:
         self.ledger = Ledger()
         engine = TradingEngine(
             instruments(),
             self.ledger,
             config_version="engine-test",
-            guard_config=GuardConfig(delay_threshold_ms=2_000, default_gap_threshold_ms=60_000),
+            guard_config=guard
+            or GuardConfig(delay_threshold_ms=2_000, default_gap_threshold_ms=60_000),
             news_windows=spread_windows,
             trade_blocks=trade_blocks(news, {s: SYMBOLS[s] for s in SYMS}),
         )
