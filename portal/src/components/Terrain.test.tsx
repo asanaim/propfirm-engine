@@ -22,3 +22,13 @@ describe("Terrain", () => {
     expect(unavailable).toHaveBeenCalledOnce();
   });
 });
+
+describe("the terrain's rest (kept light)", () => {
+  it("draws while there is no rest, or until the rest after the last move", async () => {
+    const { awake, FRAME_MS } = await import("./Terrain");
+    expect(FRAME_MS).toBeCloseTo(33.3, 1); // 30 frames a second at most
+    expect(awake(100_000, 0, undefined)).toBe(true); // the home page hero drifts
+    expect(awake(3_000, 0, 3_000)).toBe(true);
+    expect(awake(3_001, 0, 3_000)).toBe(false); // the menu rests
+  });
+});

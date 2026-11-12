@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu as RaMenu, usePermissions } from "react-admin";
 import { Terrain } from "./components/Terrain";
+
+/** The terrain rests this long after the pointer last moved (it holds its
+last frame; a screen left open costs no drawing). */
+const REST_MS = 3_000;
 import { ICONS, SIZE, STROKE } from "./icons";
 import { screensFor } from "./screens";
 
@@ -30,7 +34,7 @@ export function Menu() {
   useStagger(plane, screens.size);
   return (
     <div className="menu-3d" ref={area}>
-      {webgl ? <Terrain area={area} onUnavailable={noWebgl} /> : <div className="menu-ridge-fallback" aria-hidden="true" />}
+      {webgl ? <Terrain area={area} onUnavailable={noWebgl} idleMs={REST_MS} /> : <div className="menu-ridge-fallback" aria-hidden="true" />}
       <div className="menu-3d-plane" ref={plane}>
         <MenuItems screens={screens} />
       </div>

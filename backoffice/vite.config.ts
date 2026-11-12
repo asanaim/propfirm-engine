@@ -15,7 +15,8 @@ export default defineConfig({
       "/api": { target: api, rewrite: (path) => path.replace(/^\/api/, "") },
     },
   },
-  // staff-only, behind sign-in: one bundle (react-admin and MUI ≈ 1.1 MB) is fine
+  // screens load on first use (App.tsx); the first download is held to a
+  // budget in CI (scripts/size-budget.mjs)
   build: { sourcemap: true, chunkSizeWarningLimit: 1500 },
   test: {
     environment: "jsdom",

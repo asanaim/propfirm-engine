@@ -9,24 +9,42 @@ import { dataProvider } from "./dataProvider";
 import { Home } from "./Home";
 import { ICONS, icon } from "./icons";
 import { Login } from "./Login";
-import { PolicyPages } from "./Policies";
-import { TradersPage } from "./Traders";
-import { ReportsPage } from "./Transactions";
-import { SystemPage } from "./System";
-import { SiteEditorPage } from "./Site";
-import { NoticesPage } from "./Notices";
-import { PaymentMethodsPage } from "./PaymentMethods";
-import { GeneralPage, SecurityPage, SettingsHub } from "./SettingsHub";
-import { AnomalyReport, AuditTrail, NewsDesk } from "./Reports";
-import { CaseList, CaseShow } from "./resources/cases";
-import { NotificationList } from "./resources/notifications";
-import { PayoutList, PayoutShow } from "./resources/payouts";
-import { OnboardingList, OnboardingShow, ProgressionList, ProgressionShow } from "./resources/reviews";
-import { ChangeList, ProposalList } from "./resources/settings";
 import { screensFor } from "./screens";
 import { Layout } from "./Layout";
 import { darkTheme, lightTheme } from "./theme";
-import { ApprenticeProposalList, CutoffList, GrantList, MemberList, MemberShow } from "./resources/staff";
+import { lazyPage } from "./lazyPage";
+
+// Every screen but the first (My work) loads when it is first opened, so the
+// first screen downloads only what it shows (kept light, 12 Nov 2026).
+const PolicyPages = lazyPage(() => import("./Policies"), "PolicyPages");
+const TradersPage = lazyPage(() => import("./Traders"), "TradersPage");
+const ReportsPage = lazyPage(() => import("./Transactions"), "ReportsPage");
+const SystemPage = lazyPage(() => import("./System"), "SystemPage");
+const SiteEditorPage = lazyPage(() => import("./Site"), "SiteEditorPage");
+const NoticesPage = lazyPage(() => import("./Notices"), "NoticesPage");
+const PaymentMethodsPage = lazyPage(() => import("./PaymentMethods"), "PaymentMethodsPage");
+const SettingsHub = lazyPage(() => import("./SettingsHub"), "SettingsHub");
+const GeneralPage = lazyPage(() => import("./SettingsHub"), "GeneralPage");
+const SecurityPage = lazyPage(() => import("./SettingsHub"), "SecurityPage");
+const AnomalyReport = lazyPage(() => import("./Reports"), "AnomalyReport");
+const AuditTrail = lazyPage(() => import("./Reports"), "AuditTrail");
+const NewsDesk = lazyPage(() => import("./Reports"), "NewsDesk");
+const CaseList = lazyPage(() => import("./resources/cases"), "CaseList");
+const CaseShow = lazyPage(() => import("./resources/cases"), "CaseShow");
+const NotificationList = lazyPage(() => import("./resources/notifications"), "NotificationList");
+const PayoutList = lazyPage(() => import("./resources/payouts"), "PayoutList");
+const PayoutShow = lazyPage(() => import("./resources/payouts"), "PayoutShow");
+const OnboardingList = lazyPage(() => import("./resources/reviews"), "OnboardingList");
+const OnboardingShow = lazyPage(() => import("./resources/reviews"), "OnboardingShow");
+const ProgressionList = lazyPage(() => import("./resources/reviews"), "ProgressionList");
+const ProgressionShow = lazyPage(() => import("./resources/reviews"), "ProgressionShow");
+const ChangeList = lazyPage(() => import("./resources/settings"), "ChangeList");
+const ProposalList = lazyPage(() => import("./resources/settings"), "ProposalList");
+const ApprenticeProposalList = lazyPage(() => import("./resources/staff"), "ApprenticeProposalList");
+const CutoffList = lazyPage(() => import("./resources/staff"), "CutoffList");
+const GrantList = lazyPage(() => import("./resources/staff"), "GrantList");
+const MemberList = lazyPage(() => import("./resources/staff"), "MemberList");
+const MemberShow = lazyPage(() => import("./resources/staff"), "MemberShow");
 
 export function App({ api, manager }: { api: Api; manager: UserManager }) {
   return (

@@ -1,5 +1,5 @@
 import { Box, useTheme } from "@mui/material";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, Suspense, useEffect } from "react";
 import { AppBar, Layout as RaLayout, TitlePortal } from "react-admin";
 import { useLocation } from "react-router-dom";
 import { CommandSearch } from "./CommandSearch";
@@ -41,7 +41,7 @@ export function Layout({ children }: { children: ReactNode }) {
     <RaLayout menu={Menu} appBar={BrandBar}>
       {/* keyed by the page, so each new page fades in (still for reduced motion) */}
       <div key={pathname} className="page-fade">
-        {children}
+        <Suspense fallback={<p className="page-loading">Loading…</p>}>{children}</Suspense>
       </div>
     </RaLayout>
   );

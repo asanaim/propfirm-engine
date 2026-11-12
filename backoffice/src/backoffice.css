@@ -405,25 +405,26 @@ pre.json {
   }
 }
 
-/* boxes on every page: rise in when the page opens, lift under the pointer */
+/* boxes on every page: rise in when the page opens (quickly: the page is
+   readable within 0.4 s), lift under the pointer */
 .RaLayout-content .MuiCard-root,
 .RaLayout-content .MuiPaper-root.MuiPaper-elevation1 {
-  animation: box-rise 520ms var(--ease-out) backwards;
+  animation: box-rise 280ms var(--ease-out) backwards;
   transition:
     box-shadow 260ms var(--ease-out),
     transform 320ms var(--ease-spring);
 }
 
 .RaLayout-content .MuiCard-root:nth-of-type(2) {
-  animation-delay: 60ms;
+  animation-delay: 30ms;
 }
 
 .RaLayout-content .MuiCard-root:nth-of-type(3) {
-  animation-delay: 120ms;
+  animation-delay: 60ms;
 }
 
 .RaLayout-content .MuiCard-root:nth-of-type(n + 4) {
-  animation-delay: 180ms;
+  animation-delay: 90ms;
 }
 
 .RaLayout-content .MuiCard-root:hover {
@@ -453,7 +454,7 @@ pre.json {
 
 /* each new page rises in softly; the menu and top bar stay still */
 .page-fade {
-  animation: page-fade-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: page-fade-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 @keyframes page-fade-in {

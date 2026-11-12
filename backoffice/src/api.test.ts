@@ -48,3 +48,31 @@ describe("createApi", () => {
     expect(isStepUp(null)).toBe(false);
   });
 });
+
+describe("the shared /staff/me of the auth checks", () => {
+  it("serves concurrent and repeated asks from one request for a short time", async () => {
+    const { sharedMe, ME_TTL_MS } = await import("./auth");
+    let t = 0;
+    const get = vi.fn(() => Promise.resolve({ access: { permissions: ["staff.view"] } }));
+    const me = sharedMe({ get, post: vi.fn(), put: vi.fn() } as never, () => t);
+    await Promise.all([me.get(), me.get()]);
+    t = ME_TTL_MS - 1;
+    await me.get();
+    expect(get).toHaveBeenCalledTimes(1);
+    t = ME_TTL_MS;
+    await me.get();
+    expect(get).toHaveBeenCalledTimes(2);
+    me.drop();
+    await me.get();
+    expect(get).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not keep a failed answer", async () => {
+    const { sharedMe } = await import("./auth");
+    const get = vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValue({ access: { permissions: [] } });
+    const me = sharedMe({ get, post: vi.fn(), put: vi.fn() } as never, () => 0);
+    await expect(me.get()).rejects.toThrow("down");
+    await me.get();
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+});

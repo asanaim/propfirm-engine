@@ -2,6 +2,10 @@ import { Box, Button, Typography } from "@mui/material";
 import { useCallback, useRef, useState } from "react";
 import { useLogin } from "react-admin";
 import { Terrain } from "./components/Terrain";
+
+/** The terrain rests this long after the pointer last moved (it holds its
+last frame; a screen left open costs no drawing). */
+const REST_MS = 3_000;
 import { config } from "./config";
 import { useThemeMark } from "./Layout";
 import { useTilt } from "./motion";
@@ -21,7 +25,7 @@ export function Login() {
   useTilt(card, 5, area);
   return (
     <Box component="main" className="login-stage" ref={area}>
-      {webgl ? <Terrain area={area} onUnavailable={noWebgl} /> : <div className="menu-ridge-fallback" aria-hidden="true" />}
+      {webgl ? <Terrain area={area} onUnavailable={noWebgl} idleMs={REST_MS} /> : <div className="menu-ridge-fallback" aria-hidden="true" />}
       <div className="login-card" ref={card}>
         <img className="logo-on-light" src="/brand/logo.svg" alt={config.brand} width="148" height="36" />
         <img className="logo-on-dark" src="/brand/logo-on-dark.svg" alt="" width="148" height="36" />
