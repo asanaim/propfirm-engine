@@ -39,6 +39,7 @@ import {
   Users,
   UserX,
   Wallet,
+  Contact,
 } from "lucide-react";
 
 export const STROKE = 1.75;
@@ -56,6 +57,7 @@ export function icon(Glyph: LucideIcon) {
 /** Each resource and page with its own icon. */
 export const ICONS = {
   work: ListTodo,
+  traders: Contact,
   payouts: Wallet,
   cases: Gavel,
   onboardings: IdCard,

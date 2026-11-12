@@ -10,6 +10,7 @@ import { Home } from "./Home";
 import { ICONS, icon } from "./icons";
 import { Login } from "./Login";
 import { PolicyPages } from "./Policies";
+import { TradersPage } from "./Traders";
 import { SiteEditorPage } from "./Site";
 import { NoticesPage } from "./Notices";
 import { PaymentMethodsPage } from "./PaymentMethods";
@@ -60,6 +61,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
               {screens.has("proposals") ? <Resource name="proposals" icon={icon(ICONS.proposals)} options={{ label: "Setting proposals" }} list={ProposalList} /> : null}
               {screens.has("changes") ? <Resource name="changes" icon={icon(ICONS.changes)} options={{ label: "Setting changes" }} list={ChangeList} /> : null}
               <CustomRoutes>
+                {screens.has("traders") ? <Route path="/traders" element={<TradersPage />} /> : null}
                 {screens.has("anomalies") ? <Route path="/anomalies" element={<AnomalyReport />} /> : null}
                 {screens.has("audit") ? <Route path="/audit" element={<AuditTrail />} /> : null}
                 {screens.has("news") ? <Route path="/news" element={<NewsDesk />} /> : null}

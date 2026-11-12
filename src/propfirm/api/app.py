@@ -61,7 +61,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from importlib import metadata
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol, get_args
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -77,6 +77,7 @@ from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
+from propfirm.customers.directory import SEGMENTS
 from propfirm.customers.four_eyes import open_proposal, proposal_json
 from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
@@ -221,6 +222,22 @@ class Submitter(Protocol):
     async def outcome(self, entry_id: str, wait_s: float) -> Outcome: ...
 
 
+class Traders(Protocol):
+    async def counts(self) -> dict[str, int]: ...
+
+    async def traders(
+        self,
+        segment: str = "all",
+        q: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+        *,
+        cif_only: bool = False,
+    ) -> list[dict[str, Any]]: ...
+
+    async def trader(self, cif: str) -> dict[str, Any] | None: ...
+
+
 class Customers(Protocol):
     async def cif_by_subject(self, subject: str) -> CifRecord | None: ...
 
@@ -255,6 +272,7 @@ class Deps:
     onboarding: Onboarding | None = None  # funded onboarding
     cases: Casework | None = None  # integrity, fraud and compliance cases
     payouts: Payouts | None = None  # payout wallets, requests and approvals
+    traders: Traders | None = None  # traders by status, and each trader's file (AC19)
     news: NewsDesk | None = None  # restricted-events calendar and the risk desk's actions
     source_alerts: SourceAlerts | None = None  # news sources the collector cannot read
     staff: Directory | None = None  # the staff directory; None: Keycloak roles only
@@ -1185,6 +1203,10 @@ PAYOUT_STATUS = Literal[
     "requested", "approved", "debited", "sent", "paid", "denied", "cancelled", "failed"
 ]
 CASE_STATUSES = Literal["open", "decision_pending", "actioning", "closed"]
+SEGMENT = Literal[
+    "all", "trading", "funded", "no_account", "kyc_pending", "kyc_declined", "open_case", "blocked"
+]
+assert set(get_args(SEGMENT)) == set(SEGMENTS)  # the directory's segments, one list
 ONB_STATUSES = Literal[
     "verification",
     "verification_declined",
@@ -2233,6 +2255,40 @@ def create_app(
         record = await _cases(deps).store.case(cas)
         assert record is not None
         return {**case_view(record), "alert": alr}
+
+    def _traders(deps: Deps) -> Traders:
+        if deps.traders is None:
+            raise HTTPException(status_code=503, detail="trader directory not available")
+        return deps.traders
+
+    @app.get("/staff/traders")
+    async def list_traders(
+        request: Request,
+        deps: D,
+        me: Viewer,
+        segment: SEGMENT = "all",
+        q: Annotated[str | None, Query(min_length=2, max_length=80)] = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        """Traders by status (rule AC19), newest first, with each segment's
+        count; an apprentice sees names and emails masked, and searches by
+        CIF only (a name or email search would confirm what the mask hides)."""
+        d = _traders(deps)
+        by_cif = bool(getattr(request.state, "mask_pii", False))
+        found = await d.traders(segment, q, limit, offset, cif_only=by_cif)
+        return {"counts": await d.counts(), "traders": found}
+
+    @app.get("/staff/traders/{cif}")
+    async def get_trader(
+        deps: D, me: Viewer, cif: Annotated[str, Path(pattern=r"^CIF[0-9]{8}$")]
+    ) -> dict[str, Any]:
+        """One trader's file (rule AC19): accounts, purchases, identity checks,
+        cases, payouts, emails sent and registration events."""
+        found = await _traders(deps).trader(cif)
+        if found is None:
+            raise HTTPException(status_code=404, detail="unknown trader")
+        return found
 
     @app.get("/staff/cases")
     async def list_cases(

@@ -21,6 +21,7 @@ from propfirm.audit.store import migrate as migrate_audit
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.directory import TraderDirectory
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycProvider, SandboxKyc
 from propfirm.customers.lifecycle import Lifecycle
@@ -230,6 +231,7 @@ async def platform(
         onboarding=onboarding,
         cases=cases,
         payouts=payouts,
+        traders=TraderDirectory(pool, config.customer_schema),
         staff=staff,
         desk=desk,
         cutoffs=cutoffs,

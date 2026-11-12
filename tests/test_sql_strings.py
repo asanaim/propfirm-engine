@@ -29,6 +29,8 @@ ALLOWED = {
     "where": "a constant WHERE clause written in the calling method",
     "seq": "one of two constant sequence names",
     "bucket": "a constant SQL expression chosen from INTERVALS",
+    "self._summary": "the trader summary query, built from constants and the checked schema",
+    "parts": "count columns built from the constant SEGMENTS and _WHERE",
 }
 
 

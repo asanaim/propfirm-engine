@@ -4,7 +4,7 @@ export function screensFor(permissions: readonly string[]): Set<string> {
   const has = (p: string) => permissions.includes(p);
   const out = new Set(["notifications", "apprentice-proposals"]);
   if (has("staff.view") || has("staff.view_masked")) {
-    for (const s of ["payouts", "cases", "onboardings", "progressions"]) out.add(s);
+    for (const s of ["traders", "payouts", "cases", "onboardings", "progressions"]) out.add(s);
   }
   if (has("news.desk")) out.add("news");
   if (has("staff.directory")) for (const s of ["members", "grants", "cutoffs"]) out.add(s);
