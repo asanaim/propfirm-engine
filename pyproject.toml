@@ -3,7 +3,7 @@ name = "propfirm-engine"
 version = "0.1.0"
 description = "Prop firm trading engine: prices, fills, rules, ledger and replay"
 readme = "README.md"
-requires-python = ">=3.14,<3.15"
+requires-python = ">=3.15,<3.16"
 dependencies = [
     "asyncpg==0.32.0",
     "cryptography==50.0.2",
@@ -43,13 +43,13 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py315"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.15"
 strict = true
 files = ["src", "tests", "scripts"]
 
