@@ -16,14 +16,44 @@ each case (Confirmed Configuration CC-5):
 
 Any fresh update (delay within the threshold) unfreezes its symbol. Time is
 supplied by the caller from events, never read from a clock.
+
+Added 12 Nov 2026 (review D2 and D9), both off in configurations written
+before (journals replay exactly):
+
+- Quote age [`quote_age_ms`, per symbol]: a market order, or a client
+  close, is refused when the symbol's last applied price is older than this
+  at the order's time; the trader tries again on a newer price. A trader
+  with a faster source can then no longer fill on a price the firm's feed
+  has not yet moved.
+- Sanity filter [`sanity_multiple`, `sanity_min_bp`,
+  `sanity_min_changes`]: a fresh update whose move from the last applied
+  price is larger than both `sanity_multiple` times the median of the
+  recent changes (once there are `sanity_min_changes`) and
+  `sanity_min_bp` basis points of the last price is held, not applied: it fills no
+  order, triggers no stop and breaches no account. The next update decides:
+  if it is itself a normal move from the held price, the move was real and
+  the next update is applied; if it is a normal move from the last applied
+  price, the held one was an error and is dropped; otherwise it is held in
+  its place.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
 from propfirm._checks import require_int
+from propfirm.journal.codec import added_field
 from propfirm.market.types import PriceUpdate
+
+
+def lower_median(values: Sequence[int]) -> int:
+    """The middle value; of the two middle values for an even count, the
+    lower (exact and deterministic). The same rule as the spread model's."""
+    ordered = sorted(values)
+    if not ordered:
+        raise ValueError("no values")
+    return ordered[(len(ordered) - 1) // 2]
+
 
 DEFAULT_DELAY_THRESHOLD_MS = 2_000
 DEFAULT_GAP_THRESHOLD_MS = 60_000
@@ -50,15 +80,45 @@ class GuardConfig:
     delay_threshold_ms: int = DEFAULT_DELAY_THRESHOLD_MS
     default_gap_threshold_ms: int = DEFAULT_GAP_THRESHOLD_MS
     gap_threshold_ms: Mapping[str, int] | None = None
+    # quote age limit for market orders and client closes; 0: off
+    default_quote_age_ms: int = added_field(0)
+    quote_age_ms: Mapping[str, int] | None = added_field(None)
+    # sanity filter; a multiple of 0: off
+    sanity_multiple: int = added_field(0)
+    sanity_min_bp: int = added_field(0)  # basis points of the last price: 50 = 0.5 %
+    sanity_min_changes: int = added_field(5)
 
     def __post_init__(self) -> None:
         require_int("delay_threshold_ms", self.delay_threshold_ms, minimum=0)
         require_int("default_gap_threshold_ms", self.default_gap_threshold_ms, minimum=1)
         for symbol, ms in (self.gap_threshold_ms or {}).items():
             require_int(f"gap_threshold_ms[{symbol}]", ms, minimum=1)
+        require_int("default_quote_age_ms", self.default_quote_age_ms, minimum=0)
+        for symbol, ms in (self.quote_age_ms or {}).items():
+            require_int(f"quote_age_ms[{symbol}]", ms, minimum=1)
+        require_int("sanity_multiple", self.sanity_multiple, minimum=0)
+        require_int("sanity_min_changes", self.sanity_min_changes, minimum=1)
+        require_int("sanity_min_bp", self.sanity_min_bp, minimum=0)
 
     def gap_threshold(self, symbol: str) -> int:
         return (self.gap_threshold_ms or {}).get(symbol, self.default_gap_threshold_ms)
+
+    def quote_age_limit(self, symbol: str) -> int:
+        """The oldest a price may be (ms) for a market order; 0: no limit."""
+        return (self.quote_age_ms or {}).get(symbol, self.default_quote_age_ms)
+
+    def out_of_line(self, price: int, reference: int, changes: Sequence[int]) -> bool:
+        """Whether `price` moved from `reference` by more than the sanity
+        filter allows, given the recent absolute changes. Exact: integer
+        comparisons only."""
+        if self.sanity_multiple == 0:
+            return False
+        move = abs(price - reference)
+        if move * 10_000 <= reference * self.sanity_min_bp:
+            return False
+        if len(changes) >= self.sanity_min_changes:
+            return move > self.sanity_multiple * lower_median(changes)
+        return True  # too little history: the percentage alone decides
 
 
 @dataclass(frozen=True, slots=True)
