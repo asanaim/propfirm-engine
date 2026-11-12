@@ -12,6 +12,7 @@ import { Login } from "./Login";
 import { PolicyPages } from "./Policies";
 import { TradersPage } from "./Traders";
 import { ReportsPage } from "./Transactions";
+import { SystemPage } from "./System";
 import { SiteEditorPage } from "./Site";
 import { NoticesPage } from "./Notices";
 import { PaymentMethodsPage } from "./PaymentMethods";
@@ -64,6 +65,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
               <CustomRoutes>
                 {screens.has("traders") ? <Route path="/traders" element={<TradersPage />} /> : null}
                 {screens.has("transactions") ? <Route path="/transactions" element={<ReportsPage />} /> : null}
+                {screens.has("system") ? <Route path="/system" element={<SystemPage />} /> : null}
                 {screens.has("anomalies") ? <Route path="/anomalies" element={<AnomalyReport />} /> : null}
                 {screens.has("audit") ? <Route path="/audit" element={<AuditTrail />} /> : null}
                 {screens.has("news") ? <Route path="/news" element={<NewsDesk />} /> : null}

@@ -41,6 +41,7 @@ import {
   Wallet,
   Contact,
   ArrowLeftRight,
+  Server,
 } from "lucide-react";
 
 export const STROKE = 1.75;
@@ -94,4 +95,5 @@ export const ICONS = {
   extensions: Puzzle,
   maintenance: Wrench,
   security: LockKeyhole,
+  system: Server,
 } satisfies Record<string, LucideIcon>;

@@ -52,7 +52,10 @@ services:
   # --- the platform (P2): docker compose --profile platform up ---------------
   engine:
     profiles: ["platform"]
-    build: &runtime {context: ., target: runtime}  # non-root, no dev tools
+    build: &runtime  # non-root, no dev tools
+      context: .
+      target: runtime
+      args: {PIPRIDGE_REVISION: "${PIPRIDGE_REVISION:-unknown}"}
     depends_on: &services
       postgres:
         condition: service_healthy

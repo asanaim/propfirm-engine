@@ -43,6 +43,7 @@ from fastapi import FastAPI
 
 from propfirm.api.app import Deps, create_app
 from propfirm.api.auth import JwksKeys, TokenVerifier
+from propfirm.api.system import SystemProbe
 from propfirm.audit.store import AuditStore
 from propfirm.audit.store import migrate as migrate_audit
 from propfirm.customers.cases_store import CaseStore
@@ -375,6 +376,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             payouts=payouts,
             traders=directory,
             reports=Reports(pool, config.customer_schema),
+            system=SystemProbe(
+                pool, client, now_ms(), os.environ.get("PIPRIDGE_REVISION", ""), live.head
+            ),
             news=news,
             staff=staff,
             desk=desk,

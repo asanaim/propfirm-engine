@@ -13,5 +13,6 @@ export function screensFor(permissions: readonly string[]): Set<string> {
   if (has("settings.change")) out.add("site"); // the website's text (AC07)
   if (has("settings.change")) out.add("methods"); // payment methods (AC13)
   if (has("settings.change")) out.add("templates"); // notification templates (AC12)
+  if (has("settings.change")) out.add("system"); // system information (AC23); the API checks admin tier
   return out;
 }
