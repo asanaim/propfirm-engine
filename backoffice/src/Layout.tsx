@@ -1,6 +1,7 @@
 import { Box, useTheme } from "@mui/material";
 import { type ReactNode, useEffect } from "react";
 import { AppBar, Layout as RaLayout, TitlePortal } from "react-admin";
+import { useLocation } from "react-router-dom";
 import { CommandSearch } from "./CommandSearch";
 import { Menu } from "./Menu";
 
@@ -32,9 +33,16 @@ export function useThemeMark(): void {
 
 export function Layout({ children }: { children: ReactNode }) {
   useThemeMark();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
   return (
     <RaLayout menu={Menu} appBar={BrandBar}>
-      {children}
+      {/* keyed by the page, so each new page fades in (still for reduced motion) */}
+      <div key={pathname} className="page-fade">
+        {children}
+      </div>
     </RaLayout>
   );
 }
