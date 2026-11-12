@@ -6,7 +6,13 @@ page scrolls, so it moves on touch screens too. It draws only while on
 screen and the tab is visible, at most at device pixel ratio 2. For people
 who prefer reduced motion it draws one still frame. Colours come from the
 theme (--ridge-start, --summit) and follow a theme change. Without WebGL it
-renders nothing and `onUnavailable` is called (the CSS ridges stand in). */
+renders nothing and `onUnavailable` is called (the CSS ridges stand in).
+
+Kept light (12 Nov 2026): at most 30 frames a second; no layout read per
+frame (the canvas size and place are measured on resize and scroll only);
+and with `idleMs` it stops `idleMs` after the last pointer move and holds
+its frame until the pointer moves again, so a screen left open (the back
+office menu) costs nothing. */
 
 import { type RefObject, useEffect, useRef } from "react";
 
@@ -137,12 +143,25 @@ function compile(gl: WebGLRenderingContext, type: number, source: string): WebGL
   return gl.getShaderParameter(shader, gl.COMPILE_STATUS) ? shader : null;
 }
 
+/** The longest gap between frames we draw: 30 frames a second. */
+export const FRAME_MS = 1000 / 30;
+
+/** Whether a drifting terrain should keep drawing at `now`: always without
+`idleMs`; otherwise until `idleMs` after the last pointer activity. */
+export function awake(now: number, lastActive: number, idleMs: number | undefined): boolean {
+  return idleMs === undefined || now - lastActive <= idleMs;
+}
+
 export function Terrain({
   area,
   onUnavailable,
+  idleMs,
 }: {
   area?: RefObject<HTMLElement | null> | undefined;
   onUnavailable: () => void;
+  /** Stop drawing this long after the last pointer move (the menu, the
+  sign-in page); undefined: drift while on screen (the home page hero). */
+  idleMs?: number | undefined;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -197,6 +216,11 @@ export function Terrain({
     const themeWatch = new MutationObserver(readColours);
     themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
+    // measured on resize and scroll, never per frame (a read forces layout)
+    let box = el.getBoundingClientRect();
+    const place = () => {
+      box = el.getBoundingClientRect();
+    };
     const size = () => {
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       const w = Math.max(1, Math.round(el.clientWidth * ratio));
@@ -206,21 +230,28 @@ export function Terrain({
         el.height = h;
       }
       gl.viewport(0, 0, w, h);
+      place();
     };
+    size();
     const sizer = new ResizeObserver(size);
     sizer.observe(el);
+    window.addEventListener("scroll", place, { passive: true });
 
     // pointer (mouse, pen or finger) aims the camera; eased toward each frame
     const aim = { x: 0, y: 0, tx: 0, ty: 0 };
     const zone = area?.current ?? el;
+    let lastActive = performance.now();
     const point = (e: PointerEvent) => {
       const r = zone.getBoundingClientRect();
       aim.tx = ((e.clientX - r.left) / r.width - 0.5) * 2;
       aim.ty = ((e.clientY - r.top) / r.height - 0.5) * 2;
+      lastActive = performance.now();
+      if (!running && !still) loop(); // woken from rest
     };
     const release = () => {
       aim.tx = 0;
       aim.ty = 0;
+      lastActive = performance.now(); // ease back, then rest
     };
     zone.addEventListener("pointermove", point, { passive: true });
     zone.addEventListener("pointerdown", point, { passive: true });
@@ -235,12 +266,14 @@ export function Terrain({
 
     const start = performance.now();
     let frame = 0;
+    let running = false;
+    let drawn = -Infinity;
     const draw = (now: number) => {
-      size();
+      drawn = now;
       const t = still ? 6 : (now - start) / 1000;
-      aim.x += (aim.tx - aim.x) * 0.06;
-      aim.y += (aim.ty - aim.y) * 0.06;
-      const r = el.getBoundingClientRect();
+      aim.x += (aim.tx - aim.x) * 0.12; // per frame at 30 a second
+      aim.y += (aim.ty - aim.y) * 0.12;
+      const r = box;
       const scroll = Math.min(Math.max(1 - r.bottom / (window.innerHeight + r.height), 0), 1);
       const yaw = Math.sin(t * 0.12) * 0.18 + aim.x * 0.35;
       const eye: [number, number, number] = [Math.sin(yaw) * 2.3, 0.95 + aim.y * -0.2 + scroll * 0.5, Math.cos(yaw) * 2.3];
@@ -256,14 +289,21 @@ export function Terrain({
     };
     function loop() {
       cancelAnimationFrame(frame);
+      running = true;
       frame = requestAnimationFrame(function tick(now) {
-        if (!visible || document.hidden) return;
-        draw(now);
+        if (!visible || document.hidden || !awake(now, lastActive, idleMs)) {
+          running = false; // the last frame stays on the canvas
+          return;
+        }
+        if (now - drawn >= FRAME_MS - 1) draw(now);
         frame = requestAnimationFrame(tick);
       });
     }
     const resume = () => {
-      if (!document.hidden && visible && !still) loop();
+      if (!document.hidden && visible && !still) {
+        lastActive = performance.now();
+        loop();
+      }
     };
     document.addEventListener("visibilitychange", resume);
     if (still) requestAnimationFrame(draw);
@@ -274,11 +314,12 @@ export function Terrain({
       sizer.disconnect();
       seen.disconnect();
       document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("scroll", place);
       zone.removeEventListener("pointermove", point);
       zone.removeEventListener("pointerdown", point);
       zone.removeEventListener("pointerleave", release);
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     };
-  }, [area, onUnavailable]);
+  }, [area, onUnavailable, idleMs]);
   return <canvas ref={canvas} className="terrain" aria-hidden="true" />;
 }

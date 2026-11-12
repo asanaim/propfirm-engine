@@ -55,7 +55,34 @@ export function stepUp(manager: UserManager): Promise<void> {
   return manager.signinRedirect({ max_age: 0, state: { returnTo: window.location.hash } });
 }
 
+/** How long one answer of /staff/me serves the identity and permission
+checks (react-admin asks for both on many screens; the API builds the whole
+staff page each time). The My work screen still asks for its own. */
+export const ME_TTL_MS = 30_000;
+
+/** One shared, short-lived /staff/me for the auth checks: concurrent asks
+share one request, and a failed one is not kept. */
+export function sharedMe(api: Api, now: () => number = Date.now): { get: () => Promise<Me>; drop: () => void } {
+  let kept: { at: number; me: Promise<Me> } | null = null;
+  return {
+    get() {
+      if (kept !== null && now() - kept.at < ME_TTL_MS) return kept.me;
+      const me = api.get<Me>("/staff/me");
+      const entry = { at: now(), me };
+      kept = entry;
+      me.catch(() => {
+        if (kept === entry) kept = null;
+      });
+      return me;
+    },
+    drop() {
+      kept = null;
+    },
+  };
+}
+
 export function authProvider(manager: UserManager, api: Api): AuthProvider {
+  const staffMe = sharedMe(api);
   return {
     async login() {
       const back = window.location.hash === "#/login" ? "" : window.location.hash;
@@ -64,6 +91,7 @@ export function authProvider(manager: UserManager, api: Api): AuthProvider {
     async logout() {
       const user = await manager.getUser();
       current = null;
+      staffMe.drop();
       await manager.removeUser();
       // end the Keycloak session too, or the next sign-in skips the second factor
       if (user?.id_token !== undefined) await manager.signoutRedirect({ id_token_hint: user.id_token });
@@ -78,13 +106,13 @@ export function authProvider(manager: UserManager, api: Api): AuthProvider {
     },
     async getIdentity() {
       if ((await tokenSource(manager)()) === null) return { id: "anonymous" };
-      const me = await api.get<Me>("/staff/me");
+      const me = await staffMe.get();
       const name = me.member?.name ?? current?.profile.email ?? "staff";
       return { id: me.access.sid ?? current?.profile.sub ?? "me", fullName: `${name} (${me.access.title ?? "-"})` };
     },
     async getPermissions() {
       if ((await tokenSource(manager)()) === null) return [];
-      const me = await api.get<Me>("/staff/me");
+      const me = await staffMe.get();
       return me.access.permissions;
     },
   };
