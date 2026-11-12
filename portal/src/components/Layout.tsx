@@ -52,6 +52,7 @@ const NAV = [
   { href: "/funded", label: "Funded" },
   { href: "/payouts", label: "Payouts" },
   { href: "/news", label: "News" },
+  { href: "/analysis", label: "Analysis" },
   { href: "/tools", label: "Tools" },
   { href: "/security", label: "Security" },
 ];
