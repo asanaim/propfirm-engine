@@ -48,6 +48,7 @@ from propfirm.audit.store import migrate as migrate_audit
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.directory import TraderDirectory
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowScreening
 from propfirm.customers.lifecycle import Lifecycle
@@ -201,6 +202,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         policy = load_policy(config.policy_path)
         gateway = Gateway(InputStreamWriter(client, config.stream), pool, config.schema)
         customers = await CustomerStore.open(pool, config.customer_schema)
+        directory = TraderDirectory(pool, config.customer_schema)
         progressions = ProgressionStore(pool, config.customer_schema, config.schema)
         onboardings = OnboardingStore(pool, config.customer_schema)
         case_store = CaseStore(pool, config.customer_schema, config.schema)
@@ -371,6 +373,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             onboarding=onboarding,
             cases=cases,
             payouts=payouts,
+            traders=directory,
             news=news,
             staff=staff,
             desk=desk,

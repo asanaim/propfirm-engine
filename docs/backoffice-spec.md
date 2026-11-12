@@ -159,8 +159,23 @@ length. Values are never read as variables. Back office: Notification
 templates screen with live preview on sample values. Events today: the
 payout wallet security email (the only email the firm sends). Not yet: SMS
 and push (no such channel exists yet), and the per-customer notification
-history screen (AC19's user detail page; the outbox already keeps every
+history screen (now on AC19's trader file: subjects and delivery state; the outbox already keeps every
 email and each send attempt).
+
+AC19 trader lists and file (12 Nov 2026). In place: a Traders screen for
+staff who read customer records (an apprentice sees names, emails and
+countries masked and searches by CIF only). Tabs by status, each with its
+count: all, trading, funded, no account, identity pending, identity
+declined, open case, blocked; a search by CIF, name or email; the list
+shows accounts, identity status, total paid out and registration time.
+One trader's file shows the registration, accounts, purchases, identity
+checks, cases, payouts, emails sent (subjects and the latest delivery
+state, not bodies) and registration events (`GET /staff/traders`, `GET
+/staff/traders/{cif}`). Read only; segments are computed from the records,
+never stored. Not covered, because nothing records them here: email and
+mobile unverified (Keycloak verifies email at sign up; no phone number is
+collected), login history (kept by Keycloak), support tickets (AC21) and
+the transaction log (AC20).
 
 AC15 identity checks (10 Nov 2026), decided: provider only, as FTMO and
 FundedNext do. Identity checks run at the provider (Didit: photo ID and a
@@ -197,7 +212,7 @@ only add restrictions; cancelling a news window still needs an admin.
 ## Not started
 
 AC09 evidence for claims, AC11 SEO and generated sitemap, AC18 language
-manager, AC19 to AC22 console lists and
+manager, AC20 to AC22 console lists and
 reports (partly present: not checked), AC23 system pages, AC24 price feed
 failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.

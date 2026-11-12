@@ -42,6 +42,7 @@ function MenuItems({ screens }: { screens: Set<string> }) {
   return (
     <RaMenu>
       <RaMenu.DashboardItem primaryText="My work" leftIcon={<ICONS.work size={SIZE} strokeWidth={STROKE} />} />
+      {screens.has("traders") ? <RaMenu.Item to="/traders" primaryText="Traders" leftIcon={<ICONS.traders size={SIZE} strokeWidth={STROKE} />} /> : null}
       <RaMenu.ResourceItems />
       {screens.has("settings") ? (
         <RaMenu.Item to="/settings" primaryText="System settings" leftIcon={<ICONS.settings size={SIZE} strokeWidth={STROKE} />} />
