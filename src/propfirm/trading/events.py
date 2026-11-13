@@ -9,6 +9,7 @@ number, source time, receive time).
 from dataclasses import dataclass
 from enum import StrEnum
 
+from propfirm.journal.codec import added_field
 from propfirm.market.guards import FreezeReason
 from propfirm.trading.orders import OrderType, Side, TrailingKind
 
@@ -81,6 +82,10 @@ class OrderCancelled:
     order_id: str
     account_id: str
     reason: RejectReason | None  # None: cancelled by the trader
+    # the order's symbol; set on market-break cancellations only (added after
+    # records existed: other cancellations keep their recorded form, so
+    # older journals replay identically)
+    symbol: str | None = added_field(None)
 
 
 @dataclass(frozen=True, slots=True)

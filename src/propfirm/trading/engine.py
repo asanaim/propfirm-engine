@@ -1087,7 +1087,9 @@ class TradingEngine:
             if pending.request.symbol == symbol and order_id in self._orders:
                 del self._orders[order_id]
                 events.append(
-                    OrderCancelled(self._now, order_id, account_id, RejectReason.MARKET_BREAK)
+                    OrderCancelled(
+                        self._now, order_id, account_id, RejectReason.MARKET_BREAK, symbol
+                    )
                 )
         quote = self._quotes.get(symbol)
         if quote is None:

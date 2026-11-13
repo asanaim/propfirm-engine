@@ -64,7 +64,8 @@ def closures(events: Iterable[object]) -> list[BreakClosure]:
                 f"result {usd_text(e.pnl_cents)}"
             )
         elif isinstance(e, OrderCancelled) and e.reason is RejectReason.MARKET_BREAK:
-            line = f"  Pending order {e.order_id}: cancelled"
+            where = f"{e.symbol} " if e.symbol else ""
+            line = f"  {where}pending order {e.order_id}: cancelled"
         else:
             continue
         lines.setdefault(e.account_id, []).append(line)

@@ -115,7 +115,8 @@ EVENTS: Mapping[str, Event] = {
             "acc": "ACC00000001",
             "time": "2026-11-20 21:55 UTC",
             "closed_lines": (
-                "\n  EUR/USD buy 1.00 lot: closed, result -10.00 USD\n  Pending order o7: cancelled"
+                "\n  EUR/USD buy 1.00 lot: closed, result -10.00 USD"
+                "\n  XAU/USD pending order o7: cancelled"
             ),
         },
     ),

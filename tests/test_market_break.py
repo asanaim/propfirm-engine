@@ -90,6 +90,10 @@ def test_a_funded_account_is_made_flat_at_the_flat_by_time() -> None:
     (cancelled,) = of(OrderCancelled, events)
     assert (closed.reason, closed.ts) == (CloseReason.MARKET_BREAK, FLAT_BY)
     assert (cancelled.reason, cancelled.ts) == (RejectReason.MARKET_BREAK, FLAT_BY)
+    assert cancelled.symbol == "EUR/USD"
+    # other cancellations keep their recorded form (replay of older journals)
+    assert "symbol" not in CODEC.encode(OrderCancelled(1, "o9", "A", None))
+    assert CODEC.decode(CODEC.encode(cancelled)) == cancelled
     assert not rig.engine.positions("A") and not rig.engine.pending_orders("A")
     assert rig.engine.next_break("EUR/USD") == (FLAT_BY, ny(2026, 11, 20, 17), ny(2026, 11, 22, 17))
 
@@ -251,7 +255,7 @@ def test_one_email_per_account_lists_what_was_closed() -> None:
     (closure,) = closures(events)
     assert (closure.account_id, closure.ts) == ("A", FLAT_BY)
     assert closure.lines == (
-        "  Pending order o2: cancelled",
+        "  EUR/USD pending order o2: cancelled",
         "  EUR/USD buy 1.00 lot: closed, result -10.00 USD",
     )
     notice = break_notice("ada@example.com", "Ada Trader", closure)
