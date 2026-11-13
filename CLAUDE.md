@@ -33,5 +33,6 @@ These rules bind every change to this repository.
 - Every behaviour change ships with tests. `ruff check`, `ruff format
   --check`, `mypy` (strict) and `pytest` must pass.
 - Branch from `main`; merge through a pull request.
-- Open policy decisions (D-numbers in the outline) are configuration, not
-  hard-coded choices.
+- Open policy decisions (D-numbers in `docs/functional-outline.md`) are
+  configuration, not hard-coded choices. Dated owner decisions are in
+  `docs/decisions.md` and win where the two differ.
