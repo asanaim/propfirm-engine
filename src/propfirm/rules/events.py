@@ -8,6 +8,7 @@ from enum import StrEnum
 class BreachReason(StrEnum):
     DAILY_LOSS = "daily_loss"
     MAX_LOSS = "max_loss"
+    NEWS = "news"  # a fill inside a restricted news window (RuleSet.news_breaches)
 
 
 class AccountStatus(StrEnum):

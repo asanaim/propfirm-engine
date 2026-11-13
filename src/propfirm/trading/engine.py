@@ -252,6 +252,7 @@ class TradingEngine:
         # accounts whose rule set is not news-restricted (evaluations): set by
         # the rules supervisor from each account's rule set, so not engine state
         self._news_exempt: set[str] = set()
+        self._news_strict: set[str] = set()  # entries cancelled when a window opens
         # accounts the market break rule binds (funded, not Swing): set by the
         # supervisor from each account's rule set, so not engine state
         self._break_bound: set[str] = set()
@@ -901,6 +902,15 @@ class TradingEngine:
         else:
             self._news_exempt.add(account_id)
 
+    def set_news_strict(self, account_id: str, strict: bool) -> None:
+        """Whether this account's pending entries on a symbol are cancelled
+        when a news window opens on it (RuleSet.news_breaches)."""
+        self._account(account_id)
+        if strict:
+            self._news_strict.add(account_id)
+        else:
+            self._news_strict.discard(account_id)
+
     def is_blocked_for(self, account_id: str, symbol: str) -> bool:
         """Whether a news trade block binds this account on `symbol` now."""
         return account_id not in self._news_exempt and self.is_blocked(symbol)
@@ -1004,10 +1014,35 @@ class TradingEngine:
         target = max(self._now, ts)
         events = self._flatten_before_breaks(target)
         self._now = target
+        events.extend(self._cancel_news_entries())
         for event_id, window in list(self._calendar.items()):
             if window.end_ts <= self._now:  # time only moves forward: never covers again
                 del self._calendar[event_id]
         events.extend(_guard_event(c) for c in self._guards.advance(self._now))
+        return events
+
+    def _cancel_news_entries(self) -> list[EngineEvent]:
+        """Cancel the pending and trailing entries of strict accounts on every
+        symbol a news window covers now (RejectReason.NEWS_WINDOW), in
+        placement order. Stops of open positions stay."""
+        if not self._news_strict:
+            return []
+        events: list[EngineEvent] = []
+        for symbol in self._instruments:
+            if not self.is_blocked(symbol):
+                continue
+            for order_id, pending in list(self._orders.on_symbol(symbol)):
+                request = pending.request
+                if request.account_id not in self._news_strict or (
+                    isinstance(request, TrailingOrder) and request.kind is not TrailingKind.ENTRY
+                ):
+                    continue
+                del self._orders[order_id]
+                events.append(
+                    OrderCancelled(
+                        self._now, order_id, request.account_id, RejectReason.NEWS_WINDOW
+                    )
+                )
         return events
 
     def _break_after(self, symbol: str, ts: int) -> tuple[tuple[int, int, int] | None, int]:

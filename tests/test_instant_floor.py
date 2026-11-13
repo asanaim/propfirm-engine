@@ -29,7 +29,7 @@ def rig_in_profit(rsv: str) -> RulesRig:
 
 def test_the_new_instant_is_on_sale_and_keeps_its_floor() -> None:
     (instant,) = PRODUCTS["instant"]
-    assert (instant.rsv_id, instant.floor_restarts_after_payout) == ("instant-funded-v3", False)
+    assert (instant.rsv_id, instant.floor_restarts_after_payout) == ("instant-funded-v4", False)
     assert RULESETS["instant-funded-v1"].floor_restarts_after_payout  # open accounts keep it
 
 

@@ -181,10 +181,10 @@ def test_the_shipped_funded_stages_and_settings() -> None:
     policy = load_policy()
     funded = {r.rsv_id for r in policy.rule_sets() if r.flat_before_breaks}
     assert funded == {
-        "lite-funded-v3",
-        "classic-funded-v2",
-        "one-step-funded-v3",
-        "instant-funded-v3",
+        "lite-funded-v4",
+        "classic-funded-v3",
+        "one-step-funded-v4",
+        "instant-funded-v4",
     }
     hours = {i.name: i.hours for i in policy.trading.instruments}
     assert all(h is not None and h.flat_before_minutes == 5 for h in hours.values())
@@ -224,7 +224,7 @@ def test_the_journal_closes_a_funded_position_and_replays_identically() -> None:
         return PlaceOrder(request, ts)
 
     inputs = [
-        OpenAccount("F", "lite-funded-v3", 1_000_000, FRIDAY),
+        OpenAccount("F", "lite-funded-v4", 1_000_000, FRIDAY),
         OpenAccount("E", "lite-s1-v3", 1_000_000, FRIDAY),
         PriceUpdate("EUR/USD", 1, FRIDAY, FRIDAY, 110_000),
         buy("f1", "F", FRIDAY + 1),

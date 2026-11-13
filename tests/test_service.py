@@ -90,7 +90,7 @@ def test_bad_settings_are_refused(env: dict[str, str]) -> None:
 def test_development_setup_has_every_symbol_and_product() -> None:
     setup = development_setup()
     assert len(setup.instruments) == 30
-    assert {r.rsv_id for r in setup.rule_sets} >= {"lite-s1-v3", "instant-funded-v3"}
+    assert {r.rsv_id for r in setup.rule_sets} >= {"lite-s1-v3", "instant-funded-v4"}
     assert setup.trade_blocks == () and setup.news_windows == ()
 
 
@@ -395,8 +395,10 @@ def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
         "floor_restarts_after_payout": True,  # a static loss: the key keeps its default
         "floor_locks_at_start": True,  # a static loss: the key keeps its default
         "flat_before_breaks": False,  # evaluations: hold over breaks (as FTMO)
+        "news_breaches": False,  # evaluations: news windows do not bind
     }
     assert products[0]["stages"][-1]["flat_before_breaks"] is True  # funded (D-13.23)
+    assert products[0]["stages"][-1]["news_breaches"] is True  # funded: news rule as FTMO
     instant = products[-1]["stages"][0]
     assert (instant["max_loss_kind"], instant["consistency_percent"]) == ("trailing", "50")
     assert instant["profit_target_percent"] is None  # funded: no target

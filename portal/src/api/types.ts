@@ -16,6 +16,7 @@ export interface Stage {
   tie_rule: "breach_wins" | "pass_wins";
   news_restricted: boolean; // restricted news windows bind this stage (funded only, as FTMO)
   floor_restarts_after_payout?: boolean; // trailing loss: a payout lowers the floor again (older Instant only)
+  news_breaches?: boolean; // funded: entries cancelled when a news window opens; a fill inside ends the account
   flat_before_breaks?: boolean; // funded: made flat shortly before a market break of 2 hours or more
   floor_locks_at_start?: boolean; // trailing loss: the floor stops rising at the starting balance
 }

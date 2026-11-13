@@ -133,6 +133,13 @@ class RuleSet:
     # initial balance (True: every rule set before 13 Nov 2026). False: it
     # keeps trailing above the initial balance [build plan step 1].
     floor_locks_at_start: bool = added_field(True)
+    # The news rule as FTMO (D-13.17 news row, 13 Nov 2026), on news-
+    # restricted accounts only: pending entry orders on an affected symbol
+    # are cancelled when its window opens, and a fill inside a window (stop
+    # loss, take profit, trailing stop) breaches the account (BreachReason.
+    # NEWS). False: entries wait for the window to end and a fill raises an
+    # integrity case for staff (every rule set before 14 Nov 2026).
+    news_breaches: bool = added_field(False)
     # Market break rule (build plan step 1, FTMO's funded Standard account):
     # positions are closed and pending orders cancelled shortly before a
     # market break of 2 hours or more, and no new order opens in those last
@@ -158,6 +165,10 @@ class RuleSet:
             raise ValueError("only funded stages have no profit target")
         if self.consistency_at_pass and self.consistency is None:
             raise ValueError("consistency_at_pass needs a consistency share")
+        if not isinstance(self.news_breaches, bool):
+            raise TypeError("news_breaches must be a bool")
+        if self.news_breaches and not self.news_restricted:
+            raise ValueError("news_breaches needs news_restricted")
         if not isinstance(self.news_restricted, bool):
             raise TypeError("news_restricted must be a bool")
         if not isinstance(self.floor_restarts_after_payout, bool):
@@ -280,29 +291,45 @@ def _breaks(rules: RuleSet, version: int) -> RuleSet:
     return replace(rules, rsv_id=f"{base}-v{version}", flat_before_breaks=True)
 
 
+def _news(rules: RuleSet, version: int) -> RuleSet:
+    """A funded rule set with the news rule as FTMO (14 Nov 2026), as its
+    next version."""
+    base = rules.rsv_id.rsplit("-v", 1)[0]
+    return replace(rules, rsv_id=f"{base}-v{version}", news_breaches=True)
+
+
+_LITE_FUNDED_V3 = _breaks(_lite(Stage.FUNDED, None), 3)
+_CLASSIC_FUNDED_V2 = _breaks(_classic(Stage.FUNDED, None), 2)
+_ONE_STEP_FUNDED_V3 = _breaks(_one_step(Stage.FUNDED, None), 3)
+
 # The rule sets on sale, per product, in stage order.
 PRODUCTS: dict[str, tuple[RuleSet, ...]] = {
     "lite": (
         _lite(Stage.S1, _P(6, 100)),
         _lite(Stage.S2, _P(6, 100)),
-        _breaks(_lite(Stage.FUNDED, None), 3),
+        _news(_LITE_FUNDED_V3, 4),
     ),
     "classic": (
         _classic(Stage.S1, _P(10, 100)),
         _classic(Stage.S2, _P(5, 100)),
-        _breaks(_classic(Stage.FUNDED, None), 2),
+        _news(_CLASSIC_FUNDED_V2, 3),
     ),
     "one-step": (
         _one_step(Stage.S1, _P(10, 100)),
-        _breaks(_one_step(Stage.FUNDED, None), 3),
+        _news(_ONE_STEP_FUNDED_V3, 4),
     ),
-    "instant": (_INSTANT_V3,),
+    "instant": (_news(_INSTANT_V3, 4),),
 }
 
 # Versions no longer sold; accounts opened on them keep them.
 RETIRED: tuple[RuleSet, ...] = (
     _INSTANT_V1,
     _INSTANT_V2,
+    # funded stages before the news rule as FTMO (14 Nov 2026)
+    _INSTANT_V3,
+    _LITE_FUNDED_V3,
+    _CLASSIC_FUNDED_V2,
+    _ONE_STEP_FUNDED_V3,
     # funded stages before the market break rule (13 Nov 2026)
     _lite(Stage.FUNDED, None),
     _classic(Stage.FUNDED, None),

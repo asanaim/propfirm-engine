@@ -221,7 +221,7 @@ def refused(events: list[Any]) -> InputRejectReason:
 
 def test_a_payout_debit_takes_the_profit_once_and_lowers_the_floors() -> None:
     rig = Rig()
-    rig(OpenAccount("A", "lite-funded-v3", 1_000_000, T0))
+    rig(OpenAccount("A", "lite-funded-v4", 1_000_000, T0))
     rig.price(T0, 110_000)
     request = OrderRequest("o1", "A", "EUR/USD", Side.BUY, OrderType.MARKET, 100)
     (opened,) = [e for e in rig(PlaceOrder(request, T0 + 1)) if isinstance(e, PositionOpened)]
@@ -245,7 +245,7 @@ def test_a_payout_debit_takes_the_profit_once_and_lowers_the_floors() -> None:
     assert (debited.account_id, debited.payout, debited.amount_cents) == ("A", PO, profit)
     assert (debited.balance_cents, debited.rsv_id, debited.ts) == (
         1_000_000,
-        "lite-funded-v3",
+        "lite-funded-v4",
         T0 + 33,
     )
     assert engine.balance("A") == 1_000_000 and engine.has_entry(payout_entry(PO))

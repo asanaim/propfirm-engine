@@ -43,7 +43,7 @@ def fold(*steps: Step) -> OnboardingState:
     return onboarding_state(ONB, [OnboardingEvent(ONB, k, n, d) for n, (k, d) in enumerate(steps)])
 
 
-CREATED: Step = ("created", {"source": "progression", "rsv_id": "lite-funded-v3"})
+CREATED: Step = ("created", {"source": "progression", "rsv_id": "lite-funded-v4"})
 ASKED: Step = ("kyc_requested", {"kyc": "KYC00000001"})
 VERIFIED: Step = ("kyc_approved", {"kyc": "KYC00000001"})
 CLEARED: Step = ("cleared", {})
@@ -181,7 +181,7 @@ def test_the_contract_states_the_terms_in_force() -> None:
         "Agreement CTR00000001, issued 2026-10-26",
         "Ada Trader, customer CIF00000001, identity verified under case KYC00000001",
         "Account ACC00000009, product Lite, allocation 10,000.00 (USD)",
-        "Rule set lite-funded-v3: maximum loss 6 % (static)",
+        "Rule set lite-funded-v4: maximum loss 6 % (static)",
         "daily loss limit 3 %",
         "receives 80 % of the profit",
         "from the trading day 14 days after that of the first trade on the account",

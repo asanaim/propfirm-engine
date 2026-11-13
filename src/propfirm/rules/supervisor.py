@@ -141,6 +141,7 @@ class RuleSupervisor:
         events = self._roll(ts)
         events += self._engine.open_account(account_id, initial_balance_cents, ts)
         self._engine.set_news_restricted(account_id, rules.news_restricted)
+        self._engine.set_news_strict(account_id, rules.news_breaches)
         self._engine.set_break_bound(account_id, rules.flat_before_breaks)
         self._accounts[account_id] = _State(
             account_id=account_id,
@@ -290,6 +291,7 @@ class RuleSupervisor:
         self._day = state.day
         for a in accounts.values():  # derived from the rule sets, not engine state
             self._engine.set_news_restricted(a.account_id, a.rules.news_restricted)
+            self._engine.set_news_strict(a.account_id, a.rules.news_breaches)
             self._engine.set_break_bound(a.account_id, a.rules.flat_before_breaks)
 
     # --- queries ------------------------------------------------------------
@@ -541,7 +543,29 @@ class RuleSupervisor:
                     state.rules.rsv_id,
                 )
             )
+            if state.rules.news_breaches and state.status is AccountStatus.ACTIVE:
+                out += self._news_breach(state)
         return out
+
+    def _news_breach(self, state: _State) -> list[Event]:
+        """As FTMO: a fill inside a restricted window ends the account. The
+        close-out follows, as for a loss breach."""
+        now = self._engine.now
+        events: list[Event] = [
+            AccountBreached(
+                now,
+                state.account_id,
+                (BreachReason.NEWS,),
+                self._engine.equity(state.account_id),
+                self._daily_floor(state),
+                self._max_floor(state),
+                state.rules.rsv_id,
+            )
+        ]
+        events += self._engine.close_all(state.account_id, now, CloseReason.BREACH)
+        events += self._engine.lock_account(state.account_id, now)
+        state.status = AccountStatus.BREACHED
+        return events
 
     def _check(self, state: _State) -> list[Event]:
         equity = self._engine.equity(state.account_id)
