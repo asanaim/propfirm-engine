@@ -8,6 +8,8 @@ Every input goes through `_run`:
    carried across the reset with a floating loss larger than the daily limit
    therefore breaches at the reset itself.
 2. Pass the input to the engine.
+   At each boundary the engine first charges the overnight swaps of open
+   positions (`TradingEngine.rollover`); they count in the closing day's P&L.
 3. Record trading days and realized P&L per day from the engine's fills.
 4. Check every active account: update the equity high-water mark (trailing
    max loss), then breach and pass in the order the tie rule sets (D11:
@@ -60,6 +62,7 @@ from propfirm.trading.events import (
     EngineEvent,
     PositionClosed,
     PositionOpened,
+    SwapCharged,
 )
 from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest, Side
@@ -472,6 +475,11 @@ class RuleSupervisor:
         boundary = self._clock.next_boundary(self._day)
         while boundary <= now:
             events += self._engine.advance(boundary)
+            # swaps first: they belong to the day that closes, and the new
+            # day's base and floors are set from the balance after them
+            swaps = self._engine.rollover(boundary, self._clock.weekday(boundary))
+            self._record(swaps)
+            events += swaps
             self._day = boundary
             for state in self._active():
                 equity = self._engine.equity(state.account_id)
@@ -505,6 +513,8 @@ class RuleSupervisor:
                 state.day_pnl[self._day] = state.day_pnl.get(self._day, 0) + event.pnl_cents
             elif isinstance(event, CommissionCharged):  # the day's P&L is net of commission
                 state.day_pnl[self._day] = state.day_pnl.get(self._day, 0) - event.commission_cents
+            elif isinstance(event, SwapCharged):  # and of swaps, on the day the reset closes
+                state.day_pnl[self._day] = state.day_pnl.get(self._day, 0) - event.swap_cents
 
     def _news_violations(self, events: list[EngineEvent]) -> list[Event]:
         """Stop-loss, take-profit and trailing-stop fills inside a window that

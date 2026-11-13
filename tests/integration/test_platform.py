@@ -310,7 +310,7 @@ def test_policy_edits_reach_the_engine_on_restart(
     shipped = load_policy()
     raw = tomllib.loads(DEFAULT_POLICY.read_text("utf-8"))
     raw["products"][0]["stages"][0].update(version=3, daily_loss_percent="4")
-    raw["trading"]["config_version"] = "trading-v5"
+    raw["trading"]["config_version"] = "trading-v6"
     raw["trading"]["leverage"]["metal"] = "25"
     edited = parse_policy(raw)
     same_version = copy.deepcopy(raw)
@@ -327,11 +327,11 @@ def test_policy_edits_reach_the_engine_on_restart(
         client = avalkey.Valkey.from_url(valkey_url)
         try:
             first = await life(shipped)
-            assert first.machine.supervisor.engine.config_version == "trading-v4"
+            assert first.machine.supervisor.engine.config_version == "trading-v5"
             second = await life(edited)  # the journal keeps its setup; edits arrive as inputs
             engine = second.machine.supervisor.engine
             assert "lite-s1-v3" in second.machine.rule_sets
-            assert engine.config_version == "trading-v5"
+            assert engine.config_version == "trading-v6"
             assert engine.instruments["XAU/USD"].leverage == 25
             assert second.machine.rule_sets["lite-s1-v2"].daily_loss == Fraction(3, 100)
             with pytest.raises(PolicyError, match="raise the stage's version"):

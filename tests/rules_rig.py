@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import replace
 from datetime import datetime
 
 from propfirm.ledger import Ledger
@@ -15,6 +16,7 @@ from propfirm.rules.products import RuleSet
 from propfirm.rules.supervisor import Event, RuleSupervisor
 from propfirm.trading.engine import TradingEngine
 from propfirm.trading.orders import OrderRequest, OrderType, Side
+from propfirm.trading.swaps import SwapTerms
 from tests.engine_rig import SYMS, instruments
 
 
@@ -36,10 +38,14 @@ class RulesRig:
         news: Iterable[RestrictedEvent] = (),
         spread_windows: Iterable[NewsWindow] = (),
         guard: GuardConfig | None = None,
+        swap: SwapTerms | None = None,
     ) -> None:
         self.ledger = Ledger()
+        specs = instruments()
+        if swap is not None:  # every test symbol pays this swap
+            specs = {name: replace(spec, swap=swap) for name, spec in specs.items()}
         engine = TradingEngine(
-            instruments(),
+            specs,
             self.ledger,
             config_version="engine-test",
             guard_config=guard

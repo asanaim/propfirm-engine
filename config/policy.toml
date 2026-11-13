@@ -96,7 +96,7 @@ one_instant_funding_per_trader = true
 unpaid_hold_hours = 24
 
 [trading]
-config_version = "trading-v4"  # v4: quote age limit and sanity filter (12 Nov 2026)
+config_version = "trading-v5"  # v5: swaps (13 Nov 2026); v4: quote age limit and sanity filter
 delay_threshold_ms = 2000      # older updates freeze the symbol
 gap_threshold_ms = 60000       # no update for longer freezes the symbol
 gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
@@ -198,6 +198,34 @@ forex = "0"
 metal = "0"
 oil = "0"
 crypto = "0.0525"
+
+[trading.swaps]
+# Overnight swaps (K6, D-13.19; product line version 1, section 8), charged
+# at each 17:00 New York reset on open positions, never credited:
+#   charge = position value x annual rate x nights / 360
+# Forex: the costly side pays the rate differential plus markup_percent
+# (the other side pays nothing); gold and silver long: USD rate plus
+# metal_markup_percent; oil long: oil_long_percent; crypto: crypto_percent
+# both sides every night. Forex, metals and oil: Wednesday's reset carries
+# 3 nights, Saturday and Sunday none.
+# markup, oil and crypto are starting values [A], to be checked against one
+# broker's published table (build plan step 8).
+markup_percent = "1"
+metal_markup_percent = "1"
+oil_long_percent = "4"
+crypto_percent = "15"
+
+[trading.swaps.rates_percent]
+# Central bank policy rates, owner settings: change them with
+# trading.config_version when a bank moves. As of 13 Nov 2026:
+USD = "4"      # Fed: top of the 3.75 to 4 % target range (28 Oct 2026)
+EUR = "2.5"    # ECB deposit facility (29 Oct 2026)
+GBP = "4"      # Bank of England Bank Rate (5 Nov 2026)
+JPY = "1.25"   # Bank of Japan (30 Oct 2026)
+CHF = "0"      # SNB (24 Sep 2026)
+AUD = "4.85"   # RBA cash rate (3 Nov 2026)
+CAD = "2.5"    # Bank of Canada (28 Oct 2026)
+NZD = "2.75"   # RBNZ official cash rate (28 Oct 2026)
 
 [contract]
 # The funded-trader agreement, issued after Tier 2 verification (outline

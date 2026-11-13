@@ -41,6 +41,7 @@ from propfirm.trading.instruments import (
     SpreadAndCommission,
     default_instrument,
 )
+from propfirm.trading.swaps import CURRENCIES, SwapSettings, swap_terms
 
 DEFAULT_POLICY = Path(__file__).resolve().parents[2] / "config" / "policy.toml"
 _PERCENT = re.compile(r"(0|[1-9][0-9]*)(\.[0-9]+)?")
@@ -359,6 +360,10 @@ class _Table:
 
     def name(self, key: str) -> str:
         return f"{self._where}.{key}"
+
+    def has(self, key: str) -> bool:
+        """Whether an optional key (added after policy files existed) is set."""
+        return key in self._data
 
     def table(self, key: str) -> _Table:
         return _Table(self._get(key), self.name(key))
@@ -725,6 +730,7 @@ def _trading(t: _Table) -> TradingPolicy:
     sanity_t.done()
     leverage_t, caps_t, spread_t = t.table("leverage"), t.table("lot_caps"), t.table("spread")
     commission_t = t.table("commission")
+    swaps = _swaps(t.table("swaps")) if t.has("swaps") else None
     t.done()
     commission = {c: commission_t.required_percent(c.value) for c in AssetClass}
     commission_t.done()
@@ -772,6 +778,7 @@ def _trading(t: _Table) -> TradingPolicy:
                     commission[symbol.asset_class],
                     commission_t.name(symbol.asset_class.value),
                 ),
+                swap=None if swaps is None else swap_terms(symbol, swaps),
             )
         )
     mins_t.done()
@@ -796,6 +803,26 @@ def _trading(t: _Table) -> TradingPolicy:
         sanity_min_changes=sanity[2],
     )
     return TradingPolicy(config_version, tuple(instruments), guard)
+
+
+def _swaps(t: _Table) -> SwapSettings:
+    """[trading.swaps]: the owner settings each symbol's swap is worked out
+    from (`propfirm.trading.swaps`)."""
+    rates_t = t.table("rates_percent")
+    rates = {code: rates_t.required_percent(code) for code in CURRENCIES}
+    rates_t.done()
+    try:
+        settings = SwapSettings(
+            rates=rates,
+            markup=t.required_percent("markup_percent"),
+            metal_markup=t.required_percent("metal_markup_percent"),
+            oil_long=t.required_percent("oil_long_percent"),
+            crypto=t.required_percent("crypto_percent"),
+        )
+    except ValueError as exc:
+        raise PolicyError(f"{t.name('rates_percent')}: {exc}") from exc
+    t.done()
+    return settings
 
 
 def _pricing(spread: MarketSpreadConfig, commission: Fraction, where: str) -> Pricing:

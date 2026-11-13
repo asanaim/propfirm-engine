@@ -132,6 +132,21 @@ class CommissionCharged:
 
 
 @dataclass(frozen=True, slots=True)
+class SwapCharged:
+    """The overnight swap of an open position at a 17:00 New York reset,
+    taken from the account's balance (K6, D-13.19)."""
+
+    ts: int  # the reset
+    position_id: str
+    account_id: str
+    symbol: str
+    nights: int  # nights the reset carries (3 on Wednesday for forex)
+    value_cents: int  # the position's value at the feed price, rounded half-even (for the record)
+    swap_cents: int  # exact charge of the exact value, rounded half-even
+    config_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class StopsModified:
     ts: int
     position_id: str
@@ -273,6 +288,7 @@ type EngineEvent = (
     | PositionOpened
     | PositionClosed
     | CommissionCharged
+    | SwapCharged
     | StopsModified
     | TrailingPlaced
     | TrailingMoved

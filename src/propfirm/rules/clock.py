@@ -46,6 +46,11 @@ class TradingClock:
         local = datetime.fromtimestamp(start // 1000, tz=self._zone)
         return self._boundary(local.date() + timedelta(days=1))
 
+    def weekday(self, ts: int) -> int:
+        """The local weekday of `ts` (ms UTC), Monday = 0."""
+        require_int("ts", ts, minimum=0)
+        return datetime.fromtimestamp(ts // 1000, tz=self._zone).weekday()
+
     def _boundary(self, day: date) -> int:
         local = datetime.combine(day, self._reset, tzinfo=self._zone)
         return (local - _EPOCH) // _MS
