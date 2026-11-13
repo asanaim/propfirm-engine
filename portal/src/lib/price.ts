@@ -47,6 +47,7 @@ export const REJECTIONS: Record<string, string> = {
   news_window: "No trades open or close around a listed news event (see the news calendar).",
   invalid_trailing: "Distance and step must be whole points, at least 1, and the level must stay above zero.",
   position_closed: "The position closed, so its trailing stop was cancelled.",
+  market_closed: "The market for this symbol is closed now. Pending orders and stops wait for it to open.",
   stale_quote: "The last price is a few seconds old, so the order was not filled on it. Try again on the next price.",
 };
 

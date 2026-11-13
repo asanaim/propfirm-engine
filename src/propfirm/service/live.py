@@ -131,6 +131,7 @@ def quote_views(machine: Machine) -> dict[str, dict[str, Any]]:
             "receive_ts": quote.receive_ts if quote else None,
             "digits": engine.symbol_specs[symbol].digits,
             "frozen": engine.is_frozen(symbol),
+            "open": engine.is_open(symbol),  # inside its trading hours
             "blocked": engine.is_blocked(symbol),
         }
     return out

@@ -24,6 +24,7 @@ from propfirm._checks import require_int, require_text
 from propfirm.journal.codec import added_field
 from propfirm.market.spread import AnySpreadConfig, MarketSpreadConfig, SpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass, SymbolSpec
+from propfirm.trading.hours import TradingHours
 from propfirm.trading.swaps import SwapTerms
 
 LEVERAGE: Mapping[AssetClass, Fraction] = {
@@ -94,10 +95,15 @@ class InstrumentSpec:
     # the overnight swap (K6, D-13.19); None: none. Added after records
     # existed, so older setups keep their encoding and charge nothing.
     swap: SwapTerms | None = added_field(None)  # noqa: RUF009 (a dataclasses.field)
+    # trading hours (step 1, D6); None: always open, as every setup before
+    # 13 Nov 2026 (an added field: their encodings are unchanged)
+    hours: TradingHours | None = added_field(None)  # noqa: RUF009 (a dataclasses.field)
 
     def __post_init__(self) -> None:
         if self.swap is not None and not isinstance(self.swap, SwapTerms):
             raise TypeError("swap must be SwapTerms or None")
+        if self.hours is not None and not isinstance(self.hours, TradingHours):
+            raise TypeError("hours must be TradingHours or None")
         if not isinstance(self.spread, (SpreadConfig, MarketSpreadConfig, SpreadAndCommission)):
             raise TypeError(
                 "spread must be a SpreadConfig, MarketSpreadConfig or SpreadAndCommission"

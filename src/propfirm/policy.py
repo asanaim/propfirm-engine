@@ -35,6 +35,7 @@ from propfirm.market.spread import MarketSpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
 from propfirm.staff.records import SECTIONS_APPROVALS, Limits
+from propfirm.trading.hours import ALWAYS, TradingHours, day_minute, new_york_ms, week_minute
 from propfirm.trading.instruments import (
     InstrumentSpec,
     Pricing,
@@ -731,6 +732,7 @@ def _trading(t: _Table) -> TradingPolicy:
     leverage_t, caps_t, spread_t = t.table("leverage"), t.table("lot_caps"), t.table("spread")
     commission_t = t.table("commission")
     swaps = _swaps(t.table("swaps")) if t.has("swaps") else None
+    hours = _hours(t.table("hours")) if t.has("hours") else None
     t.done()
     commission = {c: commission_t.required_percent(c.value) for c in AssetClass}
     commission_t.done()
@@ -779,6 +781,7 @@ def _trading(t: _Table) -> TradingPolicy:
                     commission_t.name(symbol.asset_class.value),
                 ),
                 swap=None if swaps is None else swap_terms(symbol, swaps),
+                hours=None if hours is None else hours[symbol.asset_class],
             )
         )
     mins_t.done()
@@ -803,6 +806,44 @@ def _trading(t: _Table) -> TradingPolicy:
         sanity_min_changes=sanity[2],
     )
     return TradingPolicy(config_version, tuple(instruments), guard)
+
+
+def _hours(t: _Table) -> dict[AssetClass, TradingHours]:
+    """[trading.hours]: each asset class's schedule in New York time, with
+    the dated closures that apply to it (`propfirm.trading.hours`)."""
+    closures: dict[AssetClass, list[tuple[int, int]]] = {c: [] for c in AssetClass}
+    for closure in t.tables("closures") if t.has("closures") else []:
+        try:
+            span = (new_york_ms(closure.text("from")), new_york_ms(closure.text("to")))
+            classes = [AssetClass(c) for c in closure.texts("classes")]
+        except ValueError as exc:
+            raise PolicyError(f"{t.name('closures')}: {exc}") from exc
+        closure.done()
+        for c in classes:
+            closures[c].append(span)
+    out: dict[AssetClass, TradingHours] = {}
+    for c in AssetClass:
+        table = t.table(c.value)
+        try:
+            if table.boolean("always"):
+                out[c] = replace(ALWAYS, closures=tuple(sorted(closures[c])))
+            else:
+                daily = table.text("daily_break", allow_empty=True)
+                start, _, end = daily.partition("-")
+                out[c] = TradingHours(
+                    open_minute=week_minute(table.text("open")),
+                    close_minute=week_minute(table.text("close")),
+                    break_start=day_minute(start) if daily else None,
+                    break_end=day_minute(end) if daily else None,
+                    closures=tuple(sorted(closures[c])),
+                )
+        except ValueError as exc:
+            if isinstance(exc, PolicyError):
+                raise
+            raise PolicyError(f"{t.name(c.value)}: {exc}") from exc
+        table.done()
+    t.done()
+    return out
 
 
 def _swaps(t: _Table) -> SwapSettings:

@@ -15,6 +15,7 @@ from propfirm.rules.news import RestrictedEvent, trade_blocks
 from propfirm.rules.products import RuleSet
 from propfirm.rules.supervisor import Event, RuleSupervisor
 from propfirm.trading.engine import TradingEngine
+from propfirm.trading.hours import TradingHours
 from propfirm.trading.orders import OrderRequest, OrderType, Side
 from propfirm.trading.swaps import SwapTerms
 from tests.engine_rig import SYMS, instruments
@@ -39,11 +40,14 @@ class RulesRig:
         spread_windows: Iterable[NewsWindow] = (),
         guard: GuardConfig | None = None,
         swap: SwapTerms | None = None,
+        hours: TradingHours | None = None,
     ) -> None:
         self.ledger = Ledger()
         specs = instruments()
         if swap is not None:  # every test symbol pays this swap
             specs = {name: replace(spec, swap=swap) for name, spec in specs.items()}
+        if hours is not None:  # every test symbol keeps these hours
+            specs = {name: replace(spec, hours=hours) for name, spec in specs.items()}
         engine = TradingEngine(
             specs,
             self.ledger,

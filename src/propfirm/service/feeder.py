@@ -33,8 +33,10 @@ from propfirm.journal.stream import InputStreamWriter
 from propfirm.market.symbols import SYMBOLS
 from propfirm.market.synthetic import DEFAULT_START_POINTS, SyntheticConfig, generate
 from propfirm.market.types import PriceUpdate
+from propfirm.policy import load_policy
 from propfirm.service._wait import wait_or_stop
 from propfirm.service.config import ServiceConfig
+from propfirm.trading.hours import TradingHours
 
 WEEK_MS = 7 * 24 * 3_600_000
 
@@ -70,6 +72,21 @@ def continued(updates: Iterator[PriceUpdate], last: Mapping[str, int]) -> Iterat
     """The updates numbered on from `last` per symbol (gap-free, as generated)."""
     for update in updates:
         yield dataclasses.replace(update, seq=last.get(update.symbol, 0) + update.seq)
+
+
+def in_hours(
+    updates: Iterator[PriceUpdate], hours: Mapping[str, TradingHours | None]
+) -> Iterator[PriceUpdate]:
+    """The updates whose symbol's market is open at their receive time,
+    numbered on without gaps per symbol (a closed market sends nothing, as
+    a real feed; the engine would ignore those prices anyway)."""
+    seqs: dict[str, int] = {}
+    for update in updates:
+        schedule = hours.get(update.symbol)
+        if schedule is not None and not schedule.is_open(update.receive_ts):
+            continue
+        seq = seqs[update.symbol] = seqs.get(update.symbol, 0) + 1
+        yield dataclasses.replace(update, seq=seq)
 
 
 async def feed(
@@ -128,7 +145,9 @@ async def _main() -> None:
             await client.hset(key, update.symbol, f"{update.seq} {update.price}")
 
         writer = InputStreamWriter(client, config.stream)
-        updates = continued(generate(synthetic, start, start + WEEK_MS), seqs)
+        hours = {i.name: i.hours for i in load_policy(config.policy_path).trading.instruments}
+        generated = in_hours(generate(synthetic, start, start + WEEK_MS), hours)
+        updates = continued(generated, seqs)
         await feed(writer, updates, stop, record=record)
     finally:
         await client.aclose()

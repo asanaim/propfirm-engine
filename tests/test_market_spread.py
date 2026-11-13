@@ -210,7 +210,7 @@ def test_the_switch_is_journaled_and_replays_exactly() -> None:
 
 def test_an_existing_journal_switches_at_engine_start() -> None:
     """A journal begun under trading-v1 gets one UpdateTrading for every
-    symbol when the engine starts with the shipped policy (trading-v5)."""
+    symbol when the engine starts with the shipped policy (trading-v6)."""
     shipped = load_policy()
     legacy = replace(
         shipped,
@@ -222,7 +222,7 @@ def test_an_existing_journal_switches_at_engine_start() -> None:
     )
     machine, _ = run(legacy, [])
     (update,) = policy_changes(shipped, machine, T0)
-    assert isinstance(update, UpdateTrading) and update.config_version == "trading-v5"
+    assert isinstance(update, UpdateTrading) and update.config_version == "trading-v6"
     assert len(update.instruments) == 30 and update.guard is None
     events = CODEC.decode(machine.apply("1-0", update).record.events)
     assert isinstance(events, tuple) and not any(isinstance(e, InputRejected) for e in events)

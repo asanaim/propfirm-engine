@@ -96,7 +96,7 @@ one_instant_funding_per_trader = true
 unpaid_hold_hours = 24
 
 [trading]
-config_version = "trading-v5"  # v5: swaps (13 Nov 2026); v4: quote age limit and sanity filter
+config_version = "trading-v6"  # v6: trading hours; v5: swaps (13 Nov 2026)
 delay_threshold_ms = 2000      # older updates freeze the symbol
 gap_threshold_ms = 60000       # no update for longer freezes the symbol
 gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
@@ -226,6 +226,47 @@ CHF = "0"      # SNB (24 Sep 2026)
 AUD = "4.85"   # RBA cash rate (3 Nov 2026)
 CAD = "2.5"    # Bank of Canada (28 Oct 2026)
 NZD = "2.75"   # RBNZ official cash rate (28 Oct 2026)
+
+[trading.hours]
+# Trading hours in New York time (build plan step 1, D6). Outside them the
+# engine refuses orders, closes and stop changes ("market_closed"), holds
+# pending orders and stops, and ignores any price that arrives. Weekday and
+# time as "Sun 17:00"; daily_break as "17:00-18:00" ("" = none).
+# [DEFAULT] the major CFD brokers' sessions; check against the chosen
+# price source's hours in the feed trial (step 8).
+
+[trading.hours.forex]
+always = false
+open = "Sun 17:00"
+close = "Fri 17:00"
+daily_break = ""
+
+[trading.hours.metal]          # CME Globex session: a daily hour's break
+always = false
+open = "Sun 18:00"
+close = "Fri 17:00"
+daily_break = "17:00-18:00"
+
+[trading.hours.oil]
+always = false
+open = "Sun 18:00"
+close = "Fri 17:00"
+daily_break = "17:00-18:00"
+
+[trading.hours.crypto]         # every minute
+always = true
+
+# Holiday closures, New York wall time [from, to); classes they close.
+# [DEFAULT] Christmas and New Year's Day, as most CFD brokers.
+[[trading.hours.closures]]
+from = "2026-12-24 17:00"
+to = "2026-12-25 17:00"
+classes = ["forex", "metal", "oil"]
+
+[[trading.hours.closures]]
+from = "2026-12-31 17:00"
+to = "2027-01-01 17:00"
+classes = ["forex", "metal", "oil"]
 
 [contract]
 # The funded-trader agreement, issued after Tier 2 verification (outline
