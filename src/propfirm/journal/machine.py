@@ -117,7 +117,9 @@ from propfirm.trading.events import (
     TradingConfigChanged,
     TrailingMoved,
     TrailingPlaced,
+    UpdateOutsideHours,
 )
+from propfirm.trading.hours import TradingHours
 from propfirm.trading.instruments import InstrumentSpec, SpreadAndCommission
 from propfirm.trading.orders import (
     OrderRequest,
@@ -276,6 +278,9 @@ CODEC = Codec(
         # swaps (13 Nov 2026)
         SwapTerms,
         SwapCharged,
+        # trading hours (13 Nov 2026)
+        TradingHours,
+        UpdateOutsideHours,
     )
 )
 

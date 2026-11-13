@@ -32,6 +32,7 @@ class RejectReason(StrEnum):
     INVALID_TRAILING = "invalid_trailing"  # distance or step below 1, or no level >= 1
     POSITION_CLOSED = "position_closed"  # a trailing stop whose position closed
     STALE_QUOTE = "stale_quote"  # the last applied price is older than the quote age limit
+    MARKET_CLOSED = "market_closed"  # outside the symbol's trading hours
 
 
 class CloseReason(StrEnum):
@@ -129,6 +130,16 @@ class CommissionCharged:
     notional_cents: int  # at the fill price, rounded half-even (for the record)
     commission_cents: int  # exact share of the exact notional, rounded half-even
     config_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateOutsideHours:
+    """A price that arrived while the symbol's market was closed: not
+    applied, so it moves no quote and fires no order or stop."""
+
+    ts: int
+    symbol: str
+    seq: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +300,7 @@ type EngineEvent = (
     | PositionClosed
     | CommissionCharged
     | SwapCharged
+    | UpdateOutsideHours
     | StopsModified
     | TrailingPlaced
     | TrailingMoved

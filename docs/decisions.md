@@ -163,3 +163,13 @@ the starting balance (`max_loss_kind = "trailing_eod"`,
 `floor_locks_at_start = false`). Supersedes the lock in D-13.17 for 1 Step;
 Instant keeps its lock (K7). Status: the fields exist (#92); the product
 change is entered in step 2.
+
+D-13.21, trading hours (review D6). Taken under the owner's instruction to
+choose the most sustainable option where no decision exists: New York time;
+forex Sunday 17:00 to Friday 17:00; metals and oil Sunday 18:00 to Friday
+17:00 with a daily break 17:00 to 18:00; crypto every minute; closed 24 Dec
+17:00 to 25 Dec 17:00 and 31 Dec 17:00 to 1 Jan 17:00 for forex, metals
+and oil. Outside hours: no new order, close or stop change; pending orders
+and stops wait; prices are not applied. Every value is a policy setting
+(`[trading.hours]`), to be checked against the price source's hours in the
+feed trial (step 8). Status: built (step 1).

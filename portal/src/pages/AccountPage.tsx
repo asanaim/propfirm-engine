@@ -136,7 +136,7 @@ function Quotes({ quotes, attribution }: { quotes: Record<string, Quote>; attrib
                 <th scope="row">{q.symbol}</th>
                 <td>{q.bid === null ? "—" : formatPrice(q.bid, q.digits)}</td>
                 <td>{q.ask === null ? "—" : formatPrice(q.ask, q.digits)}</td>
-                <td>{q.frozen ? "No price" : q.blocked ? "News window" : "Open"}</td>
+                <td>{q.open === false ? "Market closed" : q.frozen ? "No price" : q.blocked ? "News window" : "Open"}</td>
               </tr>
             ))}
           </tbody>

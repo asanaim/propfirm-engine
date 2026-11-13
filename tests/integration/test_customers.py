@@ -125,13 +125,20 @@ async def platform(
     legacy_roles: bool = True,
     screening: bool = False,
     audit: bool = False,
+    trading_hours: bool = False,
 ) -> AsyncIterator[Platform]:
     """`funded`: funded orders wait for funded onboarding (sandbox identity
     check), as the API process runs it; otherwise they open at payment.
     `screening`: the pre-employment screening gate (on in the shipped policy;
-    off here unless a test is about it, so staff tests need not screen)."""
+    off here unless a test is about it, so staff tests need not screen).
+    `trading_hours`: the shipped trading hours; off here unless a test is
+    about them, because these tests run on the real clock and a weekend
+    run would find forex closed."""
     policy = policy or load_policy()
     policy = replace(policy, staff=replace(policy.staff, screening_required=screening))
+    if not trading_hours:
+        always = tuple(replace(i, hours=None) for i in policy.trading.instruments)
+        policy = replace(policy, trading=replace(policy.trading, instruments=always))
     config = ServiceConfig(
         database_url=database_url,
         valkey_url=valkey_url,

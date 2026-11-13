@@ -262,6 +262,7 @@ export interface Quote {
   source_ts: number | null;
   digits: number;
   frozen: boolean;
+  open?: boolean; // inside its trading hours (absent from older servers: open)
   blocked: boolean;
 }
 

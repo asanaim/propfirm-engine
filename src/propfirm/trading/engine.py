@@ -57,6 +57,13 @@ Rules hooks (step 5): `close_all` closes every position of an account at the
 current prices, ignoring freezes and news blocks (breach close-out), and
 `lock_account` cancels its pending orders and rejects all further trading.
 
+Trading hours (build plan step 1; `propfirm.trading.hours`): a symbol with
+hours is closed outside them. Closed is handled like frozen: new orders,
+closes and stop changes are rejected (`market_closed`), pending orders,
+stop-losses and take-profits are held, cancelling is allowed, and a price
+that arrives is not applied (`UpdateOutsideHours`). A breach close-out
+still closes at the last price.
+
 Money:
 - Account currency USD; balances are ledger balances in integer cents.
 - P&L and margin are exact rationals until rounded: P&L half-even to the
@@ -122,6 +129,7 @@ from propfirm.trading.events import (
     TradingConfigChanged,
     TrailingMoved,
     TrailingPlaced,
+    UpdateOutsideHours,
 )
 from propfirm.trading.instruments import InstrumentSpec, conversion_route, scaled_cap
 from propfirm.trading.orders import (
@@ -279,6 +287,11 @@ class TradingEngine:
         if seq.status is SeqStatus.GAP:
             assert seq.missing_from is not None and seq.missing_to is not None
             events.append(FeedGap(self._now, symbol, seq.missing_from, seq.missing_to))
+        if self._closed(symbol):
+            # a stray price outside trading hours is never applied, so it
+            # cannot fire a stop; its sequence number is still used
+            events.append(UpdateOutsideHours(self._now, symbol, update.seq))
+            return events
         apply, changes = self._guards.on_update(update)
         events.extend(_guard_event(c) for c in changes)
         if not apply:
@@ -492,6 +505,9 @@ class TradingEngine:
         if order_id in self._used_ids or order_id in self._positions:
             events.append(self._reject(order_id, account_id, RejectReason.DUPLICATE_ID))
             return events
+        if self._closed(position.symbol):
+            events.append(self._reject(order_id, account_id, RejectReason.MARKET_CLOSED))
+            return events
         if self._guards.is_frozen(position.symbol):
             events.append(self._reject(order_id, account_id, RejectReason.SYMBOL_FROZEN))
             return events
@@ -538,6 +554,9 @@ class TradingEngine:
         if account_id in self._locked:
             events.append(self._reject(position_id, account_id, RejectReason.ACCOUNT_LOCKED))
             return events
+        if self._closed(position.symbol):
+            events.append(self._reject(position_id, account_id, RejectReason.MARKET_CLOSED))
+            return events
         if self._guards.is_frozen(position.symbol):
             events.append(self._reject(position_id, account_id, RejectReason.SYMBOL_FROZEN))
             return events
@@ -571,6 +590,9 @@ class TradingEngine:
             return events
         if account_id in self._locked:
             events.append(self._reject(position_id, account_id, RejectReason.ACCOUNT_LOCKED))
+            return events
+        if self._closed(position.symbol):
+            events.append(self._reject(position_id, account_id, RejectReason.MARKET_CLOSED))
             return events
         if self._guards.is_frozen(position.symbol):
             events.append(self._reject(position_id, account_id, RejectReason.SYMBOL_FROZEN))
@@ -824,6 +846,14 @@ class TradingEngine:
     def is_frozen(self, symbol: str) -> bool:
         return self._guards.is_frozen(symbol)
 
+    def is_open(self, symbol: str) -> bool:
+        """Whether the symbol's trading hours are open at engine time."""
+        return not self._closed(symbol)
+
+    def _closed(self, symbol: str) -> bool:
+        hours = self._instruments[symbol].hours
+        return hours is not None and not hours.is_open(self._now)
+
     def set_news_restricted(self, account_id: str, restricted: bool) -> None:
         """Whether news trade blocks bind this account (from its rule set)."""
         self._account(account_id)
@@ -974,6 +1004,8 @@ class TradingEngine:
         spec = self._instruments.get(request.symbol)
         if spec is None:
             return RejectReason.UNKNOWN_SYMBOL
+        if self._closed(request.symbol):
+            return RejectReason.MARKET_CLOSED
         if self._guards.is_frozen(request.symbol):
             return RejectReason.SYMBOL_FROZEN
         if self.is_blocked_for(request.account_id, request.symbol):
@@ -1014,6 +1046,8 @@ class TradingEngine:
             return RejectReason.DUPLICATE_ID
         if symbol not in self._instruments:
             return RejectReason.UNKNOWN_SYMBOL
+        if self._closed(symbol):
+            return RejectReason.MARKET_CLOSED
         if self._guards.is_frozen(symbol):
             return RejectReason.SYMBOL_FROZEN
         if not is_int(volume) or volume < 1:
