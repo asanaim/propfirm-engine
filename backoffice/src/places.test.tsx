@@ -149,7 +149,7 @@ describe("the screens", () => {
         <SettingsHub />
       </AdminContext>,
     );
-    expect(await screen.findByTestId("area-seo")).toHaveTextContent("Not built yet (AC11)");
+    expect(await screen.findByTestId("area-languages")).toHaveTextContent("Not built yet (AC18)");
     await waitFor(() => {
       expect(screen.getByTestId("area-general")).toHaveTextContent("Open"); // once permissions load
     });

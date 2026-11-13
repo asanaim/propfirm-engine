@@ -41,7 +41,16 @@ class Shape:
     images: frozenset[str] = frozenset()  # fields holding an image address
     figures: frozenset[str] = frozenset()  # item fields where a typed figure is the point
     private: frozenset[str] = frozenset()  # item fields kept off the public site
+    item_optional: frozenset[str] = frozenset()  # item fields that may be left empty
+    # item fields whose value must match a pattern (a page path, a robots value)
+    patterns: Mapping[str, re.Pattern[str]] = field(default_factory=dict)
 
+
+# a public page of the portal (review D10)
+PUBLIC_PATH = re.compile(
+    r"^/(shop|tools(/(symbols|reset|simulator))?|legal/[a-z0-9][a-z0-9-]{0,39})?$"
+)
+ROBOTS = re.compile(r"^(index|noindex)$")
 
 SECTIONS: dict[str, Shape] = {
     "hero": Shape({"title_line_1": 80, "title_line_2": 80, "lead": 300, "button": 40}),
@@ -69,6 +78,18 @@ SECTIONS: dict[str, Shape] = {
         4,
         figures=frozenset({"value"}),
         private=frozenset({"evidence"}),
+    ),
+    # rule AC11 and review D10 (12 Nov 2026): the title and description
+    # search engines and link previews show. Site wide (empty: built in), and
+    # one entry per page that overrides it; an empty field falls back.
+    "seo": Shape(
+        {"site_title": 60, "description": 160, "image": 300},
+        {"path": 60, "title": 60, "description": 160, "robots": 7},
+        20,
+        optional=frozenset({"site_title", "description", "image"}),
+        images=frozenset({"image"}),
+        item_optional=frozenset({"title", "description", "robots"}),
+        patterns={"path": PUBLIC_PATH, "robots": ROBOTS},
     ),
     "maintenance": Shape(
         {"title": 80, "message": 600, "image": 300},
@@ -116,10 +137,19 @@ class SiteSection:
             if set(item) != set(shape.items):
                 raise PolicyError(f"{self.section}: each item has {sorted(shape.items)}")
             for k, v in item.items():
-                if k in shape.figures:
+                if k in shape.patterns:
+                    if not (v == "" and k in shape.item_optional) and not (
+                        isinstance(v, str) and shape.patterns[k].match(v)
+                    ):
+                        raise PolicyError(f"{self.section}: {k} {v!r} is not allowed")
+                elif k in shape.figures:
                     check_figure(k, v, shape.items[k])
-                else:
+                elif not (k in shape.item_optional and v == ""):
                     texts.append((k, v, shape.items[k]))
+            if "path" in shape.patterns:
+                paths = [i.get("path") for i in self.items]
+                if len(set(paths)) != len(paths):
+                    raise PolicyError(f"{self.section}: one entry per page")
         for key, text, longest in texts:
             check_text(key, text, longest)
 
