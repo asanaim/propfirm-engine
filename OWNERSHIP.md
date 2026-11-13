@@ -9,7 +9,7 @@ the owner's lawyer (decision D-13.16 in `docs/decisions.md`).
 
 | Item | Value |
 | --- | --- |
-| Owner and copyright holder | Sayed Naim (GitHub account `asanaim`) |
+| Owner and copyright holder | Md. Abu Sayed Naim (GitHub account `asanaim`, commit name "Sayed Naim") |
 | Licence | Proprietary, all rights reserved (`LICENSE`) |
 | Repository | `github.com/asanaim/propfirm-engine`, private |
 | First commit | 29 Oct 2026 (`87e9f70`, repository skeleton) |
@@ -19,7 +19,7 @@ the owner's lawyer (decision D-13.16 in `docs/decisions.md`).
 
 | Person | Role | Commits on `main` |
 | --- | --- | --- |
-| Sayed Naim | Owner. Set every requirement and decision, reviewed and merged every pull request | 84 merge commits (as "Sayed Naim" and "asanaim") |
+| Md. Abu Sayed Naim | Owner. Set every requirement and decision, reviewed and merged every pull request | 84 merge commits (as "Sayed Naim" and "asanaim") |
 
 No other person has committed to this repository.
 
@@ -29,9 +29,8 @@ No other person has committed to this repository.
 | --- | --- | --- | --- |
 | Claude (model Claude Opus 5.5), through Claude Code and the Claude apps | Anthropic | Writing code, tests, documentation and specifications to the owner's instructions; research; the brand name screen and the logo, built as vector outlines with no font | All 109 non-merge commits carry `Co-Authored-By: Claude Opus 5.5`; 43 of them are authored as "Claude", 66 as "asanaim" |
 
-To confirm by the owner: whether any other AI tool (for example Gemini,
-ChatGPT or DeepSeek) produced material that entered this repository. If
-one did, it is added to the table with what it produced.
+No other AI tool produced material in this repository (owner's statement,
+13 Nov 2026).
 
 ## Points for the buyer's review
 
