@@ -288,6 +288,8 @@ class TradingEngine:
             update.receive_ts,
             self._spread_news(symbol),
             self._now,
+            update.bid,
+            update.ask,
         )
         self._quotes[symbol] = quote
         events.extend(self._trigger_orders(quote))

@@ -36,6 +36,14 @@ even number of points, so the midpoint of bid and ask equals the feed price.
 Bid never goes below 1 point; in that edge case the spread is kept and the
 midpoint moves up. Only applied (fresh) prices feed the estimate.
 
+Source bid and ask [D-13.10, 13 Nov 2026]: when the update carries the
+source's own bid and ask, the quote is widened to cover them: bid =
+min(model bid, source bid), ask = max(model ask, source ask). The engine
+never quotes tighter than the real market, so no trader buys below the
+market's ask or sells above its bid; in a calm market the model's spread
+already covers the source's and nothing changes. The midpoint can then
+differ from the feed price, and the spread can be odd.
+
 `min_points`, `max_points`, `window`, `min_samples`, `vol_multiplier` and
 `news_multiplier` are [DEFAULT] values, calibrated in P3 on recorded
 prices and broker spreads.
@@ -255,14 +263,19 @@ class SpreadModel:
         receive_ts: int,
         news: bool,
         ts: int = -1,
+        source_bid: int | None = None,
+        source_ask: int | None = None,
     ) -> Quote:
         spread = self.spread_points(news, ts)
         bid = max(1, price - spread // 2)
+        ask = bid + spread
+        if source_bid is not None and source_ask is not None:
+            bid, ask = min(bid, source_bid), max(ask, source_ask)
         return Quote(
             symbol=symbol,
             mid=price,
             bid=bid,
-            ask=bid + spread,
+            ask=ask,
             seq=seq,
             source_ts=source_ts,
             receive_ts=receive_ts,

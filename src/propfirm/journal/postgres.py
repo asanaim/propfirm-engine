@@ -90,6 +90,10 @@ CREATE TABLE IF NOT EXISTS {s}.prices (
     receive_ts bigint NOT NULL,
     price bigint NOT NULL
 );
+-- the source's own bid and ask (13 Nov 2026, D-13.10); null for a source
+-- that sends one price and for every row written before
+ALTER TABLE {s}.prices ADD COLUMN IF NOT EXISTS bid bigint;
+ALTER TABLE {s}.prices ADD COLUMN IF NOT EXISTS ask bigint;
 
 CREATE TABLE IF NOT EXISTS {s}.price_keys (
     key_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -245,14 +249,20 @@ class PostgresJournal:
 
     async def _prices(self, first: int, last: int) -> dict[int, PriceUpdate]:
         rows = await self._conn.fetch(
-            f"SELECT journal_seq, symbol, seq, source_ts, receive_ts, price "
+            f"SELECT journal_seq, symbol, seq, source_ts, receive_ts, price, bid, ask "
             f"FROM {self._s}.prices WHERE journal_seq BETWEEN $1 AND $2",
             first,
             last,
         )
         return {
             r["journal_seq"]: PriceUpdate(
-                r["symbol"], r["seq"], r["source_ts"], r["receive_ts"], r["price"]
+                r["symbol"],
+                r["seq"],
+                r["source_ts"],
+                r["receive_ts"],
+                r["price"],
+                r["bid"],
+                r["ask"],
             )
             for r in rows
         }
@@ -278,7 +288,9 @@ class PostgresJournal:
                 )
             if stored.price is not None:
                 u = stored.price
-                prices.append((r.seq, u.symbol, u.seq, u.source_ts, u.receive_ts, u.price))
+                prices.append(
+                    (r.seq, u.symbol, u.seq, u.source_ts, u.receive_ts, u.price, u.bid, u.ask)
+                )
         s = self._s
         async with self._conn.transaction():
             await self._conn.executemany(
@@ -300,7 +312,7 @@ class PostgresJournal:
             if prices:
                 await self._conn.executemany(
                     f"INSERT INTO {s}.prices (journal_seq, symbol, seq, source_ts, receive_ts, "
-                    f"price) VALUES ($1, $2, $3, $4, $5, $6)",
+                    f"price, bid, ask) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     prices,
                 )
             if snapshots:

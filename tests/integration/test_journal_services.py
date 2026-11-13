@@ -16,13 +16,14 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import asyncpg
 import pytest
 import valkey.asyncio as avalkey
 
-from propfirm.journal.machine import JournalIntegrityError, PricesUnavailableError
+from propfirm.journal.machine import JournalIntegrityError, PricesUnavailableError, StoredRecord
 from propfirm.journal.postgres import JournalLockedError, PostgresJournal
 from propfirm.journal.runner import rebuild, verify_chain
 from propfirm.journal.stream import InputStreamReader
@@ -358,3 +359,35 @@ async def wait_for(
         if time.monotonic() > deadline:
             raise AssertionError("worker made no progress")
         await asyncio.sleep(0.002)
+
+
+def test_the_price_store_keeps_the_sources_bid_and_ask(database_url: str, pg_schema: str) -> None:
+    """D-13.10: bid and ask go into the licensed price store; older rows and
+    one-price sources read back with neither; an older schema gains the
+    columns on connect."""
+
+    async def scenario() -> None:
+        await journal_live(database_url, pg_schema)
+        async with sql(database_url) as conn:  # the schema as it was before 13 Nov
+            await conn.execute(f"ALTER TABLE {pg_schema}.prices DROP COLUMN bid, DROP COLUMN ask")
+        store = await PostgresJournal.connect(database_url, pg_schema)
+        try:
+            rows = [r async for r in store.records()]
+            priced = [r for r in rows if r.price is not None]
+            assert priced and all(r.price.bid is None and r.price.ask is None for r in priced)  # type: ignore[union-attr]
+            last = rows[-1].record
+            template = priced[-1]
+            assert template.price is not None
+            quoted = replace(
+                template.price, bid=template.price.price - 3, ask=template.price.price + 4
+            )
+            record = replace(
+                template.record, seq=last.seq + 1, source_id="9999999999999-0", hash="f" * 64
+            )
+            await store.append([StoredRecord(record, quoted)])
+            back = [r async for r in store.records(after=last.seq)]
+            assert [r.price for r in back] == [quoted]
+        finally:
+            await store.close()
+
+    asyncio.run(scenario())
