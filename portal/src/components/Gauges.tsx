@@ -117,8 +117,8 @@ interface BalanceEvent {
 }
 
 /** The balance over time from the account's journal history: the opening
-balance, then each closed trade's profit, each commission and each payout
-(which states the balance after it). */
+balance, then each closed trade's profit, each commission, each overnight
+swap and each payout (which states the balance after it). */
 export function balancePoints(events: BalanceEvent[], initial: number): CurvePoint[] {
   const opened = events.find((e) => e.type === "AccountOpened");
   let cents = initial;
@@ -126,6 +126,7 @@ export function balancePoints(events: BalanceEvent[], initial: number): CurvePoi
   for (const e of events) {
     if (e.type === "PositionClosed") cents += Number(e.pnl_cents);
     else if (e.type === "CommissionCharged") cents -= Number(e.commission_cents);
+    else if (e.type === "SwapCharged") cents -= Number(e.swap_cents);
     else if (e.type === "PayoutDebited") cents = Number(e.balance_cents);
     else continue;
     out.push({ ts: e.ts, cents });

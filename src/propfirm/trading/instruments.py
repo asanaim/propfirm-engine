@@ -21,8 +21,10 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 from propfirm._checks import require_int, require_text
+from propfirm.journal.codec import added_field
 from propfirm.market.spread import AnySpreadConfig, MarketSpreadConfig, SpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass, SymbolSpec
+from propfirm.trading.swaps import SwapTerms
 
 LEVERAGE: Mapping[AssetClass, Fraction] = {
     AssetClass.FOREX: Fraction(100),
@@ -89,8 +91,13 @@ class InstrumentSpec:
     max_order_volume_per_100k: int
     max_symbol_volume_per_100k: int
     spread: Pricing  # the spread model, with any commission
+    # the overnight swap (K6, D-13.19); None: none. Added after records
+    # existed, so older setups keep their encoding and charge nothing.
+    swap: SwapTerms | None = added_field(None)  # noqa: RUF009 (a dataclasses.field)
 
     def __post_init__(self) -> None:
+        if self.swap is not None and not isinstance(self.swap, SwapTerms):
+            raise TypeError("swap must be SwapTerms or None")
         if not isinstance(self.spread, (SpreadConfig, MarketSpreadConfig, SpreadAndCommission)):
             raise TypeError(
                 "spread must be a SpreadConfig, MarketSpreadConfig or SpreadAndCommission"

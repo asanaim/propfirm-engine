@@ -68,12 +68,13 @@ describe("objectives", () => {
 });
 
 describe("balancePoints", () => {
-  it("follows closed trades, commissions and payouts", () => {
+  it("follows closed trades, commissions, swaps and payouts", () => {
     const pts = balancePoints(
       [
         { type: "AccountOpened", ts: 10 },
         { type: "PositionOpened", ts: 20 },
         { type: "CommissionCharged", ts: 20, commission_cents: 350 },
+        { type: "SwapCharged", ts: 25, swap_cents: 764 },
         { type: "PositionClosed", ts: 30, pnl_cents: 12_000 },
         { type: "PayoutDebited", ts: 40, balance_cents: 500_000 },
       ],
@@ -82,7 +83,8 @@ describe("balancePoints", () => {
     expect(pts).toEqual([
       { ts: 10, cents: 500_000 },
       { ts: 20, cents: 499_650 },
-      { ts: 30, cents: 511_650 },
+      { ts: 25, cents: 498_886 },
+      { ts: 30, cents: 510_886 },
       { ts: 40, cents: 500_000 },
     ]);
   });

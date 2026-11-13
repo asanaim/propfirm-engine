@@ -111,6 +111,7 @@ from propfirm.trading.events import (
     RejectReason,
     StaleUpdate,
     StopsModified,
+    SwapCharged,
     SymbolFrozen,
     SymbolResumed,
     TradingConfigChanged,
@@ -127,6 +128,7 @@ from propfirm.trading.orders import (
     TrailingKind,
     TrailingOrder,
 )
+from propfirm.trading.swaps import SwapTerms
 
 CHAIN_VERSION = "propfirm-journal-v2"  # v2: keyed price digests, checkpoints
 PRICE_KEY_BYTES = 32
@@ -271,6 +273,9 @@ CODEC = Codec(
         # inputs added later (registration order does not affect encodings)
         PlaceTrailingEntry,
         SetTrailingStop,
+        # swaps (13 Nov 2026)
+        SwapTerms,
+        SwapCharged,
     )
 )
 

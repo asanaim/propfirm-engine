@@ -72,6 +72,13 @@ Money:
   posted to the ledger at once, so it counts in balance, equity, the loss
   limits and the day's P&L. Rounded half-even to the cent. The margin
   check requires margin plus commission.
+- Swaps (K6, D-13.19; formulas in `propfirm.trading.swaps`): at each
+  17:00 New York reset the rules supervisor calls `rollover`; every open
+  position on a symbol with swap terms pays value x annual rate x nights /
+  360, the value at the symbol's feed price (midpoint) in US dollars,
+  rounded half-even to the cent, posted to the ledger at once like a
+  commission. Never credited. A position whose value cannot be converted to
+  US dollars at that moment (no conversion price yet) is not charged.
 - Not implemented: margin call and stop-out (not in the project record; the
   loss limits of the rules engine, step 5, act far earlier).
 """
@@ -109,6 +116,7 @@ from propfirm.trading.events import (
     RejectReason,
     StaleUpdate,
     StopsModified,
+    SwapCharged,
     SymbolFrozen,
     SymbolResumed,
     TradingConfigChanged,
@@ -128,10 +136,12 @@ from propfirm.trading.orders import (
     trailing_move,
     trailing_reached,
 )
+from propfirm.trading.swaps import YEAR_DAYS
 
 FIRM_CAPITAL = "firm:capital"
 FIRM_TRADING_PNL = "firm:trading_pnl"
 FIRM_COMMISSION = "firm:commission"
+FIRM_SWAP = "firm:swap"
 FIRM_PAYOUTS = "firm:payouts"  # paid out of trading accounts, owed to traders until sent
 
 
@@ -318,6 +328,56 @@ class TradingEngine:
     def advance(self, ts: int) -> list[EngineEvent]:
         """Move engine time forward; freezes symbols whose updates are overdue."""
         return self._advance(ts)
+
+    def rollover(self, reset: int, weekday: int) -> list[EngineEvent]:
+        """Charge the swaps of a 17:00 New York reset (ms UTC) falling on
+        `weekday` (New York, Monday = 0), in position opening order. The
+        supervisor calls it once per reset, after advancing to it."""
+        require_int("weekday", weekday, minimum=0)
+        if weekday > 6:
+            raise ValueError("weekday must be 0 (Monday) to 6")
+        events = self._advance(reset)
+        for position in list(self._positions.values()):
+            spec = self._instruments[position.symbol]
+            terms = spec.swap
+            if terms is None:
+                continue
+            nights = terms.nights[weekday]
+            rate = terms.rate(position.side is Side.BUY)
+            quote = self._quotes.get(position.symbol)
+            if nights == 0 or rate == 0 or quote is None:
+                continue
+            try:
+                value = self._notional_usd(spec, quote.mid, position.volume)
+            except _NoRate:
+                continue
+            swap_cents = cents_half_even(value * rate * nights / YEAR_DAYS)
+            if swap_cents == 0:
+                continue
+            self._ledger.post(
+                transfer(
+                    f"swap:{position.position_id}:{self._now}",
+                    self._now,
+                    "swap",
+                    debit=FIRM_SWAP,
+                    credit=balance_account(position.account_id),
+                    amount=swap_cents,
+                    reference=position.position_id,
+                )
+            )
+            events.append(
+                SwapCharged(
+                    ts=self._now,
+                    position_id=position.position_id,
+                    account_id=position.account_id,
+                    symbol=position.symbol,
+                    nights=nights,
+                    value_cents=cents_half_even(value),
+                    swap_cents=swap_cents,
+                    config_version=self._version,
+                )
+            )
+        return events
 
     def on_outage(self, ts: int) -> list[EngineEvent]:
         """The feed connection is down: freeze every symbol."""

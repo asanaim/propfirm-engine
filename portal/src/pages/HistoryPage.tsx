@@ -111,6 +111,7 @@ export function HistoryPage({ acc }: { acc: string }) {
   const commission = events
     .filter((e) => e.type === "CommissionCharged")
     .reduce((sum, e) => sum + Number(e.commission_cents), 0);
+  const swaps = events.filter((e) => e.type === "SwapCharged").reduce((sum, e) => sum + Number(e.swap_cents), 0);
   const download = () => {
     const blob = new Blob([tradesCsv([...trades].reverse(), digitsOf)], { type: "text/csv" });
     const link = document.createElement("a");
@@ -135,7 +136,8 @@ export function HistoryPage({ acc }: { acc: string }) {
         }
       >
         <p>
-          {trades.length} trades: {formatCents(total)} profit, {formatCents(commission)} commission.
+          {trades.length} trades: {formatCents(total)} profit, {formatCents(commission)} commission,{" "}
+          {formatCents(swaps)} overnight swaps.
         </p>
       </Card>
       {trades.length > 0 && (
