@@ -238,3 +238,40 @@ def test_the_journal_closes_a_funded_position_and_replays_identically() -> None:
     (refused,) = of(OrderRejected, out[6])
     assert refused.reason is RejectReason.MARKET_BREAK
     assert run(inputs) == out  # deterministic
+
+
+# --- the trader's email ------------------------------------------------------------------
+
+
+def test_one_email_per_account_lists_what_was_closed() -> None:
+    from propfirm.customers.break_notices import break_notice, closures, lots_text, usd_text
+
+    rig = rig_with_trades()
+    events = rig.sup.advance(IN_WINDOW)
+    (closure,) = closures(events)
+    assert (closure.account_id, closure.ts) == ("A", FLAT_BY)
+    assert closure.lines == (
+        "  Pending order o2: cancelled",
+        "  EUR/USD buy 1.00 lot: closed, result -10.00 USD",
+    )
+    notice = break_notice("ada@example.com", "Ada Trader", closure)
+    assert notice.kind == "market_break_close" and notice.recipient == "ada@example.com"
+    assert notice.subject == "Account A: trades closed before the market break"
+    assert "  EUR/USD buy 1.00 lot: closed, result -10.00 USD" in notice.body
+    assert "This is not a rule breach" in notice.body
+    assert "2026-11-20 21:55 UTC" in notice.body  # 16:55 New York, winter time
+    assert (lots_text(250), lots_text(1), usd_text(123_456), usd_text(-5)) == (
+        "2.50 lots",
+        "0.01 lots",
+        "1,234.56 USD",
+        "-0.05 USD",
+    )
+
+
+def test_other_closures_send_no_break_email() -> None:
+    from propfirm.customers.break_notices import closures
+
+    rig = rig_with_trades(EVALUATION)
+    position = rig.engine.positions("A")[0].position_id
+    rig.price(110_000, FRIDAY + 2_000)
+    assert closures(rig.sup.close_position("A", position, FRIDAY + 2_000)) == []

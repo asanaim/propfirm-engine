@@ -544,6 +544,22 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
                 'contract_issued', 'signed', 'provision_attempted', 'provisioned', 'failed'));
         """,
     ),
+    (
+        10,
+        """
+        -- market break rule (D-13.23, 13 Nov 2026): the trader is emailed when
+        -- trades are closed before a market break
+        ALTER TABLE {s}.notifications DROP CONSTRAINT notifications_kind_check;
+        ALTER TABLE {s}.notifications ADD CONSTRAINT notifications_kind_check
+            CHECK (kind IN ('wallet_changed', 'market_break_close'));
+        -- how far the market-break sweep has read the engine journal
+        CREATE TABLE {s}.break_cursor (
+            id int PRIMARY KEY CHECK (id = 1),
+            seq bigint NOT NULL
+        );
+        INSERT INTO {s}.break_cursor (id, seq) VALUES (1, 0);
+        """,
+    ),
 )
 
 
