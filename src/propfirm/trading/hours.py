@@ -12,8 +12,9 @@ A schedule in New York time, the firm's trading-day zone:
 While a symbol is closed the engine refuses new orders, closes and stop
 changes (reason `market_closed`), holds pending orders, stop-losses and
 take-profits, and does not apply a price that arrives (a stray tick cannot
-fire a stop). Cancelling a pending order stays allowed. A breach close-out
-still closes at the last price, as for a frozen symbol.
+fire a stop). A pending order cannot be cancelled either: MetaTrader, the
+platform of FTMO and FundedNext, refuses every request on a closed market.
+A breach close-out still closes at the last price, as for a frozen symbol.
 
 Minutes are integers: a weekly minute counts from Monday 00:00 (0) to
 Sunday 23:59 (10079); a daily minute from 00:00 (0) to 23:59 (1439). Local
