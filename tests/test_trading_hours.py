@@ -1,8 +1,8 @@
 """Trading hours per symbol (build plan step 1, line 4; review D6).
 
-Outside its hours a symbol takes no new order, close or stop change
-(`market_closed`); pending orders and stops wait; a price that arrives is
-not applied; cancelling stays allowed.
+Outside its hours a symbol takes no new order, close, stop change or
+cancellation (`market_closed`), as MetaTrader; pending orders and stops
+wait; a price that arrives is not applied.
 """
 
 from dataclasses import replace
@@ -127,11 +127,12 @@ def test_nothing_trades_while_the_market_is_closed() -> None:
     assert rejected(rig.sup.modify_stops("A", position, 109_700, None, CLOSED)) == [
         RejectReason.MARKET_CLOSED
     ]
-    # cancelling a pending order stays allowed
-    assert not rejected(
-        rig.sup.cancel_order("A", rig.engine.pending_orders("A")[0].request.order_id, CLOSED)
-    )
+    # a deletion waits too, as MetaTrader on a closed market
+    order_id = rig.engine.pending_orders("A")[0].request.order_id
+    assert rejected(rig.sup.cancel_order("A", order_id, CLOSED)) == [RejectReason.MARKET_CLOSED]
     assert not rig.engine.is_open("EUR/USD")
+    assert not rejected(rig.sup.cancel_order("A", order_id, SUNDAY_OPEN))
+    assert rig.engine.is_open("EUR/USD")
 
 
 def test_a_stray_price_outside_hours_moves_nothing_and_fires_no_stop() -> None:
@@ -204,3 +205,20 @@ def test_the_feeder_sends_nothing_into_a_closed_market() -> None:
         ("EUR/USD", 2, 110_002),  # numbered on without a gap
     ]
     assert AssetClass.FOREX.value == "forex"
+
+
+@pytest.mark.parametrize(
+    ("symbol", "at", "open_"),
+    [
+        ("XAU/USD", ny(2026, 11, 26, 15, 0), False),  # Thanksgiving halt
+        ("XAU/USD", ny(2026, 11, 26, 18, 1), True),
+        ("EUR/USD", ny(2026, 11, 26, 15, 0), True),  # forex trades through US holidays
+        ("WTI", ny(2027, 3, 26, 9, 0), False),  # Good Friday
+        ("WTI", ny(2027, 6, 18, 13, 30), False),  # Juneteenth early close
+        ("EUR/USD", ny(2027, 12, 24, 9, 0), False),  # Christmas (observed)
+        ("BTC/USD", ny(2027, 12, 24, 9, 0), True),  # crypto never closes
+    ],
+)
+def test_the_shipped_holidays(symbol: str, at: int, open_: bool) -> None:
+    hours = {i.name: i.hours for i in load_policy().trading.instruments}[symbol]
+    assert hours is not None and hours.is_open(at) is open_

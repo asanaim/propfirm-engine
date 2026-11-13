@@ -173,3 +173,12 @@ and oil. Outside hours: no new order, close or stop change; pending orders
 and stops wait; prices are not applied. Every value is a policy setting
 (`[trading.hours]`), to be checked against the price source's hours in the
 feed trial (step 8). Status: built (step 1).
+
+D-13.22, closed markets and holidays (amends D-13.21, owner question of
+13 Nov 2026 on market practice). On a closed market a pending order cannot
+be cancelled either, as MetaTrader at FTMO and FundedNext refuses every
+request then. Holidays: metals and oil follow the CME Globex holiday
+schedule (halts, early closes, full closures) for the rest of 2026 and for
+2027; forex closes for Christmas and New Year's Day only; crypto never
+closes. Two 2026 early-close times are assumed from 2027's pattern and
+marked [A] in the policy file. Status: built (step 1).

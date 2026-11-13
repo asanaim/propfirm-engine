@@ -96,7 +96,7 @@ one_instant_funding_per_trader = true
 unpaid_hold_hours = 24
 
 [trading]
-config_version = "trading-v6"  # v6: trading hours; v5: swaps (13 Nov 2026)
+config_version = "trading-v7"  # v7: holidays, no cancel on a closed market; v6: trading hours
 delay_threshold_ms = 2000      # older updates freeze the symbol
 gap_threshold_ms = 60000       # no update for longer freezes the symbol
 gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
@@ -257,15 +257,87 @@ daily_break = "17:00-18:00"
 always = true
 
 # Holiday closures, New York wall time [from, to); classes they close.
-# [DEFAULT] Christmas and New Year's Day, as most CFD brokers.
-[[trading.hours.closures]]
+# Metals and oil follow the CME Globex holiday schedule (Central time + 1 h):
+# on a Monday or Thursday holiday they halt at 14:30 and reopen at 18:00;
+# full closures and early closes as listed. Forex closes for Christmas and
+# New Year's Day only: spot currencies trade through US holidays (thin).
+# Crypto never closes. CME finalises each holiday's hours about two weeks
+# before it: check them then and correct an entry if CME changed it.
+# Times marked [A] are this year's pattern assumed from 2027's schedule.
+
+[[trading.hours.closures]]       # Thanksgiving: halt
+from = "2026-11-26 14:30"
+to = "2026-11-26 18:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # day after Thanksgiving: early close [A]
+from = "2026-11-27 14:45"
+to = "2026-11-27 17:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Christmas Eve: early close [A]
+from = "2026-12-24 13:45"
+to = "2026-12-24 17:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Christmas Day
 from = "2026-12-24 17:00"
 to = "2026-12-25 17:00"
 classes = ["forex", "metal", "oil"]
 
-[[trading.hours.closures]]
+[[trading.hours.closures]]       # New Year's Day
 from = "2026-12-31 17:00"
 to = "2027-01-01 17:00"
+classes = ["forex", "metal", "oil"]
+
+[[trading.hours.closures]]       # Martin Luther King Jr. Day: halt
+from = "2027-01-18 14:30"
+to = "2027-01-18 18:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Presidents Day: halt
+from = "2027-02-15 14:30"
+to = "2027-02-15 18:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Good Friday: closed
+from = "2027-03-25 17:00"
+to = "2027-03-26 17:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Memorial Day: halt
+from = "2027-05-31 14:30"
+to = "2027-05-31 18:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Juneteenth (observed): early close
+from = "2027-06-18 13:00"
+to = "2027-06-18 17:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Independence Day (observed): halt
+from = "2027-07-05 14:30"
+to = "2027-07-05 18:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Labor Day: halt
+from = "2027-09-06 14:30"
+to = "2027-09-06 18:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Thanksgiving: halt
+from = "2027-11-25 14:30"
+to = "2027-11-25 18:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # day after Thanksgiving: early close
+from = "2027-11-26 14:45"
+to = "2027-11-26 17:00"
+classes = ["metal", "oil"]
+
+[[trading.hours.closures]]       # Christmas (observed): closed
+from = "2027-12-23 17:00"
+to = "2027-12-24 17:00"
 classes = ["forex", "metal", "oil"]
 
 [contract]

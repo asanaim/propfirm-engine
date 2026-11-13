@@ -60,7 +60,8 @@ current prices, ignoring freezes and news blocks (breach close-out), and
 Trading hours (build plan step 1; `propfirm.trading.hours`): a symbol with
 hours is closed outside them. Closed is handled like frozen: new orders,
 closes and stop changes are rejected (`market_closed`), pending orders,
-stop-losses and take-profits are held, cancelling is allowed, and a price
+stop-losses and take-profits are held, a pending order cannot be cancelled
+either (as MetaTrader), and a price
 that arrives is not applied (`UpdateOutsideHours`). A breach close-out
 still closes at the last price.
 
@@ -435,6 +436,11 @@ class TradingEngine:
         pending = self._orders.get(order_id)
         if pending is None or pending.request.account_id != account_id:
             events.append(self._reject(order_id, account_id, RejectReason.UNKNOWN_ORDER))
+            return events
+        if self._closed(pending.request.symbol):
+            # as MetaTrader at FTMO and FundedNext: a closed market takes no
+            # request at all, a deletion included [decided 13 Nov 2026]
+            events.append(self._reject(order_id, account_id, RejectReason.MARKET_CLOSED))
             return events
         del self._orders[order_id]
         events.append(OrderCancelled(self._now, order_id, account_id, None))

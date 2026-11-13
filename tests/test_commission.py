@@ -88,7 +88,7 @@ def test_a_market_buy_pays_the_raw_spread_and_the_commission() -> None:
     expected = commission_cents(ask, 100)
     assert expected == 4_248  # 0.0525 % of $80,905.45 = $42.475... -> $42.48
     assert charged == CommissionCharged(
-        T0 + 2, "o1", "A", "BTC/USD", 8_090_545, expected, "trading-v6"
+        T0 + 2, "o1", "A", "BTC/USD", 8_090_545, expected, "trading-v7"
     )
     engine = machine.supervisor.engine
     assert engine.balance("A") == 10_000_000 - expected
@@ -198,7 +198,7 @@ def test_an_existing_journal_switches_to_commission_at_start() -> None:
     )
     machine, _ = run(v2, [OpenAccount("A", "lite-s1-v2", 10_000_000, T0)])
     (update,) = policy_changes(SHIPPED, machine, T0 + 1)
-    assert isinstance(update, UpdateTrading) and update.config_version == "trading-v6"
+    assert isinstance(update, UpdateTrading) and update.config_version == "trading-v7"
     assert sorted(s.name for s in update.instruments) == [
         "BTC/USD",
         "ETH/USD",
