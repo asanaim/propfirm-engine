@@ -11,8 +11,10 @@ The firm's own trading engine: prices, fills, equity, rules, ledger and
 replay. It is phase P1 of the plan: everything runs on synthetic prices, with
 no vendors and no money involved.
 
-Specification: *Prop Firm Operating Engine — End-to-End Functional Outline*
-(Claude Docs) and *Prop Firm Plan v4 (Audited)*.
+Specification: [`docs/functional-outline.md`](docs/functional-outline.md)
+(modules M01 to M32, decisions D-numbers), with the dated owner decisions in
+[`docs/decisions.md`](docs/decisions.md), which win where the two differ;
+also *Prop Firm Plan v4 (Audited)*.
 
 ## Stack
 
