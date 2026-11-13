@@ -92,6 +92,7 @@ const REASONS: Record<string, string> = {
   trailing_stop: "Trailing stop",
   breach: "Rule breach",
   void: "Account closed",
+  market_break: "Closed before the market break",
 };
 
 export function HistoryPage({ acc }: { acc: string }) {

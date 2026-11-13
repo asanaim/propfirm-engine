@@ -141,6 +141,7 @@ class RuleSupervisor:
         events = self._roll(ts)
         events += self._engine.open_account(account_id, initial_balance_cents, ts)
         self._engine.set_news_restricted(account_id, rules.news_restricted)
+        self._engine.set_break_bound(account_id, rules.flat_before_breaks)
         self._accounts[account_id] = _State(
             account_id=account_id,
             rules=rules,
@@ -289,6 +290,7 @@ class RuleSupervisor:
         self._day = state.day
         for a in accounts.values():  # derived from the rule sets, not engine state
             self._engine.set_news_restricted(a.account_id, a.rules.news_restricted)
+            self._engine.set_break_bound(a.account_id, a.rules.flat_before_breaks)
 
     # --- queries ------------------------------------------------------------
 

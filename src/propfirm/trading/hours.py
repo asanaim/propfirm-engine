@@ -23,8 +23,9 @@ time comes from the pinned tzdata, so every machine agrees.
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
+from propfirm.journal.codec import added_field
 from propfirm.rules.clock import NEW_YORK
 
 WEEK_MINUTES = 7 * 1440
@@ -53,6 +54,12 @@ class TradingHours:
     break_end: int | None = None  # daily minute it ends
     always: bool = False  # open every minute (closures aside)
     closures: tuple[tuple[int, int], ...] = ()  # [from, to) ms UTC, sorted
+    # Market break rule (build plan step 1; FTMO's funded Standard account):
+    # an account bound by it is made flat this many minutes before a closed
+    # period of at least `long_break_minutes`; 0: no such rule on this
+    # symbol. Added after records existed.
+    flat_before_minutes: int = added_field(0)
+    long_break_minutes: int = added_field(120)
 
     def __post_init__(self) -> None:
         _minute(self.open_minute, "open_minute", WEEK_MINUTES)
@@ -68,6 +75,14 @@ class TradingHours:
                 raise ValueError("a daily break needs different start and end minutes")
         if not isinstance(self.always, bool):
             raise TypeError("always must be a bool")
+        for name in ("flat_before_minutes", "long_break_minutes"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be whole minutes >= 0")
+        if self.long_break_minutes < 1:
+            raise ValueError("long_break_minutes must be at least 1")
+        if self.flat_before_minutes > DAY_MINUTES:
+            raise ValueError("flat_before_minutes must be at most a day")
         last = -1
         for pair in self.closures:
             if (
@@ -80,6 +95,46 @@ class TradingHours:
             if not 0 <= start < end or start < last:
                 raise ValueError("closures must be non-empty, sorted and apart")
             last = end
+
+    def next_long_break(self, ts: int) -> tuple[int, int] | None:
+        """(close, open) in ms UTC of the first closed period that starts
+        after `ts` and lasts at least `long_break_minutes`; None when the
+        market never closes that long in the next 16 days."""
+        if self.always and not self.closures:
+            return None
+        changes = sorted(c for c in self._changes(ts, 16) if c > ts)
+        state = self.is_open(ts)
+        close: int | None = None
+        for at in changes:
+            now = self.is_open(at)
+            if now == state:
+                continue
+            state = now
+            if not now:
+                close = at
+            elif close is not None:
+                if at - close >= self.long_break_minutes * 60_000:
+                    return close, at
+                close = None
+        return None
+
+    def _changes(self, ts: int, days: int) -> set[int]:
+        """Every instant at which the schedule can change in the next
+        `days` days: local midnights plus each daily minute the window or
+        the break turns at, and every closure's ends."""
+        minutes = {0, self.open_minute % DAY_MINUTES, self.close_minute % DAY_MINUTES}
+        if self.break_start is not None and self.break_end is not None:
+            minutes |= {self.break_start, self.break_end}
+        start = datetime.fromtimestamp(ts // 1000, tz=NEW_YORK).date()
+        out: set[int] = set()
+        for d in range(days + 1):
+            day = start + timedelta(days=d)
+            for m in minutes:
+                local = datetime(day.year, day.month, day.day, m // 60, m % 60, tzinfo=NEW_YORK)
+                out.add(int(local.timestamp()) * 1000)
+        for a, b in self.closures:
+            out |= {a, b}
+        return out
 
     def is_open(self, ts: int) -> bool:
         """Whether trading is open at `ts` (ms UTC)."""

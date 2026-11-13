@@ -187,3 +187,20 @@ entered in the policy file: Lite and 1-Step from 10K at the new prices,
 1-Step on FTMO's end-of-day trailing loss without a lock. Still to build
 in step 2: the free trial, the split ladder, the add-ons, the retake price
 and the Lite 10K code block.
+
+D-13.23, market break rule (build plan step 1, line 5). Taken under the
+owner's instruction to follow FTMO and choose the most sustainable option
+where no decision exists. Funded accounts (Lite, Classic, 1-Step, Instant)
+are made flat before every closed period of 2 hours or more on a market
+(the weekend, a holiday halt): 5 minutes before the close their positions on
+that market are closed at the last price and their pending orders cancelled,
+and in those 5 minutes no new order opens there (`market_break`). The daily
+1 hour break of metals and oil does not count. Evaluations hold over breaks,
+as FTMO. The Swing add-on (step 2) will lift the rule per account.
+Settings: `[trading.hours] flat_before_break_minutes = 5`, `long_break_minutes
+= 120`; per stage `flat_before_breaks`. Versions: trading-v8; lite-funded-v3,
+classic-funded-v2, one-step-funded-v3, instant-funded-v3 (accounts on the
+earlier versions keep them and are not bound). Chosen: an automatic close,
+not a breach. Open for the owner: whether a position left open at the
+close should instead count as a violation (FTMO's wording varies between
+sources). Status: built (step 1).

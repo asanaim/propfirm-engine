@@ -151,6 +151,7 @@ FIRM_CAPITAL = "firm:capital"
 FIRM_TRADING_PNL = "firm:trading_pnl"
 FIRM_COMMISSION = "firm:commission"
 FIRM_SWAP = "firm:swap"
+_BREAK_RECHECK_MS = 24 * 3_600_000  # no long break ahead: look again a day later
 FIRM_PAYOUTS = "firm:payouts"  # paid out of trading accounts, owed to traders until sent
 
 
@@ -194,6 +195,10 @@ class EngineState:
     # updates held by the sanity filter, one per symbol at most (configured
     # order); added after records existed: none before
     held: tuple[PriceUpdate, ...] = added_field(())
+    # (symbol, flat-by time) of the last market break each symbol's bound
+    # accounts were made flat for (configured order); added after records
+    # existed: none before
+    flattened: tuple[tuple[str, int], ...] = added_field(())
 
 
 class _NoRate(Exception):
@@ -247,6 +252,14 @@ class TradingEngine:
         # accounts whose rule set is not news-restricted (evaluations): set by
         # the rules supervisor from each account's rule set, so not engine state
         self._news_exempt: set[str] = set()
+        # accounts the market break rule binds (funded, not Swing): set by the
+        # supervisor from each account's rule set, so not engine state
+        self._break_bound: set[str] = set()
+        # symbol -> ((flat-by, close, open) of its next long break or None,
+        # when to look again); derived from the hours and engine time, so
+        # not engine state either
+        self._breaks: dict[str, tuple[tuple[int, int, int] | None, int]] = {}
+        self._flattened: dict[str, int] = {}  # symbol -> the flat-by time already handled
         self._now = 0
 
     # --- inputs -------------------------------------------------------------
@@ -716,6 +729,7 @@ class TradingEngine:
                 self._instruments[spec.name] = spec
             self._spreads[spec.name].reconfigure(spec.spread_model)
         self._guards.reconfigure(guard)
+        self._breaks.clear()  # the hours may have changed: look again
 
     def debit_payout(self, account_id: str, amount_cents: int, payout: str, ts: int) -> None:
         """Take a payout's amount out of the account's balance (ledger entry
@@ -805,6 +819,9 @@ class TradingEngine:
             instruments=tuple(self._instruments.values()),
             guard=self._guards.config,
             held=tuple(u for s in self._instruments if (u := self._held.get(s)) is not None),
+            flattened=tuple(
+                (s, at) for s in self._instruments if (at := self._flattened.get(s)) is not None
+            ),
         )
 
     def restore(self, state: EngineState) -> None:
@@ -843,6 +860,10 @@ class TradingEngine:
         if len(held) != len(state.held) or not set(held) <= known:
             raise ValueError("bad held updates")
         self._held = held
+        flattened = dict(state.flattened)
+        if len(flattened) != len(state.flattened) or not set(flattened) <= known:
+            raise ValueError("bad market break state")
+        self._flattened = flattened
         if not set(self._calendar) <= self._calendar_ids:
             raise ValueError("scheduled event without an id record")
 
@@ -859,6 +880,18 @@ class TradingEngine:
     def _closed(self, symbol: str) -> bool:
         hours = self._instruments[symbol].hours
         return hours is not None and not hours.is_open(self._now)
+
+    def set_break_bound(self, account_id: str, bound: bool) -> None:
+        """Whether the market break rule binds this account (from its rule set)."""
+        self._account(account_id)
+        if bound:
+            self._break_bound.add(account_id)
+        else:
+            self._break_bound.discard(account_id)
+
+    def next_break(self, symbol: str) -> tuple[int, int, int] | None:
+        """(flat-by, close, open) of the symbol's next long break, or None."""
+        return self._next_break(symbol)
 
     def set_news_restricted(self, account_id: str, restricted: bool) -> None:
         """Whether news trade blocks bind this account (from its rule set)."""
@@ -968,11 +1001,110 @@ class TradingEngine:
 
     def _advance(self, ts: int) -> list[EngineEvent]:
         require_int("ts", ts, minimum=0)
-        self._now = max(self._now, ts)
+        target = max(self._now, ts)
+        events = self._flatten_before_breaks(target)
+        self._now = target
         for event_id, window in list(self._calendar.items()):
             if window.end_ts <= self._now:  # time only moves forward: never covers again
                 del self._calendar[event_id]
-        return [_guard_event(c) for c in self._guards.advance(self._now)]
+        events.extend(_guard_event(c) for c in self._guards.advance(self._now))
+        return events
+
+    def _break_after(self, symbol: str, ts: int) -> tuple[tuple[int, int, int] | None, int]:
+        """The symbol's first long break that closes after `ts`, as
+        (flat-by, close, open), with the time to look again when there is
+        none in the schedule's horizon."""
+        hours = self._instruments[symbol].hours
+        assert hours is not None
+        found = hours.next_long_break(ts)
+        if found is None:
+            return None, ts + _BREAK_RECHECK_MS
+        close, reopen = found
+        return (close - hours.flat_before_minutes * 60_000, close, reopen), reopen
+
+    def _next_break(self, symbol: str) -> tuple[int, int, int] | None:
+        """(flat-by, close, open) of the symbol's next long break not yet
+        handled; None when the rule is off on it or none is due soon."""
+        hours = self._instruments[symbol].hours
+        if hours is None or hours.flat_before_minutes == 0:
+            return None
+        cached = self._breaks.get(symbol)
+        if cached is None or cached[1] <= self._now:
+            cached = self._break_after(symbol, self._now)
+            self._breaks[symbol] = cached
+        return cached[0]
+
+    def _flatten_before_breaks(self, target: int) -> list[EngineEvent]:
+        """Make every account the break rule binds flat on each symbol whose
+        flat-by time is at or before `target`, at that time and at that
+        moment's prices, earliest first (CloseReason.MARKET_BREAK)."""
+        if not self._break_bound:
+            return []
+        events: list[EngineEvent] = []
+        while True:
+            due = [
+                (upcoming[0], symbol)
+                for symbol in sorted(self._instruments)
+                if (upcoming := self._due_break(symbol, target)) is not None
+            ]
+            if not due:
+                return events
+            flat_by, symbol = min(due)
+            self._now = max(self._now, flat_by)
+            for account_id in sorted(self._break_bound):
+                events.extend(self._flatten(account_id, symbol))
+            self._flattened[symbol] = flat_by
+
+    def _due_break(self, symbol: str, target: int) -> tuple[int, int, int] | None:
+        """The symbol's break whose flat-by time is at or before `target` and
+        not yet handled. Moves the cache over breaks already handled, and
+        over empty horizons, that end by `target`, so one long advance
+        misses no break."""
+        upcoming = self._next_break(symbol)
+        while True:
+            cached = self._breaks.get(symbol)
+            if cached is None:  # the rule is off on this symbol
+                return None
+            if upcoming is None:
+                if cached[1] > target:
+                    return None
+                after = cached[1]  # no break in the last horizon: look on
+            elif self._flattened.get(symbol) == upcoming[0]:
+                if upcoming[2] > target:
+                    return None
+                after = upcoming[2]  # handled, and this advance passes its reopening
+            else:
+                return upcoming if upcoming[0] <= target else None
+            self._breaks[symbol] = self._break_after(symbol, after)
+            upcoming = self._breaks[symbol][0]
+
+    def _flatten(self, account_id: str, symbol: str) -> list[EngineEvent]:
+        """Close the account's positions and cancel its pending orders on
+        one symbol, at the current prices (ignores freezes and hours)."""
+        events: list[EngineEvent] = []
+        for pending in self._orders.of_account(account_id):
+            order_id = pending.request.order_id
+            if pending.request.symbol == symbol and order_id in self._orders:
+                del self._orders[order_id]
+                events.append(
+                    OrderCancelled(self._now, order_id, account_id, RejectReason.MARKET_BREAK)
+                )
+        quote = self._quotes.get(symbol)
+        if quote is None:
+            return events
+        for position in self._open(account_id):
+            if position.symbol == symbol:
+                events.extend(
+                    self._close(position, position.volume, quote, CloseReason.MARKET_BREAK)
+                )
+        return events
+
+    def _in_break_window(self, account_id: str, symbol: str) -> bool:
+        """Whether a bound account is between its flat-by time and the close."""
+        if account_id not in self._break_bound:
+            return False
+        upcoming = self._next_break(symbol)
+        return upcoming is not None and upcoming[0] <= self._now < upcoming[1]
 
     def _spread_news(self, symbol: str) -> bool:
         return in_news(self._news, symbol, self._now) or in_news(
@@ -1012,6 +1144,8 @@ class TradingEngine:
             return RejectReason.UNKNOWN_SYMBOL
         if self._closed(request.symbol):
             return RejectReason.MARKET_CLOSED
+        if self._in_break_window(request.account_id, request.symbol):
+            return RejectReason.MARKET_BREAK
         if self._guards.is_frozen(request.symbol):
             return RejectReason.SYMBOL_FROZEN
         if self.is_blocked_for(request.account_id, request.symbol):
@@ -1054,6 +1188,8 @@ class TradingEngine:
             return RejectReason.UNKNOWN_SYMBOL
         if self._closed(symbol):
             return RejectReason.MARKET_CLOSED
+        if self._in_break_window(account_id, symbol):
+            return RejectReason.MARKET_BREAK
         if self._guards.is_frozen(symbol):
             return RejectReason.SYMBOL_FROZEN
         if not is_int(volume) or volume < 1:

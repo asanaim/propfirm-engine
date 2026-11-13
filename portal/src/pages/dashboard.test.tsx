@@ -159,6 +159,18 @@ it("warns a funded account that a fill inside a news window can end it", async (
   expect(await screen.findByText(/a violation can end the account/)).toBeInTheDocument();
 });
 
+it("tells a funded trader that trades close before a long market break", async () => {
+  const funded = { ...ACCOUNT, target_balance_cents: null, rules: { ...ACCOUNT.rules, stage: "funded" as const, flat_before_breaks: true } };
+  renderWith(<RulesPage acc="ACC00000001" />, fakeAuth(), server(funded));
+  expect(await screen.findByText(/closed and pending orders cancelled a few minutes ahead/)).toBeInTheDocument();
+});
+
+it("says nothing of market breaks to an evaluation", async () => {
+  renderWith(<RulesPage acc="ACC00000001" />, fakeAuth(), server());
+  await screen.findByText(/News events do not restrict this stage/);
+  expect(screen.queryByText(/a few minutes ahead/)).toBeNull();
+});
+
 it("tells an Instant trader whether a payout moves the trailing floor", async () => {
   const kept = { ...ACCOUNT, target_balance_cents: null, rules: { ...ACCOUNT.rules, stage: "funded" as const, max_loss_kind: "trailing" as const, floor_restarts_after_payout: false } };
   renderWith(<RulesPage acc="ACC00000001" />, fakeAuth(), server(kept));

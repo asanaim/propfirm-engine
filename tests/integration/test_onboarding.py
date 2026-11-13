@@ -73,7 +73,7 @@ def test_a_funded_review_ends_in_a_signed_funded_account(
                 "verification",
                 "PRG00000002",
             )
-            assert onboarding["rsv_id"] == "lite-funded-v2"
+            assert onboarding["rsv_id"] == "lite-funded-v3"
             await p.onboarding.advance(now_ms())  # nothing new
             assert len((await p.call("GET", "/me")).json()["onboardings"]) == 1
 
@@ -122,7 +122,7 @@ def test_a_funded_review_ends_in_a_signed_funded_account(
             assert (funded["acc"], funded["stage"], funded["rsv_id"]) == (
                 "ACC00000003",
                 "funded",
-                "lite-funded-v2",
+                "lite-funded-v3",
             )
             assert (funded["progression"], funded["onboarding"]) == (
                 "PRG00000002",
@@ -187,7 +187,7 @@ def test_an_instant_account_opens_only_after_the_agreement_is_signed(
             assert (onboarding["source"], onboarding["ord"], onboarding["rsv_id"]) == (
                 "order",
                 order["ord"],
-                "instant-funded-v2",
+                "instant-funded-v3",
             )
             mine = await verify(p, onboarding["onb"])
             assert (mine["status"], mine["acc"]) == ("signature", "ACC00000001")

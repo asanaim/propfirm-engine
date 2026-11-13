@@ -71,6 +71,11 @@ def test_catalogue_matches_confirmed_configuration() -> None:
         "lite-funded-v2": None,
         "one-step-s1-v3": Fraction(10, 100),
         "one-step-funded-v2": None,
+        # market break rule (13 Nov 2026); the funded versions above it are retired
+        "lite-funded-v3": None,
+        "classic-funded-v2": None,
+        "one-step-funded-v3": None,
+        "instant-funded-v3": None,
     }
     assert [s.stage for s in PRODUCTS["lite"]] == [Stage.S1, Stage.S2, Stage.FUNDED]
     assert INSTANT.max_loss_kind is MaxLossKind.TRAILING
@@ -81,15 +86,20 @@ def test_catalogue_matches_confirmed_configuration() -> None:
         "one-step-funded-v1",
         "one-step-s1-v3",
         "one-step-funded-v2",
+        "one-step-funded-v3",
         "instant-funded-v1",
         "instant-funded-v2",
+        "instant-funded-v3",
     }
     on_sale = PRODUCTS["one-step"]
     assert all(r.max_loss_kind is MaxLossKind.TRAILING_EOD for r in on_sale)  # D-13.20
     assert not any(r.floor_locks_at_start for r in on_sale)  # FTMO: no lock
     assert all(500_000 not in r.sizes_cents for r in (*PRODUCTS["lite"], *on_sale))  # no 5K
     restart = {r.rsv_id for r in RULESETS.values() if not r.floor_restarts_after_payout}
-    assert restart == {"instant-funded-v2"}  # D1: only the new Instant keeps its floor
+    assert restart == {"instant-funded-v2", "instant-funded-v3"}  # D1: Instant keeps its floor
+    breaks = {r.rsv_id for r in RULESETS.values() if r.flat_before_breaks}
+    on_sale_funded = {r.rsv_id for st in PRODUCTS.values() for r in st if r.stage is Stage.FUNDED}
+    assert breaks == on_sale_funded  # D-13.23: every funded stage on sale, no evaluation
 
 
 def test_size_must_be_on_the_price_list() -> None:

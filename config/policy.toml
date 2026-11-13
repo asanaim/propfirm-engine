@@ -96,7 +96,7 @@ one_instant_funding_per_trader = true
 unpaid_hold_hours = 24
 
 [trading]
-config_version = "trading-v7"  # v7: holidays, no cancel on a closed market; v6: trading hours
+config_version = "trading-v8"  # v8: market break rule; v7: holidays, no cancel when closed
 delay_threshold_ms = 2000      # older updates freeze the symbol
 gap_threshold_ms = 60000       # no update for longer freezes the symbol
 gap_threshold_ms_by_symbol = {}  # e.g. { "XAU/USD" = 90000 }
@@ -234,6 +234,13 @@ NZD = "2.75"   # RBNZ official cash rate (28 Oct 2026)
 # time as "Sun 17:00"; daily_break as "17:00-18:00" ("" = none).
 # [DEFAULT] the major CFD brokers' sessions; check against the chosen
 # price source's hours in the feed trial (step 8).
+
+# Market break rule (funded Standard accounts, as FTMO): positions are closed
+# and pending orders cancelled this many minutes before a closed period of
+# long_break_minutes or more (the weekend, a holiday halt); in those minutes
+# no new order opens. [DEFAULT] 5 minutes ("shortly before", FTMO).
+flat_before_break_minutes = 5
+long_break_minutes = 120
 
 [trading.hours.forex]
 always = false
@@ -483,7 +490,8 @@ fee_refund_with_payout = 0     # 0: no fee refund
 
   [[products.stages]]
   stage = "funded"
-  version = 2              # 2: sizes of product line v1
+  version = 3              # 3: flat before long market breaks; 2: line v1 sizes
+  flat_before_breaks = true
   profit_target_percent = ""
   max_loss_percent = "6"
   max_loss_kind = "static"
@@ -529,7 +537,8 @@ fee_refund_with_payout = 0
 
   [[products.stages]]
   stage = "funded"
-  version = 1
+  version = 2              # 2: flat before market breaks of 2 hours or more
+  flat_before_breaks = true
   profit_target_percent = ""
   max_loss_percent = "8"
   max_loss_kind = "static"
@@ -567,7 +576,8 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
 
   [[products.stages]]
   stage = "funded"
-  version = 2              # 2: product line v1, FTMO's end-of-day trailing loss
+  version = 3              # 3: flat before long market breaks; 2: line v1, EOD trailing
+  flat_before_breaks = true
   profit_target_percent = ""
   max_loss_percent = "10"
   max_loss_kind = "trailing_eod"
@@ -590,7 +600,8 @@ fee_refund_with_payout = 0
 
   [[products.stages]]
   stage = "funded"
-  version = 2              # 2: the floor does not restart after a payout (12 Nov 2026)
+  version = 3              # 3: flat before long market breaks; 2: floor does not restart
+  flat_before_breaks = true
   profit_target_percent = ""
   max_loss_percent = "5"
   max_loss_kind = "trailing"

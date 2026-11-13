@@ -567,7 +567,7 @@ def test_funded_limits_take_no_profit_target() -> None:
     changed = api("PUT", "/admin/products/one-step/stages/funded/limits", funded, tiers=OWNERS,
                   user="owner-a")  # fmt: skip
     assert changed.status_code == 200, changed.text
-    assert changed.json()["rsv_id"] == "one-step-funded-v2-a1"
+    assert changed.json()["rsv_id"] == "one-step-funded-v3-a1"
 
 
 # --- maker-checker: a second admin approves every settings change ----------------------
