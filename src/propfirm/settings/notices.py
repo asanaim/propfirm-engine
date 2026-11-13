@@ -112,8 +112,7 @@ EVENTS: Mapping[str, Event] = {
             "stage": "Stage 1",
             "time": "2026-11-14 10:05 UTC",
             "next_step": (
-                "Your Stage 2 account opens after a short review; "
-                "it will appear in your dashboard."
+                "Your Stage 2 account opens after a short review; it will appear in your dashboard."
             ),
         },
     ),
