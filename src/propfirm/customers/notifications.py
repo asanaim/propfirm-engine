@@ -32,7 +32,7 @@ from propfirm.pgschema import Conn, check_schema
 from propfirm.settings.notices import Notices, utc_text
 
 log = logging.getLogger(__name__)
-NOTICE_KINDS = ("wallet_changed", "market_break_close")
+NOTICE_KINDS = ("wallet_changed",)
 RETRY_MS = 60_000  # a failed send is tried again after this
 TLS_MODES = ("starttls", "implicit")
 
