@@ -33,6 +33,7 @@ class RejectReason(StrEnum):
     POSITION_CLOSED = "position_closed"  # a trailing stop whose position closed
     STALE_QUOTE = "stale_quote"  # the last applied price is older than the quote age limit
     MARKET_CLOSED = "market_closed"  # outside the symbol's trading hours
+    MARKET_BREAK = "market_break"  # flat-before-break account, minutes before a long break
 
 
 class CloseReason(StrEnum):
@@ -42,6 +43,7 @@ class CloseReason(StrEnum):
     BREACH = "breach"
     VOID = "void"
     TRAILING_STOP = "trailing_stop"
+    MARKET_BREAK = "market_break"  # made flat before a long market break
 
 
 @dataclass(frozen=True, slots=True)

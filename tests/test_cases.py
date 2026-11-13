@@ -267,7 +267,7 @@ def buy(order_id: str, ts: int) -> PlaceOrder:
 
 def test_voiding_closes_positions_and_locks_the_account() -> None:
     inputs = [
-        OpenAccount("A", "lite-funded-v2", 1_000_000, T0),
+        OpenAccount("A", "lite-funded-v3", 1_000_000, T0),
         PriceUpdate("EUR/USD", 1, T0, T0, 110_000),
         buy("o1", T0 + 1),
         PriceUpdate("EUR/USD", 2, T0 + 2, T0 + 2, 110_100),
@@ -279,7 +279,7 @@ def test_voiding_closes_positions_and_locks_the_account() -> None:
     machine, out = run(inputs)
     voided, closed = out[4][0], out[4][1]
     assert isinstance(voided, AccountVoided) and (voided.account_id, voided.case) == ("A", CAS)
-    assert voided.rsv_id == "lite-funded-v2"
+    assert voided.rsv_id == "lite-funded-v3"
     assert isinstance(closed, PositionClosed) and closed.reason is CloseReason.VOID
     (refused,) = out[5]
     assert isinstance(refused, OrderRejected) and refused.reason is RejectReason.ACCOUNT_LOCKED
@@ -300,7 +300,7 @@ def test_voiding_closes_positions_and_locks_the_account() -> None:
 
 def test_a_voided_account_is_not_breached_afterwards() -> None:
     inputs = [
-        OpenAccount("A", "lite-funded-v2", 1_000_000, T0),
+        OpenAccount("A", "lite-funded-v3", 1_000_000, T0),
         PriceUpdate("EUR/USD", 1, T0, T0, 110_000),
         VoidAccount("A", CAS, T0 + 1),
         PriceUpdate("EUR/USD", 2, T0 + 2 * 86_400_000, T0 + 2 * 86_400_000, 110_001),

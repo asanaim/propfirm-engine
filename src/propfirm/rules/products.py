@@ -133,6 +133,12 @@ class RuleSet:
     # initial balance (True: every rule set before 13 Nov 2026). False: it
     # keeps trailing above the initial balance [build plan step 1].
     floor_locks_at_start: bool = added_field(True)
+    # Market break rule (build plan step 1, FTMO's funded Standard account):
+    # positions are closed and pending orders cancelled shortly before a
+    # market break of 2 hours or more, and no new order opens in those last
+    # minutes. False for evaluations and for rule sets before 13 Nov 2026;
+    # the Swing add-on (step 2) will sell a funded stage without it.
+    flat_before_breaks: bool = added_field(False)
 
     def __post_init__(self) -> None:
         require_text("rsv_id", self.rsv_id)
@@ -158,6 +164,8 @@ class RuleSet:
             raise TypeError("floor_restarts_after_payout must be a bool")
         if not isinstance(self.floor_locks_at_start, bool):
             raise TypeError("floor_locks_at_start must be a bool")
+        if not isinstance(self.flat_before_breaks, bool):
+            raise TypeError("flat_before_breaks must be a bool")
         if not self.max_loss_kind.trails:
             if not self.floor_restarts_after_payout:
                 raise ValueError("only a trailing max loss has a floor that could restart")
@@ -261,25 +269,44 @@ _INSTANT_V1 = RuleSet(
 # owner decision K7, 12 Nov 2026 (review D1): the floor does not restart
 _INSTANT_V2 = replace(_INSTANT_V1, rsv_id="instant-funded-v2", floor_restarts_after_payout=False)
 
+# market break rule (13 Nov 2026), as FTMO's funded Standard account: flat
+# shortly before a closed period of 2 hours or more
+_INSTANT_V3 = replace(_INSTANT_V2, rsv_id="instant-funded-v3", flat_before_breaks=True)
+
+
+def _breaks(rules: RuleSet, version: int) -> RuleSet:
+    """A funded rule set with the market break rule, as its next version."""
+    base = rules.rsv_id.rsplit("-v", 1)[0]
+    return replace(rules, rsv_id=f"{base}-v{version}", flat_before_breaks=True)
+
+
 # The rule sets on sale, per product, in stage order.
 PRODUCTS: dict[str, tuple[RuleSet, ...]] = {
     "lite": (
         _lite(Stage.S1, _P(6, 100)),
         _lite(Stage.S2, _P(6, 100)),
-        _lite(Stage.FUNDED, None),
+        _breaks(_lite(Stage.FUNDED, None), 3),
     ),
     "classic": (
         _classic(Stage.S1, _P(10, 100)),
         _classic(Stage.S2, _P(5, 100)),
-        _classic(Stage.FUNDED, None),
+        _breaks(_classic(Stage.FUNDED, None), 2),
     ),
-    "one-step": (_one_step(Stage.S1, _P(10, 100)), _one_step(Stage.FUNDED, None)),
-    "instant": (_INSTANT_V2,),
+    "one-step": (
+        _one_step(Stage.S1, _P(10, 100)),
+        _breaks(_one_step(Stage.FUNDED, None), 3),
+    ),
+    "instant": (_INSTANT_V3,),
 }
 
 # Versions no longer sold; accounts opened on them keep them.
 RETIRED: tuple[RuleSet, ...] = (
     _INSTANT_V1,
+    _INSTANT_V2,
+    # funded stages before the market break rule (13 Nov 2026)
+    _lite(Stage.FUNDED, None),
+    _classic(Stage.FUNDED, None),
+    _one_step(Stage.FUNDED, None),
     # before product line version 1 (13 Nov 2026)
     _lite(Stage.S1, _P(6, 100), line_v1=False),
     _lite(Stage.S2, _P(6, 100), line_v1=False),

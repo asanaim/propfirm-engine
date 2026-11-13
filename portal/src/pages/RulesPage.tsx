@@ -91,6 +91,12 @@ export function RulesPage({ acc }: { acc: string }) {
               <Link href="/news">news calendar</Link>).
             </li>
           )}
+          {r.flat_before_breaks && (
+            <li>
+              Before the market closes for 2 hours or more (the weekend, a holiday), open trades on that market are
+              closed and pending orders cancelled a few minutes ahead, and no new trade opens until it reopens.
+            </li>
+          )}
           <li>
             When a breach and a pass happen on the same price, the {r.tie_rule === "pass_wins" ? "pass" : "breach"}{" "}
             counts.

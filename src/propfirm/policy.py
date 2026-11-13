@@ -327,6 +327,8 @@ def rule_set_view(r: RuleSet) -> dict[str, Any]:
         "floor_restarts_after_payout": r.floor_restarts_after_payout,
         # trailing loss: the floor stops rising at the starting balance
         "floor_locks_at_start": r.floor_locks_at_start,
+        # funded Standard: flat shortly before a market break of 2 hours or more
+        "flat_before_breaks": r.flat_before_breaks,
     }
 
 
@@ -821,12 +823,21 @@ def _hours(t: _Table) -> dict[AssetClass, TradingHours]:
         closure.done()
         for c in classes:
             closures[c].append(span)
+    flat_before = (
+        t.integer("flat_before_break_minutes") if t.has("flat_before_break_minutes") else 0
+    )
+    long_break = t.integer("long_break_minutes", 1) if t.has("long_break_minutes") else 120
     out: dict[AssetClass, TradingHours] = {}
     for c in AssetClass:
         table = t.table(c.value)
         try:
             if table.boolean("always"):
-                out[c] = replace(ALWAYS, closures=tuple(sorted(closures[c])))
+                out[c] = replace(
+                    ALWAYS,
+                    closures=tuple(sorted(closures[c])),
+                    flat_before_minutes=flat_before,
+                    long_break_minutes=long_break,
+                )
             else:
                 daily = table.text("daily_break", allow_empty=True)
                 start, _, end = daily.partition("-")
@@ -836,6 +847,8 @@ def _hours(t: _Table) -> dict[AssetClass, TradingHours]:
                     break_start=day_minute(start) if daily else None,
                     break_end=day_minute(end) if daily else None,
                     closures=tuple(sorted(closures[c])),
+                    flat_before_minutes=flat_before,
+                    long_break_minutes=long_break,
                 )
         except ValueError as exc:
             if isinstance(exc, PolicyError):
@@ -983,4 +996,5 @@ def _rule_set(
         news_restricted=t.boolean("news_restricted"),
         floor_restarts_after_payout=t.optional_boolean("floor_restarts_after_payout", True),
         floor_locks_at_start=t.optional_boolean("floor_locks_at_start", True),
+        flat_before_breaks=t.optional_boolean("flat_before_breaks", False),
     )
