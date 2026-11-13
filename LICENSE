@@ -1,0 +1,30 @@
+pipridge platform (repository asanaim/propfirm-engine)
+
+Copyright (c) 2026 Sayed Naim. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL
+
+This repository, including its source code, configuration, documentation,
+tests, designs, brand assets (the name "pipridge", its logo, symbol and
+app icon) and any part of them, is the property of the copyright holder
+named above.
+
+No licence is granted. Without the prior written permission of the
+copyright holder, no person may copy, modify, merge, publish, distribute,
+sublicense, sell, deploy, host, or otherwise use this repository or any
+part of it, in source or compiled form.
+
+Third-party components keep their own licences; nothing in this notice
+changes their terms. Python dependencies are listed in pyproject.toml and
+uv.lock. Each web application's build writes the licence and notice texts
+of every package it ships to public/third-party-notices.txt (portal/ and
+backoffice/).
+
+Authorship and the tools used to produce this repository are recorded in
+OWNERSHIP.md.
+
+THE REPOSITORY IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY ARISING FROM ITS USE.
+
+Contact for permission: through the repository owner on GitHub (asanaim).

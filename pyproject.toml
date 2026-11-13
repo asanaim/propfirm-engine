@@ -3,6 +3,9 @@ name = "propfirm-engine"
 version = "0.1.0"
 description = "Prop firm trading engine: prices, fills, rules, ledger and replay"
 readme = "README.md"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
+classifiers = ["Private :: Do Not Upload"]
 requires-python = ">=3.15,<3.16"
 dependencies = [
     "asyncpg==0.32.0",
