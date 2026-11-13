@@ -49,7 +49,9 @@ WITH acc AS (
 ), cas AS (
     SELECT cif, cas FROM {s}.cases WHERE status <> 'closed'
 ), po AS (
-    SELECT cif, coalesce(sum(trader_amount_cents) FILTER (WHERE status = 'paid'), 0) AS paid_cents
+    -- sum() of bigint is numeric: cast back, or the API sends it as text
+    SELECT cif, coalesce(sum(trader_amount_cents) FILTER (WHERE status = 'paid'), 0)::bigint
+           AS paid_cents
     FROM {s}.payouts GROUP BY cif
 )
 SELECT c.cif, c.full_name, c.email, c.residence_country, c.status, c.created_at,
