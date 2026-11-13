@@ -46,6 +46,7 @@ from propfirm.api.auth import JwksKeys, TokenVerifier
 from propfirm.api.system import SystemProbe
 from propfirm.audit.store import AuditStore
 from propfirm.audit.store import migrate as migrate_audit
+from propfirm.customers.break_notices import BreakNotices
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
@@ -62,7 +63,7 @@ from propfirm.customers.notifications import (
     SmtpMailer,
 )
 from propfirm.customers.onboarding_store import OnboardingStore
-from propfirm.customers.payout_service import Payouts
+from propfirm.customers.payout_service import NoticeSource, Payouts
 from propfirm.customers.payout_store import PayoutStore
 from propfirm.customers.providers import (
     SandboxPayments,
@@ -156,6 +157,8 @@ async def _lifecycle_forever(
     cases: Casework,
     payouts: Payouts | None,
     notifications: Notifications | None,
+    breaks: BreakNotices | None = None,
+    wording: NoticeSource | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -177,6 +180,12 @@ async def _lifecycle_forever(
                 await payouts.advance(now_ms())  # each payout's next step, recorded first
             except Exception:  # retried next round
                 log.exception("payout round failed")
+        if breaks is not None:
+            try:  # trades closed before a market break: the trader's email (D-13.23)
+                notices = None if wording is None else await wording.notices()
+                await breaks.sweep(now_ms(), notices)
+            except Exception:  # retried next round; the cursor moves only with the emails
+                log.exception("writing market-break emails failed")
         if notifications is not None:
             try:
                 await notifications.advance(now_ms())  # security emails not sent yet
@@ -357,7 +366,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         tasks.append(
             asyncio.create_task(
-                _lifecycle_forever(lifecycle, onboarding, cases, payouts, notifications)
+                _lifecycle_forever(
+                    lifecycle,
+                    onboarding,
+                    cases,
+                    payouts,
+                    notifications,
+                    BreakNotices(pool, config.customer_schema, config.schema)
+                    if notifications is not None
+                    else None,
+                    settings,
+                )
             )
         )
         app.state.deps = Deps(

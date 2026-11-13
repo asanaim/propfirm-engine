@@ -200,7 +200,9 @@ as FTMO. The Swing add-on (step 2) will lift the rule per account.
 Settings: `[trading.hours] flat_before_break_minutes = 5`, `long_break_minutes
 = 120`; per stage `flat_before_breaks`. Versions: trading-v8; lite-funded-v3,
 classic-funded-v2, one-step-funded-v3, instant-funded-v3 (accounts on the
-earlier versions keep them and are not bound). Chosen: an automatic close,
-not a breach. Open for the owner: whether a position left open at the
-close should instead count as a violation (FTMO's wording varies between
-sources). Status: built (step 1).
+earlier versions keep them and are not bound). Owner decision, 13 Nov
+2026: an automatic close, not a breach, and the trader is emailed
+automatically: one email per account and closing, listing each position
+closed (symbol, side, lots, result) and each pending order cancelled
+(notification template `market_break_close`, editable under rule AC12).
+Status: built (step 1).

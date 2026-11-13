@@ -19,6 +19,7 @@ from propfirm.api.app import Deps, create_app
 from propfirm.api.system import SystemProbe
 from propfirm.audit.store import AuditStore
 from propfirm.audit.store import migrate as migrate_audit
+from propfirm.customers.break_notices import BreakNotices
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
@@ -89,6 +90,7 @@ class Platform:
     identity: SandboxIdentity | None = None
     oversight: Oversight | None = None
     audit: AuditStore | None = None
+    breaks: BreakNotices | None = None  # market-break emails (D-13.23)
 
     async def call(
         self,
@@ -305,6 +307,7 @@ async def platform(
             identity,
             oversight,
             trail,
+            BreakNotices(pool, config.customer_schema, config.schema),
         )
     finally:
         await stop_engine()
@@ -488,7 +491,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

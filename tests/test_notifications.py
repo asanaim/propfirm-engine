@@ -55,9 +55,9 @@ def test_an_unknown_notice_kind_is_refused() -> None:
 
 def test_the_migration_allows_exactly_the_notice_kinds() -> None:
     sql = dict(_MIGRATIONS)[7]
-    kinds = re.search(r"kind IN \(('wallet_changed'[^)]*)\)", sql)
-    assert kinds is not None
-    assert tuple(re.findall(r"'([a-z_]+)'", kinds.group(1))) == NOTICE_KINDS
+    latest = re.search(r"kind IN \(('wallet_changed'[^)]*)\)", dict(_MIGRATIONS)[10])
+    assert latest is not None  # migration 10 widened the check (market break emails)
+    assert tuple(re.findall(r"'([a-z_]+)'", latest.group(1))) == NOTICE_KINDS
     assert "BEFORE UPDATE ON {s}.notification_events" in sql  # events: append-only
     triggers = re.findall(r"BEFORE [A-Z ]+ ON \{s\}\.(\w+)", sql)
     assert triggers == ["notification_events"]  # notifications: personal data, erasable
