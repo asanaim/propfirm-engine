@@ -13,8 +13,7 @@ no vendors and no money involved.
 
 Specification: [`docs/functional-outline.md`](docs/functional-outline.md)
 (modules M01 to M32, decisions D-numbers), with the dated owner decisions in
-[`docs/decisions.md`](docs/decisions.md), which win where the two differ;
-also *Prop Firm Plan v4 (Audited)*.
+[`docs/decisions.md`](docs/decisions.md), which win where the two differ.
 
 ## Stack
 
