@@ -36,6 +36,12 @@ const AnalysisPage = later(() => import("./pages/AnalysisPage"), "AnalysisPage")
 const SymbolsPage = later(() => import("./pages/ToolsExtra"), "SymbolsPage");
 const ResetPage = later(() => import("./pages/ToolsExtra"), "ResetPage");
 const SimulatorPage = later(() => import("./pages/ToolsExtra"), "SimulatorPage");
+const ProfilePage = later(() => import("./pages/TraderPages"), "ProfilePage");
+const BillingPage = later(() => import("./pages/TraderPages"), "BillingPage");
+const InvoicePage = later<typeof import("./pages/TraderPages"), { ord: string }>(() => import("./pages/TraderPages"), "InvoicePage");
+const CertificatesPage = later(() => import("./pages/TraderPages"), "CertificatesPage");
+const CertificatePage = later<typeof import("./pages/TraderPages"), { id: string }>(() => import("./pages/TraderPages"), "CertificatePage");
+const LeaderboardPage = later(() => import("./pages/TraderPages"), "LeaderboardPage");
 
 const PAGES: Record<string, ComponentType> = {
   "/": OverviewPage,
@@ -51,11 +57,17 @@ const PAGES: Record<string, ComponentType> = {
   "/tools/symbols": SymbolsPage,
   "/tools/reset": ResetPage,
   "/tools/simulator": SimulatorPage,
+  "/profile": ProfilePage,
+  "/billing": BillingPage,
+  "/certificates": CertificatesPage,
+  "/leaderboard": LeaderboardPage,
 };
 
 const ACCOUNT = /^\/accounts\/(ACC[0-9]{8})(\/history|\/rules)?$/;
 const ONBOARDING = /^\/funded\/(ONB[0-9]{8})$/;
 const LEGAL = /^\/legal\/([a-z0-9][a-z0-9-]{0,39})$/;
+const INVOICE = /^\/billing\/(ORD[0-9]{8})$/;
+const CERTIFICATE = /^\/certificates\/((?:PRG|PO)[0-9]{8})$/;
 
 export function App() {
   const auth = useAuth();
@@ -66,6 +78,8 @@ export function App() {
   const view = found?.[2];
   const onb = ONBOARDING.exec(path)?.[1];
   const legal = LEGAL.exec(path)?.[1];
+  const invoice = INVOICE.exec(path)?.[1];
+  const certificate = CERTIFICATE.exec(path)?.[1];
   if (legal !== undefined) {
     // policy pages are public: shown signed in or not
     return (
@@ -88,6 +102,8 @@ export function App() {
   else if (account !== undefined && view === "/rules") content = <RulesPage key={account} acc={account} />;
   else if (account !== undefined) content = <AccountPage key={account} acc={account} />;
   else if (onb !== undefined) content = <OnboardingPage key={onb} onb={onb} />;
+  else if (invoice !== undefined) content = <InvoicePage key={invoice} ord={invoice} />;
+  else if (certificate !== undefined) content = <CertificatePage key={certificate} id={certificate} />;
   else if (Page === undefined) content = <Notice tone="error">This page does not exist.</Notice>;
   else content = <Page />;
   return (

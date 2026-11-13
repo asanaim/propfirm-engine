@@ -90,6 +90,8 @@ from propfirm.customers.directory import (
 from propfirm.customers.four_eyes import open_proposal, proposal_json
 from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
+from propfirm.customers.leaderboard import TTL_MS as LEADERBOARD_TTL_MS
+from propfirm.customers.leaderboard import Leaderboard
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
 from propfirm.customers.onboarding_store import OnboardingRecord, OnboardingStateError
@@ -230,6 +232,14 @@ class LiveSource(Protocol):
     async def news(self) -> list[dict[str, Any]]: ...
 
 
+class LeaderboardStore(Protocol):
+    async def leaderboard_entrants(self) -> list[tuple[AccountRecord, str, str]]: ...
+
+    async def leaderboard_visible(self, cif: str) -> bool: ...
+
+    async def set_leaderboard_visible(self, cif: str, visible: bool, ts: int) -> None: ...
+
+
 class HistorySource(Protocol):
     async def account_events(
         self, account_id: str, after_seq: int = 0, limit: int = 200
@@ -322,6 +332,7 @@ class Deps:
     apprentices: ApprenticeDesk | None = None  # apprentices' proposals to their mentors
     oversight: Oversight | None = None  # sign-ins, dormant accounts, reviews, anomalies
     audit: AuditStore | None = None  # the security audit trail (7b); None: not recorded
+    leaderboard: LeaderboardStore | None = None  # the public leaderboard and its opt-outs
     client_ip_header: str | None = None  # set by a trusted proxy (X-Forwarded-For), else None
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
@@ -410,6 +421,10 @@ class PublishedNewsBody(NewsReasonBody):
     event_id: EventId
     title: Title
     currency: Currency
+
+
+class LeaderboardBody(_Body):
+    visible: StrictBool
 
 
 class CloseBody(_Body):
@@ -1670,6 +1685,42 @@ def create_app(
         except PayoutRefused as exc:
             raise _payout_refused(exc) from exc
         return wallet_view(wallet)
+
+    boards: dict[int, Leaderboard] = {}
+
+    def _board(deps: Deps) -> Leaderboard:
+        store = deps.leaderboard
+        if store is None:
+            raise HTTPException(status_code=404, detail="no leaderboard")
+        board = boards.get(id(deps))
+        if board is None:
+            board = boards[id(deps)] = Leaderboard(store.leaderboard_entrants, deps.live.account)
+        return board
+
+    @app.get("/leaderboard")
+    async def leaderboard(deps: D) -> dict[str, Any]:
+        """The public leaderboard: active funded accounts by gain on the
+        starting balance (first name and initial, country); refreshed at
+        most once a minute. Traders who opted out are left off."""
+        rows = await _board(deps).rows(deps.clock())
+        return {"rows": [r.view() for r in rows], "refresh_ms": LEADERBOARD_TTL_MS}
+
+    @app.get("/me/leaderboard")
+    async def my_leaderboard(deps: D, me: Trader) -> dict[str, Any]:
+        cif = await _cif(deps, me)
+        store = deps.leaderboard
+        visible = True if store is None else await store.leaderboard_visible(cif.cif)
+        return {"visible": visible}
+
+    @app.put("/me/leaderboard")
+    async def set_my_leaderboard(deps: D, me: Trader, body: LeaderboardBody) -> dict[str, Any]:
+        """Show or hide my funded accounts on the public leaderboard."""
+        cif = await _cif(deps, me)
+        store = deps.leaderboard
+        if store is None:
+            raise HTTPException(status_code=404, detail="no leaderboard")
+        await store.set_leaderboard_visible(cif.cif, body.visible, deps.clock())
+        return {"visible": body.visible}
 
     @app.get("/me/analysis")
     async def my_analysis(

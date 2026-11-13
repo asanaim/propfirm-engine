@@ -233,6 +233,7 @@ async def platform(
         gateway=gateway,
         verifier=verifier(),
         customers=store,
+        leaderboard=store,
         checkout=checkout,
         policy=settings,
         settings=settings,
@@ -488,7 +489,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
