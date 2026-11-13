@@ -323,6 +323,8 @@ def rule_set_view(r: RuleSet) -> dict[str, Any]:
         "news_restricted": r.news_restricted,  # restricted news windows bind this stage
         # trailing loss: a payout restarts the floor below the new balance
         "floor_restarts_after_payout": r.floor_restarts_after_payout,
+        # trailing loss: the floor stops rising at the starting balance
+        "floor_locks_at_start": r.floor_locks_at_start,
     }
 
 
@@ -877,7 +879,9 @@ def _stage(t: _Table, product_id: str, sizes: tuple[int, ...]) -> RuleSet:
     try:
         kind = MaxLossKind(kind_text)
     except ValueError:
-        raise PolicyError(f"{t.name('max_loss_kind')} must be static or trailing") from None
+        raise PolicyError(
+            f"{t.name('max_loss_kind')} must be static, trailing or trailing_eod"
+        ) from None
     try:
         rule_set = _rule_set(t, product_id, stage, version, kind, sizes)
     except (TypeError, ValueError) as exc:
@@ -910,4 +914,5 @@ def _rule_set(
         sizes_cents=sizes,
         news_restricted=t.boolean("news_restricted"),
         floor_restarts_after_payout=t.optional_boolean("floor_restarts_after_payout", True),
+        floor_locks_at_start=t.optional_boolean("floor_locks_at_start", True),
     )

@@ -393,6 +393,7 @@ def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
         "tie_rule": "breach_wins",
         "news_restricted": False,  # evaluations: news windows do not bind (as FTMO)
         "floor_restarts_after_payout": True,  # a static loss: the key keeps its default
+        "floor_locks_at_start": True,  # a static loss: the key keeps its default
     }
     instant = products[-1]["stages"][0]
     assert (instant["max_loss_kind"], instant["consistency_percent"]) == ("trailing", "50")

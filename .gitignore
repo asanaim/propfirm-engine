@@ -13,3 +13,6 @@ build/
 .env
 *.key
 *.pem
+
+# local Redis/Valkey snapshot
+dump.rdb

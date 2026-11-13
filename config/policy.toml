@@ -297,8 +297,12 @@ high = 24
 
 # --- products -------------------------------------------------------------------
 # Each stage becomes the rule-set version "<product>-<stage>-v<version>".
-# max_loss_kind: "static" (initial balance - max loss) or "trailing"
-# (equity high-water mark - max loss, never above the initial balance).
+# max_loss_kind: "static" (initial balance - max loss), "trailing" (intraday:
+# equity high-water mark - max loss) or "trailing_eod" (end of day: highest
+# balance at a 17:00 New York reset - max loss). Trailing kinds only:
+# floor_locks_at_start (default true: the floor never rises above the initial
+# balance) and floor_restarts_after_payout (default true: a payout lowers the
+# high-water mark by the amount paid).
 # consistency: best day's profit as a share of total profit ("" = no rule).
 
 [[products]]

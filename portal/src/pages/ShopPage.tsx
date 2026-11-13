@@ -4,6 +4,7 @@ import type { PlacedOrder, Product, Stage } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Problem } from "../components/Problem";
 import { Button, Card, Loading, Notice } from "../components/ui";
+import { lossKindLabel } from "../lib/lossLimit";
 import { formatCents, formatPercent, formatSize } from "../lib/money";
 import { navigate } from "../router";
 
@@ -30,7 +31,7 @@ function StageRules({ stage }: { stage: Stage }) {
         <dd>{formatPercent(stage.daily_loss_percent)}</dd>
         <dt>Maximum loss</dt>
         <dd>
-          {formatPercent(stage.max_loss_percent)} ({stage.max_loss_kind})
+          {formatPercent(stage.max_loss_percent)} ({lossKindLabel(stage.max_loss_kind)})
         </dd>
         <dt>Minimum trading days</dt>
         <dd>{stage.min_trading_days}</dd>

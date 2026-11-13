@@ -10,6 +10,10 @@ fractions of the initial balance.
 | 1-Step  | S1 FND | 10% | 6% static | 3% | best day <= 50% of profit |
 | Instant | FND | none | 5% trailing, stops at start | 3% | best day <= 50% of profit |
 
+Max loss kinds: static; trailing (intraday, on equity); trailing at end of
+day (on the balance at each 17:00 New York reset). A trailing floor may lock
+at the starting balance and may restart after a payout; both are fields.
+
 Instant from 12 Nov 2026 (policy version 2): the trailing floor does not
 restart after a payout (review D1); version 1 accounts keep the restart.
 
@@ -40,8 +44,21 @@ class Stage(StrEnum):
 
 
 class MaxLossKind(StrEnum):
+    """How the maximum loss floor moves (IB: initial balance, M: max loss).
+
+    The trailing kinds give floor = high-water mark - M * IB, capped at IB
+    when the rule set's `floor_locks_at_start` holds."""
+
     STATIC = "static"  # floor = IB * (1 - M)
-    TRAILING = "trailing"  # floor = min(equity high-water mark - M * IB, IB)
+    # intraday: the high-water mark follows equity on every check
+    TRAILING = "trailing"
+    # end of day: the high-water mark follows the balance at each 17:00 New
+    # York reset only, as FTMO's 1-Step [decided 13 Nov 2026, D-13.17]
+    TRAILING_EOD = "trailing_eod"
+
+    @property
+    def trails(self) -> bool:
+        return self is not MaxLossKind.STATIC
 
 
 class TargetBasis(StrEnum):
@@ -53,6 +70,28 @@ class TieRule(StrEnum):
     BREACH_WINS = "breach_wins"
     # a rule name, not a password
     PASS_WINS = "pass_wins"  # nosec B105
+
+
+# The kind as an adjective before "maximum loss" on public pages.
+KIND_WORDS: dict[MaxLossKind, str] = {
+    MaxLossKind.STATIC: "",
+    MaxLossKind.TRAILING: "trailing ",
+    MaxLossKind.TRAILING_EOD: "end-of-day trailing ",
+}
+
+
+def max_loss_words(rules: RuleSet) -> str:
+    """The kind as the funded agreement states it: "static", "trailing",
+    "trailing at end of day"; a floor that keeps rising past the starting
+    balance says so."""
+    words = {
+        MaxLossKind.STATIC: "static",
+        MaxLossKind.TRAILING: "trailing",
+        MaxLossKind.TRAILING_EOD: "trailing at end of day",
+    }[rules.max_loss_kind]
+    if rules.max_loss_kind.trails and not rules.floor_locks_at_start:
+        words += ", not capped at the starting balance"
+    return words
 
 
 def _usd(dollars: int) -> int:
@@ -85,6 +124,10 @@ class RuleSet:
     # D1]: the floor stays where it was; a payout may not take the account
     # to or below it. Added after records existed: True for older rule sets.
     floor_restarts_after_payout: bool = added_field(True)
+    # Trailing max loss only: the floor stops rising once it reaches the
+    # initial balance (True: every rule set before 13 Nov 2026). False: it
+    # keeps trailing above the initial balance [build plan step 1].
+    floor_locks_at_start: bool = added_field(True)
 
     def __post_init__(self) -> None:
         require_text("rsv_id", self.rsv_id)
@@ -108,8 +151,13 @@ class RuleSet:
             raise TypeError("news_restricted must be a bool")
         if not isinstance(self.floor_restarts_after_payout, bool):
             raise TypeError("floor_restarts_after_payout must be a bool")
-        if not self.floor_restarts_after_payout and self.max_loss_kind is not MaxLossKind.TRAILING:
-            raise ValueError("only a trailing max loss has a floor that could restart")
+        if not isinstance(self.floor_locks_at_start, bool):
+            raise TypeError("floor_locks_at_start must be a bool")
+        if not self.max_loss_kind.trails:
+            if not self.floor_restarts_after_payout:
+                raise ValueError("only a trailing max loss has a floor that could restart")
+            if not self.floor_locks_at_start:
+                raise ValueError("only a trailing max loss has a floor that could rise")
         if not self.sizes_cents:
             raise ValueError("sizes_cents must not be empty")
         for size in self.sizes_cents:

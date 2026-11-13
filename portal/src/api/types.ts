@@ -6,7 +6,7 @@ export interface Stage {
   rsv_id: string;
   profit_target_percent: string | null;
   max_loss_percent: string | null;
-  max_loss_kind: "static" | "trailing";
+  max_loss_kind: "static" | "trailing" | "trailing_eod"; // trailing_eod: on the balance at each 17:00 New York close
   daily_loss_percent: string | null;
   min_trading_days: number;
   consistency_percent: string | null;
@@ -16,6 +16,7 @@ export interface Stage {
   tie_rule: "breach_wins" | "pass_wins";
   news_restricted: boolean; // restricted news windows bind this stage (funded only, as FTMO)
   floor_restarts_after_payout?: boolean; // trailing loss: a payout lowers the floor again (older Instant only)
+  floor_locks_at_start?: boolean; // trailing loss: the floor stops rising at the starting balance
 }
 
 export interface Product {
