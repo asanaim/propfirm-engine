@@ -17,6 +17,8 @@ import valkey
 from propfirm.market.types import PriceUpdate
 
 FIELDS: tuple[str, ...] = ("symbol", "seq", "source_ts", "receive_ts", "price")
+# the source's own bid and ask, both or neither (D-13.10)
+QUOTE_FIELDS: tuple[str, ...] = ("bid", "ask")
 _INT = re.compile(r"-?[0-9]+")
 
 
@@ -37,7 +39,11 @@ def encode(update: PriceUpdate) -> dict[str, str]:
         "source_ts": str(update.source_ts),
         "receive_ts": str(update.receive_ts),
         "price": str(update.price),
-    }
+    } | (
+        {}
+        if update.bid is None or update.ask is None
+        else {"bid": str(update.bid), "ask": str(update.ask)}
+    )
 
 
 def decode(fields: Mapping[Any, Any]) -> PriceUpdate:
@@ -45,8 +51,8 @@ def decode(fields: Mapping[Any, Any]) -> PriceUpdate:
     if not fields:
         raise MalformedMessageError("empty entry (deleted or trimmed?)")
     data = {_text(k): _text(v) for k, v in fields.items()}
-    if set(data) != set(FIELDS):
-        raise MalformedMessageError(f"fields {sorted(data)} != {sorted(FIELDS)}")
+    if set(data) not in (set(FIELDS), set(FIELDS) | set(QUOTE_FIELDS)):
+        raise MalformedMessageError(f"fields {sorted(data)} != {sorted(FIELDS)} (+ bid, ask)")
     try:
         return PriceUpdate(
             symbol=data["symbol"],
@@ -54,6 +60,8 @@ def decode(fields: Mapping[Any, Any]) -> PriceUpdate:
             source_ts=_int(data["source_ts"]),
             receive_ts=_int(data["receive_ts"]),
             price=_int(data["price"]),
+            bid=_int(data["bid"]) if "bid" in data else None,
+            ask=_int(data["ask"]) if "ask" in data else None,
         )
     except (TypeError, ValueError) as exc:
         raise MalformedMessageError(str(exc)) from exc

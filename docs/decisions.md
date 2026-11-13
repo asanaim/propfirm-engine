@@ -156,3 +156,10 @@ plus 1.0%, short zero; oil 4.0% long, zero short; triple on Wednesday;
 crypto 15% both sides every night. Eight central bank rates are owner
 settings. Markup, oil and crypto rates to be checked against one broker's
 published table (step 8). Status: not built (step 1).
+
+D-13.20, 1 Step loss floor. FTMO's version: the 10% end-of-day trailing
+floor keeps rising with the highest end-of-day balance and is not capped at
+the starting balance (`max_loss_kind = "trailing_eod"`,
+`floor_locks_at_start = false`). Supersedes the lock in D-13.17 for 1 Step;
+Instant keeps its lock (K7). Status: the fields exist (#92); the product
+change is entered in step 2.
