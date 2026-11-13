@@ -30,6 +30,12 @@ def test_traders_by_status_and_one_traders_file(
             assert (counts["all"], counts["trading"], counts["no_account"]) == (2, 1, 1)
             assert (counts["funded"], counts["open_case"], counts["blocked"]) == (0, 0, 0)
             assert [t["full_name"] for t in listed["traders"]] == ["Bo Newcomer", "Ada Trader"]
+            # whole numbers reach the screen as JSON numbers: a SQL sum is
+            # numeric, which the API would send as text and the back office's
+            # money formatter refuses (the Traders page crashed, 13 Nov)
+            for t in listed["traders"]:
+                for key in ("accounts", "funded", "paid_cents", "created_at"):
+                    assert type(t[key]) is int, (key, t[key])
 
             trading = (await staff(p, "GET", "/staff/traders?segment=trading")).json()
             assert [t["cif"] for t in trading["traders"]] == ["CIF00000001"]
@@ -51,6 +57,7 @@ def test_traders_by_status_and_one_traders_file(
 
             file = (await staff(p, "GET", "/staff/traders/CIF00000001")).json()
             assert file["trader"]["accounts"] == 1
+            assert type(file["trader"]["paid_cents"]) is int
             assert [a["acc"] for a in file["accounts"]] == ["ACC00000001"]
             assert file["orders"][0]["status"] == "provisioned"
             assert file["cases"][0]["status"] == "open"

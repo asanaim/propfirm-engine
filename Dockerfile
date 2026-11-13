@@ -20,7 +20,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md ./
+# every file pyproject.toml names (readme, license-files): the build of the
+# project itself fails without them (tests/test_dockerfile.py)
+COPY pyproject.toml uv.lock README.md LICENSE ./
 
 
 FROM base AS test
