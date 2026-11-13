@@ -79,7 +79,7 @@ def test_store_is_append_only_and_gives_the_policy_in_force(
             assert (earlier.change, earlier.applied_at) == (first, 10)
             in_force = await policy_in_force(database_url, schema, BASE)
             rule_set = in_force.product("one-step").rule_sets[0]
-            assert rule_set.rsv_id == "one-step-s1-v2-a2"
+            assert rule_set.rsv_id == "one-step-s1-v3-a2"
             # maker-checker: one decision per proposal; the change names both admins
             prop = await store.propose(gating, "a-1", None, "counsel", 40)
             change = await store.approve(prop, "a-2", "checked", 41, applied=True)
@@ -140,24 +140,24 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             assert by_admin.json()["detail"]["code"] == "owners_only"
             changed = await two_owners(p, LIMITS_URL, NEW_LIMITS)
             assert changed.status_code == 200, changed.text
-            assert changed.json()["rsv_id"] == "one-step-s1-v2-a1"
+            assert changed.json()["rsv_id"] == "one-step-s1-v3-a1"
             after = await buy()
 
             t = now_ms()
             await p.writer.publish(PriceUpdate("EUR/USD", 1, t, t, 110_000))
             old = await eventually(lambda: p.live.account(before))
             new = await eventually(lambda: p.live.account(after))
-            # 25,000 USD: the file's 10 % target, 3 % daily and 6 % drawdown,
-            # then 8 %, 4 % and 5 %
+            # 25,000 USD: the file's 10 % target, 3 % daily and 10 % drawdown
+            # (product line v1), then 8 %, 4 % and 5 %
             floors = ("rsv_id", "target_balance_cents", "daily_floor_cents", "max_floor_cents")
             assert tuple(old[k] for k in floors) == (
-                "one-step-s1-v2",
+                "one-step-s1-v3",
                 2_750_000,
                 2_425_000,
-                2_350_000,
+                2_250_000,
             )
             assert tuple(new[k] for k in floors) == (
-                "one-step-s1-v2-a1",
+                "one-step-s1-v3-a1",
                 2_700_000,
                 2_400_000,
                 2_375_000,
@@ -166,7 +166,7 @@ def test_new_limits_apply_to_accounts_bought_after_the_change(
             # catalogue has moved on
             assert (old["rules"]["profit_target_percent"], old["rules"]["max_loss_percent"]) == (
                 "10",
-                "6",
+                "10",
             )
             assert (new["rules"]["profit_target_percent"], new["rules"]["max_loss_percent"]) == (
                 "8",
@@ -200,7 +200,7 @@ def test_limits_changed_while_the_engine_is_down_apply_once_it_has_them(
             assert pending.status_code == 202 and pending.json()["status"] == "pending"
             await p.call("POST", "/me", body=ADULT)
             order = (await p.call("POST", "/orders", body=ONE_STEP_25K)).json()
-            assert order["rsv_id"] == "one-step-s1-v2"  # the previous limits stay in force
+            assert order["rsv_id"] == "one-step-s1-v3"  # the previous limits stay in force
             await p.engine()  # journals the waiting AddRuleSet from the stream
 
             async def published() -> bool:
@@ -209,9 +209,9 @@ def test_limits_changed_while_the_engine_is_down_apply_once_it_has_them(
             await eventually(published)  # a retry finds it journaled: duplicate = done
             catalogue = (await p.call("GET", "/catalogue")).json()
             one_step = next(x for x in catalogue if x["id"] == "one-step")
-            assert one_step["stages"][0]["rsv_id"] == "one-step-s1-v2-a1"
+            assert one_step["stages"][0]["rsv_id"] == "one-step-s1-v3-a1"
             second = (await p.call("POST", "/orders", body=ONE_STEP_25K)).json()
-            assert second["rsv_id"] == "one-step-s1-v2-a1"
+            assert second["rsv_id"] == "one-step-s1-v3-a1"
 
     asyncio.run(scenario())
 

@@ -182,3 +182,8 @@ schedule (halts, early closes, full closures) for the rest of 2026 and for
 2027; forex closes for Christmas and New Year's Day only; crypto never
 closes. Two 2026 early-close times are assumed from 2027's pattern and
 marked [A] in the policy file. Status: built (step 1).
+Status update, 13 Nov 2026: product line version 1 (D-13.17, D-13.20) is
+entered in the policy file: Lite and 1-Step from 10K at the new prices,
+1-Step on FTMO's end-of-day trailing loss without a lock. Still to build
+in step 2: the free trial, the split ladder, the add-ons, the retake price
+and the Lite 10K code block.

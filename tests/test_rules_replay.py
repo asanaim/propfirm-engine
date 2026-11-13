@@ -27,7 +27,7 @@ from tests.rules_rig import ny
 T0 = ny(2026, 10, 28, 16, 58)  # two minutes before the reset
 SYMS = ("EUR/USD", "USD/JPY", "XAU/USD", "BTC/USD")
 ACCOUNTS = {
-    "A": (PRODUCTS["lite"][0], 500_000),
+    "A": (RULESETS["lite-s1-v2"], 500_000),  # retired: a 5K Lite replays
     "B": (RULESETS["instant-funded-v1"], 500_000),  # retired: its replays stay
     "C": (PRODUCTS["classic"][0], 1_000_000),
 }

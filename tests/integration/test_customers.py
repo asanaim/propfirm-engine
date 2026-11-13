@@ -353,7 +353,7 @@ def test_register_buy_pay_and_trade(database_url: str, valkey_url: str, pg_schem
             order = bought.json()
             assert (order["ord"], order["price_cents"], order["status"]) == (
                 "ORD00000001",
-                3_960,
+                4_950,  # Lite 10K $55 (product line v1) less 10 %
                 "pending",
             )
             assert (order["discount_kind"], order["discount_percent"]) == ("code", "10")
@@ -368,7 +368,7 @@ def test_register_buy_pay_and_trade(database_url: str, valkey_url: str, pg_schem
 
             me = (await p.call("GET", "/me")).json()
             assert [a["acc"] for a in me["accounts"]] == [acc]
-            assert me["accounts"][0]["rsv_id"] == "lite-s1-v2"
+            assert me["accounts"][0]["rsv_id"] == "lite-s1-v3"
 
             t = now_ms()
             await p.writer.publish(PriceUpdate("EUR/USD", 1, t, t, 110_000))
@@ -380,7 +380,7 @@ def test_register_buy_pay_and_trade(database_url: str, valkey_url: str, pg_schem
 
             second = (await p.call("POST", "/orders", body=LITE_10K)).json()  # nothing paid yet
             # K4 (12 Nov 2026): no repeat discount, the list price
-            assert second["discount_kind"] == "none" and second["price_cents"] == 4_400
+            assert second["discount_kind"] == "none" and second["price_cents"] == 5_500
             coded = await p.call("POST", "/orders", body={**LITE_10K, "code": "WELCOME10"})
             assert coded.status_code == 422  # codes are for first accounts only
 

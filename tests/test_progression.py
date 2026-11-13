@@ -40,7 +40,7 @@ def account(product: str, stage: str, rsv: str = "x-s1-v1") -> AccountRecord:
 
 
 def test_the_next_stage_of_each_product() -> None:
-    assert plan_for(POLICY, account("lite", "s1")) == Plan(Stage.S2, "lite-s2-v2")
+    assert plan_for(POLICY, account("lite", "s1")) == Plan(Stage.S2, "lite-s2-v3")
     assert plan_for(POLICY, account("classic", "s1")) == Plan(Stage.S2, "classic-s2-v2")
     assert plan_for(POLICY, account("lite", "s2")) == Plan(Stage.FUNDED, None)
     assert plan_for(POLICY, account("one-step", "s1")) == Plan(Stage.FUNDED, None)
@@ -54,7 +54,7 @@ def test_the_next_stage_uses_the_rules_in_force_at_the_pass() -> None:
         4, stage_limits("lite", "s2", "4", "3", "5", "static"), "admin-1", None, "offer", 1
     )
     in_force = apply_changes(POLICY, [change])
-    assert plan_for(in_force, account("lite", "s1")) == Plan(Stage.S2, "lite-s2-v2-a4")
+    assert plan_for(in_force, account("lite", "s1")) == Plan(Stage.S2, "lite-s2-v3-a4")
 
 
 def test_next_stage_follows_the_product_order() -> None:
@@ -66,7 +66,7 @@ def test_next_stage_follows_the_product_order() -> None:
 
 
 def test_the_stage_a_rule_set_id_names() -> None:
-    assert stage_of("lite-s1-v2") is Stage.S1
+    assert stage_of("lite-s1-v3") is Stage.S1
     assert stage_of("one-step-s1-v3-a7") is Stage.S1
     assert stage_of("instant-funded-v1") is Stage.FUNDED
     assert stage_of("x-s2-v1-s1-v3") is Stage.S1  # the suffix decides
@@ -81,7 +81,7 @@ def history(*steps: Step) -> list[ProgressionEvent]:
     return [ProgressionEvent(PRG, kind, ts, detail) for kind, ts, detail in steps]
 
 
-TO_S2: Step = ("created", 1, {"to_stage": "s2", "to_rsv_id": "lite-s2-v2"})
+TO_S2: Step = ("created", 1, {"to_stage": "s2", "to_rsv_id": "lite-s2-v3"})
 TO_FUNDED: Step = ("created", 1, {"to_stage": "funded", "to_rsv_id": None})
 ASSIGNED: Step = ("account_assigned", 2, {"acc": "ACC00000002"})
 ATTEMPT: Step = ("provision_attempted", 3, {"acc": "ACC00000002", "entry_id": "1-0"})
@@ -92,7 +92,7 @@ DENIED: Step = ("denied", 5, {"by": "staff-1", "reason": "copy trading"})
 
 def test_an_evaluation_stage_opens_its_account() -> None:
     assert progression_state(PRG, history(TO_S2)) == ProgressionState(
-        "provisioning", "lite-s2-v2", None, None, None, None
+        "provisioning", "lite-s2-v3", None, None, None, None
     )
     retried = progression_state(PRG, history(TO_S2, ASSIGNED, ATTEMPT, ATTEMPT))
     assert (retried.status, retried.to_acc) == ("provisioning", "ACC00000002")

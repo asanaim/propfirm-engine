@@ -7,8 +7,13 @@ fractions of the initial balance.
 | Product | Stages | Targets | Max loss | Daily loss | Consistency |
 | Lite    | S1 S2 FND | 6% then 6% | 6% static | 3% | none |
 | Classic | S1 S2 FND | 10% then 5% | 8% static | 4% | none |
-| 1-Step  | S1 FND | 10% | 6% static | 3% | best day <= 50% of profit |
+| 1-Step  | S1 FND | 10% | 10% trailing at end of day, no lock | 3% | best day <= 50% of profit |
 | Instant | FND | none | 5% trailing, stops at start | 3% | best day <= 50% of profit |
+
+Product line version 1 (13 Nov 2026, D-13.17 and D-13.20): Lite and 1-Step
+are sold from 10K (5K removed; Lite v3/funded v2), and 1-Step moves to
+FTMO's end-of-day trailing loss (v3/funded v2). Earlier versions stay in
+RETIRED for the accounts sold on them.
 
 Max loss kinds: static; trailing (intraday, on equity); trailing at end of
 day (on the balance at each 17:00 New York reset). A trailing floor may lock
@@ -176,13 +181,17 @@ class RuleSet:
 
 _P = Fraction
 _LITE_SIZES = tuple(_usd(k * 1_000) for k in (5, 10, 25, 50, 100, 200))
+_LINE_V1_SIZES = tuple(_usd(k * 1_000) for k in (10, 25, 50, 100, 200))  # no 5K
 _CLASSIC_SIZES = tuple(_usd(k * 1_000) for k in (10, 25, 50, 100, 200))
 _INSTANT_SIZES = tuple(_usd(k * 1_000) for k in (5, 10, 25))
 
 
-def _lite(stage: Stage, target: Fraction | None) -> RuleSet:
+def _lite(stage: Stage, target: Fraction | None, line_v1: bool = True) -> RuleSet:
+    version = (
+        (2 if stage is Stage.FUNDED else 3) if line_v1 else (1 if stage is Stage.FUNDED else 2)
+    )
     return RuleSet(
-        rsv_id=f"lite-{stage}-v{1 if stage is Stage.FUNDED else 2}",
+        rsv_id=f"lite-{stage}-v{version}",
         product="lite",
         stage=stage,
         profit_target=target,
@@ -192,7 +201,7 @@ def _lite(stage: Stage, target: Fraction | None) -> RuleSet:
         min_trading_days=0 if stage is Stage.FUNDED else 4,
         consistency=None,
         consistency_at_pass=False,
-        sizes_cents=_LITE_SIZES,
+        sizes_cents=_LINE_V1_SIZES if line_v1 else _LITE_SIZES,
         news_restricted=stage is Stage.FUNDED,
     )
 
@@ -214,20 +223,25 @@ def _classic(stage: Stage, target: Fraction | None) -> RuleSet:
     )
 
 
-def _one_step(stage: Stage, target: Fraction | None) -> RuleSet:
+def _one_step(stage: Stage, target: Fraction | None, line_v1: bool = True) -> RuleSet:
+    version = (
+        (2 if stage is Stage.FUNDED else 3) if line_v1 else (1 if stage is Stage.FUNDED else 2)
+    )
     return RuleSet(
-        rsv_id=f"one-step-{stage}-v{1 if stage is Stage.FUNDED else 2}",
+        rsv_id=f"one-step-{stage}-v{version}",
         product="one-step",
         stage=stage,
         profit_target=target,
-        max_loss=_P(6, 100),
-        max_loss_kind=MaxLossKind.STATIC,
+        # line v1: FTMO's 10 % end-of-day trailing loss that keeps rising
+        max_loss=_P(10, 100) if line_v1 else _P(6, 100),
+        max_loss_kind=MaxLossKind.TRAILING_EOD if line_v1 else MaxLossKind.STATIC,
         daily_loss=_P(3, 100),
         min_trading_days=0 if stage is Stage.FUNDED else 4,
         consistency=_P(1, 2),
         consistency_at_pass=stage is not Stage.FUNDED,
-        sizes_cents=_LITE_SIZES,
+        sizes_cents=_LINE_V1_SIZES if line_v1 else _LITE_SIZES,
         news_restricted=stage is Stage.FUNDED,
+        floor_locks_at_start=not line_v1,
     )
 
 
@@ -264,7 +278,15 @@ PRODUCTS: dict[str, tuple[RuleSet, ...]] = {
 }
 
 # Versions no longer sold; accounts opened on them keep them.
-RETIRED: tuple[RuleSet, ...] = (_INSTANT_V1,)
+RETIRED: tuple[RuleSet, ...] = (
+    _INSTANT_V1,
+    # before product line version 1 (13 Nov 2026)
+    _lite(Stage.S1, _P(6, 100), line_v1=False),
+    _lite(Stage.S2, _P(6, 100), line_v1=False),
+    _lite(Stage.FUNDED, None, line_v1=False),
+    _one_step(Stage.S1, _P(10, 100), line_v1=False),
+    _one_step(Stage.FUNDED, None, line_v1=False),
+)
 
 # every version, current and retired, by rule-set id
 RULESETS: dict[str, RuleSet] = {

@@ -66,12 +66,12 @@ from tests.rules_rig import ny
 T0 = ny(2026, 10, 28, 16, 58)  # two minutes before the reset
 SYMS = ("EUR/USD", "USD/JPY", "XAU/USD", "BTC/USD")
 NEWS = (RestrictedEvent("usd", T0 + 200_000, EventScope.CURRENCY, "USD"),)  # blocks T0+80s..
-LITE_V2 = replace(RULESETS["lite-s1-v2"], rsv_id="lite-s1-v3", daily_loss=Fraction(4, 100))
+LITE_V2 = replace(RULESETS["lite-s1-v2"], rsv_id="lite-s1-v9", daily_loss=Fraction(4, 100))
 ACCOUNTS = {
     "A": ("lite-s1-v2", 500_000),
     "B": ("instant-funded-v1", 500_000),
     "C": ("classic-s1-v2", 1_000_000),
-    "F": ("lite-s1-v3", 500_000),  # opened on a version published by input
+    "F": ("lite-s1-v9", 500_000),  # opened on a version published by input
 }
 CONSUMER = "engine-1"
 TEST_KEY = bytes(range(32))

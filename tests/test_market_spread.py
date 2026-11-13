@@ -172,7 +172,7 @@ def opened(events: list[object]) -> PositionOpened:
 
 def test_a_market_order_right_after_a_jump_pays_the_normal_spread() -> None:
     shipped = load_policy()
-    inputs = [OpenAccount("A", "lite-s1-v2", 1_000_000, T0), *jump_then_buy("o1", 1)]
+    inputs = [OpenAccount("A", "lite-s1-v3", 1_000_000, T0), *jump_then_buy("o1", 1)]
     _, out = run(shipped, inputs)
     assert opened(out[-1]).price == 110_304  # ask = 110,300 + 8 / 2 (EUR/USD 0.8 pip)
 
@@ -189,7 +189,7 @@ def test_the_switch_is_journaled_and_replays_exactly() -> None:
     )
     to_market = UpdateTrading("trading-v2", shipped.trading.instruments, None, T0 + 100)
     inputs = [
-        OpenAccount("A", "lite-s1-v2", 1_000_000, T0),
+        OpenAccount("A", "lite-s1-v3", 1_000_000, T0),
         *jump_then_buy("o1", 1),  # under the first model
         to_market,
         *(
@@ -280,7 +280,7 @@ def test_the_engine_widens_quotes_made_at_rollover() -> None:
     shipped = load_policy()
     five = ny("2026-07-15", "17:05:00")
     inputs = [
-        OpenAccount("A", "lite-s1-v2", 1_000_000, five - 1_000),
+        OpenAccount("A", "lite-s1-v3", 1_000_000, five - 1_000),
         PriceUpdate("EUR/USD", 1, five, five, 110_000),
         eurusd_buy("o1", five + 1),
     ]

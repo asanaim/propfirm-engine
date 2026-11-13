@@ -449,8 +449,9 @@ high = 24
 [[products]]
 id = "lite"
 name = "Lite"
-sizes_cents = [500000, 1000000, 2500000, 5000000, 10000000, 20000000]
-prices_cents = [2400, 4400, 9900, 17900, 31900, 63900]
+# product line version 1 (13 Nov 2026, D-13.17): 5K removed, new prices
+sizes_cents = [1000000, 2500000, 5000000, 10000000, 20000000]
+prices_cents = [5500, 10900, 21500, 38900, 77900]
 profit_split_percent = "80"
 code_discount_max_percent = "10"
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
@@ -458,7 +459,7 @@ fee_refund_with_payout = 0     # 0: no fee refund
 
   [[products.stages]]
   stage = "s1"
-  version = 2              # 2: news windows no longer bind evaluations
+  version = 3              # 3: sizes of product line v1; 2: news windows no longer bind evaluations
   profit_target_percent = "6"
   max_loss_percent = "6"
   max_loss_kind = "static"
@@ -470,7 +471,7 @@ fee_refund_with_payout = 0     # 0: no fee refund
 
   [[products.stages]]
   stage = "s2"
-  version = 2              # 2: news windows no longer bind evaluations
+  version = 3              # 3: sizes of product line v1; 2: news windows no longer bind evaluations
   profit_target_percent = "6"
   max_loss_percent = "6"
   max_loss_kind = "static"
@@ -482,7 +483,7 @@ fee_refund_with_payout = 0     # 0: no fee refund
 
   [[products.stages]]
   stage = "funded"
-  version = 1
+  version = 2              # 2: sizes of product line v1
   profit_target_percent = ""
   max_loss_percent = "6"
   max_loss_kind = "static"
@@ -541,8 +542,9 @@ fee_refund_with_payout = 0
 [[products]]
 id = "one-step"
 name = "1-Step"
-sizes_cents = [500000, 1000000, 2500000, 5000000, 10000000, 20000000]
-prices_cents = [3700, 7900, 19900, 29900, 49900, 99900]
+# product line version 1 (13 Nov 2026, D-13.17): 5K removed, new prices
+sizes_cents = [1000000, 2500000, 5000000, 10000000, 20000000]
+prices_cents = [9500, 19900, 29900, 49900, 99900]
 profit_split_percent = "80"
 code_discount_max_percent = "10"
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
@@ -550,10 +552,13 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
 
   [[products.stages]]
   stage = "s1"
-  version = 2              # 2: news windows no longer bind evaluations
+  version = 3              # 3: product line v1, FTMO's end-of-day trailing loss
   profit_target_percent = "10"
-  max_loss_percent = "6"
-  max_loss_kind = "static"
+  # D-13.17 and D-13.20: 10 % of the starting balance below the highest
+  # balance at a 17:00 New York close; it keeps rising (no lock), as FTMO
+  max_loss_percent = "10"
+  max_loss_kind = "trailing_eod"
+  floor_locks_at_start = false
   daily_loss_percent = "3"
   min_trading_days = 4
   consistency_percent = "50"
@@ -562,10 +567,11 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
 
   [[products.stages]]
   stage = "funded"
-  version = 1
+  version = 2              # 2: product line v1, FTMO's end-of-day trailing loss
   profit_target_percent = ""
-  max_loss_percent = "6"
-  max_loss_kind = "static"
+  max_loss_percent = "10"
+  max_loss_kind = "trailing_eod"
+  floor_locks_at_start = false
   daily_loss_percent = "3"
   min_trading_days = 0
   consistency_percent = "50"
