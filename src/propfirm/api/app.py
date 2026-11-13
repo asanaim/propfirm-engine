@@ -354,6 +354,11 @@ class _Body(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class TodoNoteBody(_Body):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    due_at: Annotated[int | None, Field(ge=0)] = None
+
+
 class OrderBody(_Body):
     symbol: str
     side: Literal["buy", "sell"]
@@ -1455,6 +1460,10 @@ async def build_todo(deps: Deps, me: Principal, access: Access) -> list[dict[str
                 missing = ", ".join(sc.missing) or "renewal"
                 title = f"Screen {sid}: {missing}"
                 out.append(_todo("screening_check", sid, title, now, sc.valid_until))
+        # the employee's own notes
+        async with deps.staff.store.read() as ops:
+            for note_id, text, due_at, ts in await ops.open_notes(me.subject):
+                out.append(_todo("note", str(note_id), text, ts, due_at))
     out.sort(key=lambda t: (t["due_at"] if t["due_at"] is not None else t["since"], t["ref"]))
     return out
 
@@ -3601,6 +3610,30 @@ def create_app(
         except DeskError as exc:
             raise desk_refused(exc) from exc
         return {"sheet": sheet, "version": version}
+
+    @app.post("/staff/me/notes", status_code=201)
+    async def add_note(deps: D, me: Employee, body: TodoNoteBody) -> dict[str, Any]:
+        """A note of my own on my to-do list, optionally with a due time."""
+        if deps.staff is None:
+            raise HTTPException(status_code=404, detail="no staff directory on this server")
+        now = deps.clock()
+        if body.due_at is not None and body.due_at <= now:
+            raise HTTPException(status_code=422, detail="due_at must be in the future")
+        async with deps.staff.store.read() as ops:
+            note_id = await ops.add_note(me.subject, body.text, body.due_at, now)
+        return {"id": note_id, "text": body.text, "due_at": body.due_at, "ts": now}
+
+    @app.post("/staff/me/notes/{note_id}/done")
+    async def finish_note(
+        deps: D, me: Employee, note_id: Annotated[int, Path(ge=1)]
+    ) -> dict[str, Any]:
+        """Tick off one of my notes (it stays on record)."""
+        if deps.staff is None:
+            raise HTTPException(status_code=404, detail="no staff directory on this server")
+        async with deps.staff.store.read() as ops:
+            if not await ops.finish_note(me.subject, note_id, deps.clock()):
+                raise HTTPException(status_code=404, detail="no such open note of yours")
+        return {"id": note_id, "done": True}
 
     @app.get("/staff/notifications")
     async def my_notifications(

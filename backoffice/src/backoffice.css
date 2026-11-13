@@ -469,3 +469,22 @@ pre.json {
     animation: none;
   }
 }
+
+/* own to-do notes on "My work" */
+.add-note {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px auto;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.add-note .MuiFormControl-root {
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .add-note {
+    grid-template-columns: 1fr;
+  }
+}

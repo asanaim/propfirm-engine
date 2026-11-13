@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type AuditPage, auditVerdict } from "./Reports";
 import userEvent from "@testing-library/user-event";
 import type { UserManager } from "oidc-client-ts";
@@ -119,5 +119,20 @@ describe("Home", () => {
     await userEvent.click(screen.getByRole("button", { name: "I have read these duties" }));
     await userEvent.click(screen.getByRole("button", { name: "Acknowledge" }));
     expect(posted.map((p) => p.path)).toEqual(["/staff/me/duties/payouts/ack", "/staff/notifications/7/ack"]);
+  });
+});
+
+describe("My notes", () => {
+  it("adds a note with a due time and ticks one off", async () => {
+    const withNote = { ...me, todo: [...me.todo, { kind: "note", ref: "7", title: "Call the auditor", since: 0, due_at: null }] };
+    const { api, posted } = fakeApi({ "/staff/me": withNote });
+    render(wrap(api, <Home />));
+    expect(await screen.findByText("Call the auditor")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Add a note"), "Check payout PO1");
+    fireEvent.change(screen.getByLabelText("Due (optional)"), { target: { value: "2030-01-02T09:30" } });
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    await userEvent.click(screen.getByRole("button", { name: "Done: Call the auditor" }));
+    expect(posted[0]).toEqual({ path: "/staff/me/notes", body: { text: "Check payout PO1", due_at: new Date("2030-01-02T09:30").getTime() } });
+    expect(posted[1]?.path).toBe("/staff/me/notes/7/done");
   });
 });

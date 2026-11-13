@@ -577,11 +577,15 @@ main:focus {
 .field {
   display: grid;
   gap: var(--space-1);
+  min-width: 0; /* a grid item may shrink below its input's natural width */
   font-weight: 550;
 }
 
 .field input,
 .field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   font: inherit;
   font-weight: 400;
   min-height: 44px;
