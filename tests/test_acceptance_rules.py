@@ -25,7 +25,7 @@ from propfirm.rules.events import (
     NewsViolation,
 )
 from propfirm.rules.news import CURRENT_MAP, EventScope, RestrictedEvent, affected_symbols
-from propfirm.rules.products import PRODUCTS, RuleSet
+from propfirm.rules.products import RULESETS, RuleSet
 from propfirm.trading.events import (
     CloseReason,
     OrderCancelled,
@@ -38,7 +38,7 @@ from propfirm.trading.orders import OrderType, Side
 from tests.engine_rig import USD_100K, one, rejected
 from tests.rules_rig import RulesRig, ny
 
-LITE_S1 = PRODUCTS["lite"][0]
+LITE_S1 = RULESETS["lite-s1-v2"]
 DAY = ny(2026, 10, 28, 10)  # Wednesday 10:00 New York
 
 
@@ -233,7 +233,7 @@ PRICES = {
 }
 
 
-LITE_FUNDED = PRODUCTS["lite"][2]  # news windows bind funded accounts only (as FTMO)
+LITE_FUNDED = RULESETS["lite-funded-v1"]  # news windows bind funded accounts only (as FTMO)
 
 
 def nfp_rig(at: int, rules: RuleSet = LITE_FUNDED) -> RulesRig:

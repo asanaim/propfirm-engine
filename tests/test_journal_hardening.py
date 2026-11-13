@@ -191,7 +191,7 @@ def test_a_cancelled_event_no_longer_blocks() -> None:
         ([ScheduleNews(ECB, T0), CancelNews("ecb", T0 + 480_000)], "news_started"),
         ([ScheduleNews(ECB, T0), CancelNews("ecb", T0 + 800_000)], "news_started"),  # over
         ([AddRuleSet(LITE_V2, T0), AddRuleSet(LITE_V2, T0)], "duplicate_rule_set"),
-        ([OpenAccount("F", "lite-s1-v3", 500_000, T0)], "unknown_rule_set"),  # not published
+        ([OpenAccount("F", "lite-s1-v9", 500_000, T0)], "unknown_rule_set"),  # not published
     ],
 )
 def test_refused_calendar_and_rule_set_inputs(inputs: list[object], reason: str) -> None:
@@ -216,12 +216,12 @@ def test_an_event_id_is_never_reused_even_after_its_window() -> None:
 
 def test_published_rule_set_opens_accounts_and_old_versions_stay() -> None:
     d = opened_driver()
-    assert d.send(AddRuleSet(LITE_V2, T0 + 5)) == [RuleSetAdded(T0, "lite-s1-v3")]
-    d.send(OpenAccount("F", "lite-s1-v3", 500_000, T0 + 6))
+    assert d.send(AddRuleSet(LITE_V2, T0 + 5)) == [RuleSetAdded(T0, "lite-s1-v9")]
+    d.send(OpenAccount("F", "lite-s1-v9", 500_000, T0 + 6))
     sup = d.machine.supervisor
     assert sup.floors("F")[0] == 500_000 - 20_000  # 4% daily on v2
     assert sup.floors("A")[0] == 10_000_000 - 300_000  # A keeps v1's 3%
-    assert set(d.machine.rule_sets) >= {"lite-s1-v2", "lite-s1-v3"}
+    assert set(d.machine.rule_sets) >= {"lite-s1-v2", "lite-s1-v9"}
 
 
 # --- snapshots ----------------------------------------------------------------------

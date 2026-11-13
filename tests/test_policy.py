@@ -40,6 +40,7 @@ from propfirm.trading.orders import OrderRequest, OrderType, Side
 
 RAW: dict[str, Any] = tomllib.loads(DEFAULT_POLICY.read_text("utf-8"))
 SHIPPED = load_policy()
+SIZES_V1 = (1_000_000, 2_500_000, 5_000_000, 10_000_000, 20_000_000)
 T0 = 1_790_000_000_000
 
 
@@ -88,10 +89,15 @@ def test_shipped_policy_is_the_confirmed_configuration() -> None:
     )  # review D2 and D9 (12 Nov 2026); delay and gap thresholds as before
     assert SHIPPED.access == AccessPolicy(False, frozenset({"BD", "IN"}))  # gating off
     prices = {p.id: dict(p.prices_cents) for p in SHIPPED.products}
-    assert prices["lite"][1_000_000] == 4_400  # Lite 10K $44 (CC-2)
+    # product line version 1 (13 Nov 2026, D-13.17): no 5K Lite or 1-Step
+    assert prices["lite"] == dict(
+        zip(SIZES_V1, (5_500, 10_900, 21_500, 38_900, 77_900), strict=True)
+    )
+    assert prices["one-step"] == dict(
+        zip(SIZES_V1, (9_500, 19_900, 29_900, 49_900, 99_900), strict=True)
+    )
+    assert prices["instant"] == {500_000: 10_900, 1_000_000: 19_900, 2_500_000: 47_900}
     assert prices["classic"][2_500_000] == 11_900
-    assert prices["one-step"][500_000] == 3_700
-    assert prices["instant"][2_500_000] == 47_900
     assert 500_000 not in prices["classic"]  # no Classic 5K
     assert SHIPPED.product("one-step").fee_refund_with_payout == 3
     assert SHIPPED.product("instant").code_discount_max == 0
@@ -109,15 +115,15 @@ def test_shipped_policy_is_the_confirmed_configuration() -> None:
 def test_numbers_are_editable() -> None:
     def change(data: dict[str, Any]) -> None:
         stage = lite(data)["stages"][0]
-        stage.update(version=3, profit_target_percent="8", max_loss_percent="5.5")
+        stage.update(version=4, profit_target_percent="8", max_loss_percent="5.5")
         stage.update(daily_loss_percent="2.5", min_trading_days=3)
-        lite(data)["prices_cents"][1] = 4_900
+        lite(data)["prices_cents"][0] = 4_900
         data["trading"]["leverage"]["forex"] = "50"
         data["access"]["country_gating"] = True
 
     policy = parse_policy(edited(change))
     s1 = policy.product("lite").rule_sets[0]
-    assert s1.rsv_id == "lite-s1-v3"
+    assert s1.rsv_id == "lite-s1-v4"
     assert (s1.profit_target, s1.max_loss, s1.daily_loss, s1.min_trading_days) == (
         Fraction(8, 100),
         Fraction(55, 1000),
@@ -248,11 +254,11 @@ def test_no_changes_for_the_policy_a_journal_started_with() -> None:
 
 def test_a_new_rule_set_version_is_published() -> None:
     def change(data: dict[str, Any]) -> None:
-        lite(data)["stages"][0].update(version=3, daily_loss_percent="4")
+        lite(data)["stages"][0].update(version=4, daily_loss_percent="4")
 
     policy = parse_policy(edited(change))
     (item,) = policy_changes(policy, machine(), T0)
-    assert isinstance(item, AddRuleSet) and item.rule_set.rsv_id == "lite-s1-v3"
+    assert isinstance(item, AddRuleSet) and item.rule_set.rsv_id == "lite-s1-v4"
 
 
 def test_changed_numbers_without_a_new_version_are_refused() -> None:
@@ -302,7 +308,7 @@ class Driver:
 
 def opened() -> Driver:
     d = Driver()
-    d.send(OpenAccount("A", "lite-s1-v2", 10_000_000, T0))
+    d.send(OpenAccount("A", "lite-s1-v3", 10_000_000, T0))
     d.send(PriceUpdate("XAU/USD", 1, T0, T0, 330_000))
     return d
 

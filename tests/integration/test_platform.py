@@ -90,7 +90,7 @@ def test_trade_through_the_api_and_restart(
         try:
             t0 = now_ms()
             async with engine(config):
-                await writer.publish(OpenAccount("A", "lite-s1-v2", 10_000_000, t0))
+                await writer.publish(OpenAccount("A", "lite-s1-v3", 10_000_000, t0))
                 await writer.publish(PriceUpdate("EUR/USD", 1, t0, t0, 110_000))
                 await eventually(lambda: live.account("A"))
                 order = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 100}
@@ -188,7 +188,7 @@ def test_trailing_orders_work_through_the_api_and_survive_a_restart(
         try:
             t0 = now_ms()
             async with engine(config):
-                await writer.publish(OpenAccount("A", "lite-s1-v2", 10_000_000, t0))
+                await writer.publish(OpenAccount("A", "lite-s1-v3", 10_000_000, t0))
                 await writer.publish(PriceUpdate("EUR/USD", 1, t0, t0, 110_000))
                 await eventually(lambda: live.account("A"))
                 order = {"symbol": "EUR/USD", "side": "buy", "type": "market", "volume": 100}
@@ -309,12 +309,12 @@ def test_policy_edits_reach_the_engine_on_restart(
     )
     shipped = load_policy()
     raw = tomllib.loads(DEFAULT_POLICY.read_text("utf-8"))
-    raw["products"][0]["stages"][0].update(version=3, daily_loss_percent="4")
+    raw["products"][0]["stages"][0].update(version=4, daily_loss_percent="4")
     raw["trading"]["config_version"] = "trading-v8"
     raw["trading"]["leverage"]["metal"] = "25"
     edited = parse_policy(raw)
     same_version = copy.deepcopy(raw)
-    same_version["products"][0]["stages"][0].update(version=2)
+    same_version["products"][0]["stages"][0].update(version=3)
 
     async def life(policy: Policy) -> Runner:
         stop = asyncio.Event()
@@ -333,7 +333,7 @@ def test_policy_edits_reach_the_engine_on_restart(
             assert "lite-s1-v3" in second.machine.rule_sets
             assert engine.config_version == "trading-v8"
             assert engine.instruments["XAU/USD"].leverage == 25
-            assert second.machine.rule_sets["lite-s1-v2"].daily_loss == Fraction(3, 100)
+            assert second.machine.rule_sets["lite-s1-v3"].daily_loss == Fraction(3, 100)
             with pytest.raises(PolicyError, match="raise the stage's version"):
                 await life(parse_policy(same_version))
         finally:
@@ -382,7 +382,7 @@ def test_prices_become_bars(database_url: str, valkey_url: str, pg_schema: str) 
                     await writer.publish(PriceUpdate("EUR/USD", seq, ts, ts, price))
                 await writer.publish(PriceUpdate("XAU/USD", 1, m0 + 2_000, m0 + 2_000, 400_000))
                 gateway = Gateway(writer, pool, config.schema)
-                last = await writer.publish(OpenAccount("A", "lite-s1-v2", 1_000_000, now))
+                last = await writer.publish(OpenAccount("A", "lite-s1-v3", 1_000_000, now))
                 assert (await gateway.outcome(last, 5)).seq is not None
             projector = await Projector.connect(database_url, config.schema, config.read_schema)
             try:

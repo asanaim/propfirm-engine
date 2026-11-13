@@ -90,7 +90,7 @@ def test_bad_settings_are_refused(env: dict[str, str]) -> None:
 def test_development_setup_has_every_symbol_and_product() -> None:
     setup = development_setup()
     assert len(setup.instruments) == 30
-    assert {r.rsv_id for r in setup.rule_sets} >= {"lite-s1-v2", "instant-funded-v2"}
+    assert {r.rsv_id for r in setup.rule_sets} >= {"lite-s1-v3", "instant-funded-v2"}
     assert setup.trade_blocks == () and setup.news_windows == ()
 
 
@@ -377,10 +377,10 @@ def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
     products = call(FakeGateway(), "GET", "/catalogue", policy=policy, user=None).json()
     lite = products[0]
     assert (lite["id"], lite["name"], lite["profit_split_percent"]) == ("lite", "Lite", "80")
-    assert lite["sizes"][1] == {"size_cents": 1_000_000, "price_cents": 4_400}
+    assert lite["sizes"][0] == {"size_cents": 1_000_000, "price_cents": 5_500}
     assert lite["stages"][0] == {
         "stage": "s1",
-        "rsv_id": "lite-s1-v2",
+        "rsv_id": "lite-s1-v3",
         "profit_target_percent": "6",
         "max_loss_percent": "6",
         "max_loss_kind": "static",

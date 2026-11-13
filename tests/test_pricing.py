@@ -23,9 +23,9 @@ TEN = Fraction(1, 10)
 def test_first_account_pays_list_price() -> None:
     quote = price(LITE, 1_000_000, prior_accounts=0)
     assert (quote.list_price_cents, quote.discount_kind, quote.price_cents) == (
-        4_400,
+        5_500,
         DiscountKind.NONE,
-        4_400,
+        5_500,
     )
 
 
@@ -33,8 +33,8 @@ def test_code_on_a_first_account() -> None:
     quote = price(LITE, 1_000_000, 0, TEN)
     assert (quote.discount_kind, quote.discount_cents, quote.price_cents) == (
         DiscountKind.CODE,
-        440,
-        3_960,
+        550,
+        4_950,
     )
 
 
@@ -75,8 +75,8 @@ def test_repeat_account_discounts(product: object, prior: int, share: Fraction) 
 
 def test_discount_rounds_down_to_the_cent() -> None:
     assert discount_floor(999, Fraction(15, 100)) == 149  # 149.85
-    quote = price(REPEATING, 20_000_000, 2)  # 15% of $639.00 = $95.85 exactly
-    assert (quote.discount_cents, quote.price_cents) == (9_585, 54_315)
+    quote = price(REPEATING, 20_000_000, 2)  # 15% of $779.00 = $116.85 exactly
+    assert (quote.discount_cents, quote.price_cents) == (11_685, 66_215)
 
 
 def test_unknown_size_is_refused() -> None:

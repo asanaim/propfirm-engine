@@ -16,7 +16,7 @@ import pytest
 from propfirm.journal.machine import CODEC
 from propfirm.policy import PolicyError, parse_policy, rule_set_view
 from propfirm.rules.events import AccountStatus
-from propfirm.rules.products import KIND_WORDS, PRODUCTS, MaxLossKind, RuleSet, max_loss_words
+from propfirm.rules.products import KIND_WORDS, RULESETS, MaxLossKind, RuleSet, max_loss_words
 from propfirm.settings.overlay import from_json, limits_rule_set, stage_limits, to_json
 from propfirm.trading.orders import Side
 from tests.rules_rig import RulesRig, ny
@@ -28,7 +28,7 @@ MONDAY = ny(2026, 11, 16, 10)
 RESET = ny(2026, 11, 16, 17)  # Monday's 17:00 New York reset
 TUESDAY = ny(2026, 11, 17, 10)
 
-ONE_STEP = PRODUCTS["one-step"][0]
+ONE_STEP = RULESETS["one-step-s1-v2"]  # static: the base the switches are tried on
 
 
 def rules(kind: MaxLossKind, *, locks: bool = True, restarts: bool = True) -> RuleSet:
@@ -182,7 +182,8 @@ def test_policy_file_takes_the_new_kind_and_switch() -> None:
 
 def test_policy_file_refuses_a_switch_on_a_static_floor() -> None:
     def change(data: dict[str, Any]) -> None:
-        _one_step_stage(data)["floor_locks_at_start"] = False
+        lite = next(p for p in data["products"] if p["id"] == "lite")
+        lite["stages"][0]["floor_locks_at_start"] = False  # Lite is static
 
     with pytest.raises(PolicyError, match="could rise"):
         parse_policy(edited(change))

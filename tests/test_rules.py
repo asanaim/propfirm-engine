@@ -13,8 +13,8 @@ from propfirm.trading.orders import Side
 from tests.engine_rig import USD_100K, one, rejected
 from tests.rules_rig import RulesRig, ny
 
-LITE_S1 = PRODUCTS["lite"][0]
-ONE_STEP_S1 = PRODUCTS["one-step"][0]
+LITE_S1 = RULESETS["lite-s1-v2"]  # sold before product line v1: has a 5K size
+ONE_STEP_S1 = RULESETS["one-step-s1-v2"]  # static 6 % (before line v1)
 INSTANT = PRODUCTS["instant"][0]
 WEEK = [ny(2026, 10, d, 10) for d in (19, 20, 21, 22, 23, 26, 27)]  # Mon-Fri, Mon, Tue
 
@@ -65,6 +65,12 @@ def test_catalogue_matches_confirmed_configuration() -> None:
         "one-step-funded-v1": None,
         "instant-funded-v1": None,  # retired 12 Nov 2026; open accounts keep it
         "instant-funded-v2": None,
+        # product line version 1 (13 Nov 2026); the versions above it are retired
+        "lite-s1-v3": Fraction(6, 100),
+        "lite-s2-v3": Fraction(6, 100),
+        "lite-funded-v2": None,
+        "one-step-s1-v3": Fraction(10, 100),
+        "one-step-funded-v2": None,
     }
     assert [s.stage for s in PRODUCTS["lite"]] == [Stage.S1, Stage.S2, Stage.FUNDED]
     assert INSTANT.max_loss_kind is MaxLossKind.TRAILING
@@ -73,9 +79,15 @@ def test_catalogue_matches_confirmed_configuration() -> None:
     assert {r.rsv_id for r in RULESETS.values() if r.consistency} == {
         "one-step-s1-v2",
         "one-step-funded-v1",
+        "one-step-s1-v3",
+        "one-step-funded-v2",
         "instant-funded-v1",
         "instant-funded-v2",
     }
+    on_sale = PRODUCTS["one-step"]
+    assert all(r.max_loss_kind is MaxLossKind.TRAILING_EOD for r in on_sale)  # D-13.20
+    assert not any(r.floor_locks_at_start for r in on_sale)  # FTMO: no lock
+    assert all(500_000 not in r.sizes_cents for r in (*PRODUCTS["lite"], *on_sale))  # no 5K
     restart = {r.rsv_id for r in RULESETS.values() if not r.floor_restarts_after_payout}
     assert restart == {"instant-funded-v2"}  # D1: only the new Instant keeps its floor
 
@@ -163,7 +175,7 @@ def test_one_step_needs_consistency_best_day_at_most_half() -> None:
 
 
 def test_funded_stages_never_pass() -> None:
-    rig = RulesRig(PRODUCTS["lite"][2], USD_100K, WEEK[0])
+    rig = RulesRig(RULESETS["lite-funded-v1"], USD_100K, WEEK[0])
     for day in WEEK[:5]:
         assert not passed(rig.round_trip(500, day))
     assert rig.sup.status("A") is AccountStatus.ACTIVE

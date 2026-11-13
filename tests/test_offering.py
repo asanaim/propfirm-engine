@@ -94,10 +94,11 @@ def test_switching_sizes_through_the_api() -> None:
     body = {"products_off": ["classic"], "sizes_off": [500_000], "reason": "no 5K"}
     put = api("PUT", "/admin/offering", body, user="admin-1", **kw)
     assert put.status_code == 200, put.text
-    assert 500_000 in [s["size_cents"] for s in api("GET", "/catalogue", **kw).json()[0]["sizes"]]
+    instant = api("GET", "/catalogue", **kw).json()[-1]  # the only 5K left (line v1)
+    assert 500_000 in [s["size_cents"] for s in instant["sizes"]]
     _approve(kw, put.json()["proposal"]["id"])
-    lite = api("GET", "/catalogue", signed_in=False, **kw).json()[0]
-    assert 500_000 not in [s["size_cents"] for s in lite["sizes"]]
+    instant = api("GET", "/catalogue", signed_in=False, **kw).json()[-1]
+    assert 500_000 not in [s["size_cents"] for s in instant["sizes"]]
     bad = {"products_off": [], "sizes_off": [40_000_000], "reason": "x"}
     assert api("PUT", "/admin/offering", bad, user="admin-1", **kw).status_code == 422
     trader = api("PUT", "/admin/offering", body, roles=("trader",), user="trader-1", **kw)

@@ -104,7 +104,7 @@ def test_a_pass_opens_the_next_stage_and_the_last_waits_for_review(
             assert (s2["acc"], s2["stage"], s2["rsv_id"], s2["ord"], s2["progression"]) == (
                 "ACC00000002",
                 "s2",
-                "lite-s2-v2",
+                "lite-s2-v3",
                 order["ord"],
                 "PRG00000001",
             )
@@ -147,7 +147,7 @@ def test_a_pass_opens_the_next_stage_and_the_last_waits_for_review(
             assert [h["kind"] for h in detail["history"]] == ["created", "proposed", "approved"]
             created = detail["history"][0]["detail"]
             assert (created["from_rsv_id"], created["trading_days"], created["to_stage"]) == (
-                "lite-s2-v2",
+                "lite-s2-v3",
                 1,
                 "funded",
             )
