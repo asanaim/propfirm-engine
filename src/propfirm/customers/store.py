@@ -560,6 +560,15 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         INSERT INTO {s}.break_cursor (id, seq) VALUES (1, 0);
         """,
     ),
+    (
+        11,
+        """
+        -- owner decision, 14 Nov 2026 (D-14.1): automatic emails only for
+        -- serious matters; a market-break closure is not one, so its sweep is
+        -- removed. The notice kind stays allowed for any row already written.
+        DROP TABLE {s}.break_cursor;
+        """,
+    ),
 )
 
 

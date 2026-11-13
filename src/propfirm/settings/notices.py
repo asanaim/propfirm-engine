@@ -83,42 +83,6 @@ EVENTS: Mapping[str, Event] = {
             "previous_wallet_line": "\n  Previous wallet: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
         },
     ),
-    "market_break_close": Event(
-        label="Trades closed before a market break (funded accounts)",
-        variables={
-            "full_name": "the customer's registered name",
-            "acc": "the trading account number",
-            "time": "when the trades were closed, in UTC",
-            "closed_lines": (
-                "one line per position closed and per pending order cancelled, "
-                "each starting on a new line"
-            ),
-        },
-        required=frozenset({"acc", "time", "closed_lines"}),
-        subject="Account {acc}: trades closed before the market break",
-        body="\n".join(
-            [
-                "Hello {full_name},",
-                "",
-                "Your funded account {acc} had trades open shortly before a market",
-                "closed for 2 hours or more (a weekend or a holiday). As the rules of",
-                "your account set out, they were closed automatically on {time}:",
-                "{closed_lines}",
-                "",
-                "This is not a rule breach and your account stays active. You can trade",
-                "again on these markets when they reopen. The trading history in your",
-                "account shows each closing price.",
-            ]
-        ),
-        sample={
-            "full_name": "Ada Trader",
-            "acc": "ACC00000001",
-            "time": "2026-11-20 21:55 UTC",
-            "closed_lines": (
-                "\n  EUR/USD buy 1.00 lot: closed, result -10.00 USD\n  Pending order o7: cancelled"
-            ),
-        },
-    ),
 }
 DEFAULT_WRAPPER = "{body}"
 

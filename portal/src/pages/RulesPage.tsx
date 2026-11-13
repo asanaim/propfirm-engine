@@ -115,7 +115,7 @@ export function RulesPage({ acc }: { acc: string }) {
               Before the market closes for 2 hours or more (the weekend, a
               holiday), open trades on that market are closed and pending orders
               cancelled a few minutes ahead, and no new trade opens until it
-              reopens. You are emailed what was closed; it is not a rule breach.
+              reopens. It is not a rule breach.
             </li>
           )}
           <li>

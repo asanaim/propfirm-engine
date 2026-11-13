@@ -201,8 +201,20 @@ Settings: `[trading.hours] flat_before_break_minutes = 5`, `long_break_minutes
 = 120`; per stage `flat_before_breaks`. Versions: trading-v8; lite-funded-v3,
 classic-funded-v2, one-step-funded-v3, instant-funded-v3 (accounts on the
 earlier versions keep them and are not bound). Owner decision, 13 Nov
-2026: an automatic close, not a breach, and the trader is emailed
-automatically: one email per account and closing, listing each position
-closed (symbol, side, lots, result) and each pending order cancelled
-(notification template `market_break_close`, editable under rule AC12).
-Status: built (step 1).
+2026: an automatic close, not a breach. The email first added for it
+(#101) is withdrawn by D-14.1: the closing shows in the trader's history
+and the rules page explains it. Status: built (step 1).
+
+D-14.1, automatic emails (owner decision, 14 Nov 2026). The firm emails a
+trader automatically only on serious matters, not on every event:
+- a rule violation or breach that ends or restricts an account;
+- a ban, a void or an account closed by staff;
+- payments: a purchase paid, a refund or chargeback, each payout stage
+  (approved, sent, denied or held);
+- a change of payout method or wallet, and other security changes
+  (already sent for the wallet).
+Routine events send no email: a market-break closing, a trade, a stop, a
+pass of an evaluation stage, a trading-day count. Each serious email is
+built with the feature that raises it, from a notification template
+(rule AC12). Supersedes the email of D-13.23; amends the step 6 line
+"notification events" to this list.
