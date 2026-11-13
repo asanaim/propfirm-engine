@@ -19,6 +19,7 @@ from typing import Any
 import asyncpg
 
 from propfirm.customers.four_eyes import SameProposer, next_event, open_proposal
+from propfirm.customers.notifications import insert_notice, pass_notice
 from propfirm.customers.progression import (
     PROGRESSION_KINDS,
     ProgressionEvent,
@@ -29,6 +30,7 @@ from propfirm.journal.machine import CODEC
 from propfirm.pgschema import Conn, check_schema
 from propfirm.rules.events import StagePassed
 from propfirm.rules.products import Stage
+from propfirm.settings.notices import Notices
 
 log = logging.getLogger(__name__)
 
@@ -86,10 +88,15 @@ class ProgressionStore:
     # --- passes from the journal ----------------------------------------------------
 
     async def record_passes(
-        self, plan: Callable[[AccountRecord], Plan], ts: int, limit: int = 500
+        self,
+        plan: Callable[[AccountRecord], Plan],
+        ts: int,
+        limit: int = 500,
+        notices: Notices | None = None,
     ) -> list[str]:
-        """Create a progression for each StagePassed after the cursor; return
-        the new PRG ids (none while another caller holds the cursor)."""
+        """Create a progression for each StagePassed after the cursor, and the
+        trader's email about it (D-14.1) in the same transaction; return the
+        new PRG ids (none while another caller holds the cursor)."""
         s, j = self._s, self._j
         created: list[str] = []
         async with self._pool.acquire() as conn, conn.transaction():
@@ -110,7 +117,7 @@ class ProgressionStore:
                 assert isinstance(events, tuple)
                 for event in events:
                     if isinstance(event, StagePassed):
-                        prg = await self._from_pass(conn, event, row["seq"], plan, ts)
+                        prg = await self._from_pass(conn, event, row["seq"], plan, ts, notices)
                         if prg is not None:
                             created.append(prg)
             if rows:
@@ -126,6 +133,7 @@ class ProgressionStore:
         seq: int,
         plan: Callable[[AccountRecord], Plan],
         ts: int,
+        notices: Notices | None = None,
     ) -> str | None:
         s = self._s
         row = await conn.fetchrow(f"SELECT * FROM {s}.accounts WHERE acc = $1", event.account_id)
@@ -172,6 +180,20 @@ class ProgressionStore:
         if decided.reason is not None:
             detail["reason"] = decided.reason
         await self._append(conn, prg, "created", ts, detail)
+        customer = await conn.fetchrow(
+            f"SELECT email, full_name FROM {s}.cif WHERE cif = $1", account.cif
+        )
+        if customer is not None:
+            notice = pass_notice(
+                customer["email"],
+                customer["full_name"],
+                account.acc,
+                account.stage,
+                to_stage,
+                event.ts,
+                notices,
+            )
+            await insert_notice(conn, s, account.cif, notice, ts, {"prg": prg, "acc": account.acc})
         return prg
 
     async def cursor(self) -> int:

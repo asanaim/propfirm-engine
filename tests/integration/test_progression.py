@@ -118,6 +118,16 @@ def test_a_pass_opens_the_next_stage_and_the_last_waits_for_review(
             await market.pass_stage("ACC00000002")
             assert await p.lifecycle.poll(now_ms()) == ["PRG00000002"]
             assert await p.lifecycle.advance(now_ms()) == 0  # funded: nothing opens
+            # D-14.1: each pass is emailed, once, with the next step
+            assert p.notifications is not None and p.mailer is not None
+            await p.notifications.advance(now_ms())
+            passes = [m for m in p.mailer.sent if m[1].startswith("You passed")]
+            assert [m[1] for m in passes] == [
+                f"You passed Stage 1 on account {s1}",
+                "You passed Stage 2 on account ACC00000002",
+            ]
+            assert "Stage 2 account opens after a short review" in passes[0][2]
+            assert "identity check and the trader agreement" in passes[1][2]
             waiting = (await p.call("GET", "/staff/progressions", "staff-1", roles=STAFF)).json()
             assert [(w["prg"], w["status"], w["to_stage"]) for w in waiting] == [
                 ("PRG00000002", "review", "funded")

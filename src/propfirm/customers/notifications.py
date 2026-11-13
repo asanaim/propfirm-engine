@@ -32,7 +32,7 @@ from propfirm.pgschema import Conn, check_schema
 from propfirm.settings.notices import Notices, utc_text
 
 log = logging.getLogger(__name__)
-NOTICE_KINDS = ("wallet_changed",)
+NOTICE_KINDS = ("wallet_changed", "stage_passed")
 RETRY_MS = 60_000  # a failed send is tried again after this
 TLS_MODES = ("starttls", "implicit")
 
@@ -64,6 +64,36 @@ def wallet_notice(
     }
     subject, body = (notices or Notices()).render("wallet_changed", values)
     return Notice("wallet_changed", email, subject, body)
+
+
+STAGE_NAMES = {"s1": "Stage 1", "s2": "Stage 2"}
+NEXT_STEPS = {
+    "s2": "Your Stage 2 account opens after a short review; it will appear in your dashboard.",
+    "funded": "Next come the identity check and the trader agreement for your funded "
+    "account; your dashboard takes you through both.",
+    None: "Our team reviews the result and will write to you about the next step.",
+}
+
+
+def pass_notice(
+    email: str,
+    full_name: str,
+    acc: str,
+    from_stage: str,
+    to_stage: str | None,
+    ts: int,
+    notices: Notices | None = None,
+) -> Notice:
+    """The email for an evaluation stage passed (D-14.1, 14 Nov 2026)."""
+    values = {
+        "full_name": full_name,
+        "acc": acc,
+        "stage": STAGE_NAMES.get(from_stage, from_stage),
+        "time": utc_text(ts),
+        "next_step": NEXT_STEPS.get(to_stage, NEXT_STEPS[None]),
+    }
+    subject, body = (notices or Notices()).render("stage_passed", values)
+    return Notice("stage_passed", email, subject, body)
 
 
 async def insert_notice(

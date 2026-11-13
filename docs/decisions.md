@@ -235,3 +235,9 @@ Affected symbols follow the instrument map (CURRENT_MAP, ftmo-1). The
 Swing add-on (step 2) will lift the rule per account. Evaluations and the
 earlier funded versions keep the earlier behaviour. The trader's email on
 the breach follows D-14.1 with the breach emails.
+
+D-14.1 amended (owner, 14 Nov 2026): an evaluation stage passed is emailed
+too (template `stage_passed`), with the next step: the Stage 2 account
+after a short review, or the identity check and the trader agreement for
+a funded account. Written to the outbox in the same transaction as the
+progression record, so a pass is never missed or emailed twice.
