@@ -9,7 +9,19 @@ import type { ICONS } from "./icons";
 
 export type IconKey = keyof typeof ICONS;
 
+/** The menu's sections (rule AC28: expandable groups), in menu order. */
+export const GROUPS = [
+  { key: "traders", label: "Traders" },
+  { key: "money", label: "Money" },
+  { key: "risk", label: "Risk" },
+  { key: "team", label: "Team" },
+  { key: "settings", label: "Settings" },
+] as const;
+export type GroupKey = (typeof GROUPS)[number]["key"];
+
 export interface Place {
+  /** The menu section it sits in; null: at the top, always in view. */
+  group: GroupKey | null;
   /** The screensFor key that unlocks it; null: every staff login. */
   screen: string | null;
   label: string;
@@ -19,30 +31,30 @@ export interface Place {
   keywords: string;
 }
 
-/** The menu's places, in menu order. */
+/** The menu's places, in menu order within each section. */
 export const PLACES: readonly Place[] = [
-  { screen: null, label: "My work", path: "/", icon: "work", keywords: "home to do todo dashboard duties training" },
-  { screen: "traders", label: "Traders", path: "/traders", icon: "traders", keywords: "customers clients users cif accounts kyc segments" },
-  { screen: "transactions", label: "Transactions and emails", path: "/transactions", icon: "transactions", keywords: "transaction log purchases payouts money export csv email log reports" },
-  { screen: "payouts", label: "Payouts", path: "/payouts", icon: "payouts", keywords: "withdrawals transactions money paid" },
-  { screen: "cases", label: "Cases", path: "/cases", icon: "cases", keywords: "blocks investigations rule breaches" },
-  { screen: "onboardings", label: "Identity reviews", path: "/onboardings", icon: "onboardings", keywords: "kyc onboarding identity documents" },
-  { screen: "progressions", label: "Funded reviews", path: "/progressions", icon: "progressions", keywords: "funded stage review passed" },
-  { screen: null, label: "Apprentice proposals", path: "/apprentice-proposals", icon: "apprenticeProposals", keywords: "apprentice training" },
-  { screen: null, label: "Notifications", path: "/notifications", icon: "notifications", keywords: "alerts messages inbox" },
-  { screen: "members", label: "Staff", path: "/members", icon: "members", keywords: "members people team employees" },
-  { screen: "grants", label: "Access requests", path: "/grants", icon: "grants", keywords: "grants permissions access" },
-  { screen: "cutoffs", label: "Leaver cut-offs", path: "/cutoffs", icon: "cutoffs", keywords: "leavers offboarding" },
-  { screen: "proposals", label: "Setting proposals", path: "/proposals", icon: "proposals", keywords: "approvals pending four eyes" },
-  { screen: "changes", label: "Setting changes", path: "/changes", icon: "changes", keywords: "history settings log" },
-  { screen: "settings", label: "System settings", path: "/settings", icon: "settings", keywords: "configuration hub preferences" },
-  { screen: "news", label: "News desk", path: "/news", icon: "news", keywords: "calendar economic events impact" },
-  { screen: "anomalies", label: "Anomaly report", path: "/anomalies", icon: "anomalies", keywords: "anomalies report unusual" },
-  { screen: "audit", label: "Security log", path: "/audit", icon: "audit", keywords: "audit trail log entries" },
-  { screen: "methods", label: "Payment methods", path: "/payment-methods", icon: "methods", keywords: "gateways deposits withdrawal methods charges" },
-  { screen: "site", label: "Website", path: "/site", icon: "site", keywords: "website content frontend sections hero" },
-  { screen: "templates", label: "Notification templates", path: "/notices", icon: "templates", keywords: "email templates wording wrapper messages" },
-  { screen: "policies", label: "Policy pages", path: "/policies", icon: "policies", keywords: "terms privacy policy legal" },
+  { group: null, screen: null, label: "My work", path: "/", icon: "work", keywords: "home to do todo dashboard duties training" },
+  { group: null, screen: null, label: "Notifications", path: "/notifications", icon: "notifications", keywords: "alerts messages inbox" },
+  { group: "traders", screen: "traders", label: "Traders", path: "/traders", icon: "traders", keywords: "customers clients users cif accounts kyc segments" },
+  { group: "traders", screen: "onboardings", label: "Identity reviews", path: "/onboardings", icon: "onboardings", keywords: "kyc onboarding identity documents" },
+  { group: "traders", screen: "progressions", label: "Funded reviews", path: "/progressions", icon: "progressions", keywords: "funded stage review passed" },
+  { group: "traders", screen: "cases", label: "Cases", path: "/cases", icon: "cases", keywords: "blocks investigations rule breaches" },
+  { group: "money", screen: "payouts", label: "Payouts", path: "/payouts", icon: "payouts", keywords: "withdrawals transactions money paid" },
+  { group: "money", screen: "transactions", label: "Transactions and emails", path: "/transactions", icon: "transactions", keywords: "transaction log purchases payouts money export csv email log reports" },
+  { group: "money", screen: "methods", label: "Payment methods", path: "/payment-methods", icon: "methods", keywords: "gateways deposits withdrawal methods charges" },
+  { group: "risk", screen: "news", label: "News desk", path: "/news", icon: "news", keywords: "calendar economic events impact" },
+  { group: "risk", screen: "anomalies", label: "Anomaly report", path: "/anomalies", icon: "anomalies", keywords: "anomalies report unusual" },
+  { group: "risk", screen: "audit", label: "Security log", path: "/audit", icon: "audit", keywords: "audit trail log entries" },
+  { group: "team", screen: "members", label: "Staff", path: "/members", icon: "members", keywords: "members people team employees" },
+  { group: "team", screen: "grants", label: "Access requests", path: "/grants", icon: "grants", keywords: "grants permissions access" },
+  { group: "team", screen: "cutoffs", label: "Leaver cut-offs", path: "/cutoffs", icon: "cutoffs", keywords: "leavers offboarding" },
+  { group: "team", screen: null, label: "Apprentice proposals", path: "/apprentice-proposals", icon: "apprenticeProposals", keywords: "apprentice training" },
+  { group: "settings", screen: "settings", label: "System settings", path: "/settings", icon: "settings", keywords: "configuration hub preferences" },
+  { group: "settings", screen: "proposals", label: "Setting proposals", path: "/proposals", icon: "proposals", keywords: "approvals pending four eyes" },
+  { group: "settings", screen: "changes", label: "Setting changes", path: "/changes", icon: "changes", keywords: "history settings log" },
+  { group: "settings", screen: "site", label: "Website", path: "/site", icon: "site", keywords: "website content frontend sections hero" },
+  { group: "settings", screen: "templates", label: "Notification templates", path: "/notices", icon: "templates", keywords: "email templates wording wrapper messages" },
+  { group: "settings", screen: "policies", label: "Policy pages", path: "/policies", icon: "policies", keywords: "terms privacy policy legal" },
 ];
 
 export type AreaState = "open" | "fixed" | "planned";

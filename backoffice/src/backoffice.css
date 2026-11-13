@@ -488,3 +488,42 @@ pre.json {
     grid-template-columns: 1fr;
   }
 }
+
+/* menu sections (rule AC28): a quiet heading that opens and closes */
+.menu-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin: 10px 0 2px;
+  padding: 6px 16px;
+  border: 0;
+  background: none;
+  color: var(--muted, #6b7280);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.menu-group-head:hover,
+.menu-group-head:focus-visible,
+.menu-group-here {
+  color: inherit;
+}
+
+.menu-group-chevron {
+  transition: transform 160ms ease;
+}
+
+.menu-group-head[aria-expanded="false"] .menu-group-chevron {
+  transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-group-chevron {
+    transition: none;
+  }
+}
