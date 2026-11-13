@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from propfirm.service.feeder import now_ms
 from propfirm.staff.directory import Owner
 from tests.integration.test_customers import Platform, platform
 
@@ -93,5 +94,45 @@ def test_duties_notifications_and_messages(
             assert ("grant", grt) in {(t["kind"], t["ref"]) for t in todo}
             mine = await ok(p, "GET", "/staff/me/todo", "kc-owner-a", roles=())
             assert grt not in {t["ref"] for t in mine}  # never one's own request
+
+    asyncio.run(scenario())
+
+
+def test_employees_keep_their_own_notes(database_url: str, valkey_url: str, pg_schema: str) -> None:
+    """Own to-do notes (salvaged from pull request 50): only the writer sees
+    and ticks them; a done note stays on record and leaves the list."""
+
+    async def scenario() -> None:
+        rig = platform(database_url, valkey_url, pg_schema, start_engine=False, owners=OWNERS)
+        async with rig as p:
+            due = now_ms() + 86_400_000
+            note = {"text": "Call the auditor", "due_at": due}
+            added = await p.call("POST", "/staff/me/notes", "kc-owner-a", note, ())
+            assert added.status_code == 201, added.text
+            note_id = added.json()["id"]
+            todo = (await p.call("GET", "/staff/me", "kc-owner-a", None, ())).json()["todo"]
+            mine = [t for t in todo if t["kind"] == "note"]
+            assert [(t["ref"], t["title"], t["due_at"]) for t in mine] == [
+                (str(note_id), "Call the auditor", due)
+            ]
+            # another employee neither sees nor ticks it
+            theirs = (await p.call("GET", "/staff/me", "kc-owner-b", None, ())).json()["todo"]
+            assert all(t["kind"] != "note" for t in theirs)
+            url = f"/staff/me/notes/{note_id}/done"
+            assert (await p.call("POST", url, "kc-owner-b", None, ())).status_code == 404
+            assert (await p.call("POST", url, "kc-owner-a", None, ())).status_code == 200
+            assert (await p.call("POST", url, "kc-owner-a", None, ())).status_code == 404
+            todo = (await p.call("GET", "/staff/me", "kc-owner-a", None, ())).json()["todo"]
+            assert all(t["kind"] != "note" for t in todo)
+            past = {"text": "x", "due_at": 1}
+            assert (
+                await p.call("POST", "/staff/me/notes", "kc-owner-a", past, ())
+            ).status_code == 422
+            blank = {"text": "  "}
+            assert (
+                await p.call("POST", "/staff/me/notes", "kc-owner-a", blank, ())
+            ).status_code == 422
+            trader = await p.call("POST", "/staff/me/notes", body={"text": "trader"})
+            assert trader.status_code == 403
 
     asyncio.run(scenario())

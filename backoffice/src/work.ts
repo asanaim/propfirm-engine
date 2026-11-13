@@ -15,6 +15,7 @@ export function areaOf(kind: string): string {
   if (kind === "settings_proposal") return "Settings";
   if (kind === "training") return "Training";
   if (kind === "duties") return "Duties";
+  if (kind === "note") return "My notes";
   return "Staff";
 }
 

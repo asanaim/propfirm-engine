@@ -43,6 +43,7 @@ import {
   Boxes,
   ArrowLeftRight,
   Server,
+  StickyNote,
 } from "lucide-react";
 
 export const STROKE = 1.75;
@@ -83,6 +84,7 @@ export const ICONS = {
   training: BookOpen,
   duties: ClipboardList,
   staff: UserCog,
+  notes: StickyNote,
   next: ChevronRight,
   search: Search,
   // settings hub cards (rule AC05)
