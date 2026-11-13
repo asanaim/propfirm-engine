@@ -347,7 +347,7 @@ main:focus {
   gap: var(--space-5);
 }
 
-/* the challenges side by side: four in a row on a laptop, two on a tablet */
+/* the challenges side by side: up to four in a row on a laptop, centred; two on a tablet */
 .grid.products {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
@@ -360,8 +360,11 @@ main:focus {
 }
 
 @media (min-width: 1100px) {
+  /* a quarter of the row each; with fewer than four on sale (a product
+     switched off) the empty tracks collapse and the row sits in the middle */
   .grid.products {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, calc((100% - 3 * var(--space-4)) / 4));
+    justify-content: center;
   }
 
   .products .card {
