@@ -16,7 +16,11 @@ Every input goes through `_run`:
 Floors (all in integer cents, compared at-or-below):
 - daily floor = daily base - daily limit
 - static max floor = initial balance - max loss
-- trailing max floor = min(high-water mark - max loss, initial balance)
+- trailing max floor = high-water mark - max loss, capped at the initial
+  balance when the rule set locks the floor there (`floor_locks_at_start`).
+  Intraday trailing: the high-water mark follows equity on every check and
+  at each reset. End-of-day trailing: it follows the balance at each 17:00
+  New York reset only.
   A payout lowers the high-water mark by the amount paid (the floor
   restarts) only on rule sets with `floor_restarts_after_payout`.
 
@@ -471,8 +475,10 @@ class RuleSupervisor:
             self._day = boundary
             for state in self._active():
                 equity = self._engine.equity(state.account_id)
-                state.day_base = max(self._engine.balance(state.account_id), equity)
-                state.high_water = max(state.high_water, equity)
+                balance = self._engine.balance(state.account_id)
+                state.day_base = max(balance, equity)
+                eod = state.rules.max_loss_kind is MaxLossKind.TRAILING_EOD
+                state.high_water = max(state.high_water, balance if eod else equity)
                 events.append(
                     DayStarted(
                         boundary,
@@ -527,7 +533,8 @@ class RuleSupervisor:
 
     def _check(self, state: _State) -> list[Event]:
         equity = self._engine.equity(state.account_id)
-        state.high_water = max(state.high_water, equity)
+        if state.rules.max_loss_kind is not MaxLossKind.TRAILING_EOD:
+            state.high_water = max(state.high_water, equity)  # end of day: at the reset only
         if state.rules.tie_rule is TieRule.PASS_WINS:
             passed = self._pass(state, equity)
             return passed or self._breach(state, equity)
@@ -544,7 +551,10 @@ class RuleSupervisor:
         loss = state.max_loss
         if state.rules.max_loss_kind is MaxLossKind.STATIC:
             return state.initial_balance - loss
-        return min(state.high_water - loss, state.initial_balance)
+        floor = state.high_water - loss
+        if state.rules.floor_locks_at_start:
+            return min(floor, state.initial_balance)
+        return floor
 
     def _breach(self, state: _State, equity: int) -> list[Event]:
         daily, maximum = self._daily_floor(state), self._max_floor(state)

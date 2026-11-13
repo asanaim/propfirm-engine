@@ -95,6 +95,10 @@ class StageLimits:
     daily_loss: Fraction
     max_loss: Fraction
     max_loss_kind: MaxLossKind
+    # trailing kinds only; None keeps the current stage's switch (and older
+    # records, which had neither); a static kind always sets both to True
+    floor_restarts_after_payout: bool | None = None
+    floor_locks_at_start: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +180,23 @@ def limits_rule_set(base: RuleSet, limits: StageLimits, change_id: int) -> RuleS
         daily_loss=limits.daily_loss,
         max_loss=limits.max_loss,
         max_loss_kind=limits.max_loss_kind,
+        floor_restarts_after_payout=_switch(
+            limits.max_loss_kind,
+            limits.floor_restarts_after_payout,
+            base.floor_restarts_after_payout,
+        ),
+        floor_locks_at_start=_switch(
+            limits.max_loss_kind, limits.floor_locks_at_start, base.floor_locks_at_start
+        ),
     )
+
+
+def _switch(kind: MaxLossKind, chosen: bool | None, current: bool) -> bool:
+    """A trailing floor's switch: as chosen, else as it was; always True
+    (the only valid value) for a static floor."""
+    if not kind.trails:
+        return True
+    return current if chosen is None else chosen
 
 
 def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
@@ -318,7 +338,7 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
                 "blocked_countries": sorted(setting.blocked_countries),
             }
         case StageLimits():
-            return STAGE_LIMITS, {
+            value: dict[str, Any] = {
                 "product_id": setting.product_id,
                 "stage": setting.stage.value,
                 "profit_target_percent": percent_text(setting.profit_target),
@@ -326,6 +346,12 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
                 "max_loss_percent": percent_text(setting.max_loss),
                 "max_loss_kind": setting.max_loss_kind.value,
             }
+            # the trailing switches only when chosen: a record without them
+            # keeps the form it had before they existed
+            for name in ("floor_restarts_after_payout", "floor_locks_at_start"):
+                if (switch := getattr(setting, name)) is not None:
+                    value[name] = switch
+            return STAGE_LIMITS, value
         case StandIn():
             return STAND_IN, {"subject": setting.subject, "until": setting.until}
         case SiteSection():
@@ -362,6 +388,8 @@ def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
             value["daily_loss_percent"],
             value["max_loss_percent"],
             value["max_loss_kind"],
+            value.get("floor_restarts_after_payout"),
+            value.get("floor_locks_at_start"),
         )
     if kind == STAND_IN:
         subject, until = value["subject"], value["until"]
@@ -399,6 +427,8 @@ def stage_limits(
     daily_loss_percent: str,
     max_loss_percent: str,
     max_loss_kind: str,
+    floor_restarts_after_payout: bool | None = None,
+    floor_locks_at_start: bool | None = None,
 ) -> StageLimits:
     """Limits from their text form; PolicyError for a malformed value."""
     try:
@@ -408,7 +438,7 @@ def stage_limits(
     try:
         kind = MaxLossKind(max_loss_kind)
     except ValueError:
-        raise PolicyError("max_loss_kind must be static or trailing") from None
+        raise PolicyError("max_loss_kind must be static, trailing or trailing_eod") from None
     target = (
         None
         if profit_target_percent is None
@@ -417,4 +447,21 @@ def stage_limits(
     daily = parse_percent(daily_loss_percent, "daily_loss_percent")
     maximum = parse_percent(max_loss_percent, "max_loss_percent")
     assert daily is not None and maximum is not None
-    return StageLimits(product_id, stage_value, target, daily, maximum, kind)
+    for name, switch in (
+        ("floor_restarts_after_payout", floor_restarts_after_payout),
+        ("floor_locks_at_start", floor_locks_at_start),
+    ):
+        if switch is not None and not isinstance(switch, bool):
+            raise PolicyError(f"{name} must be true, false or null")
+        if switch is False and not kind.trails:
+            raise PolicyError(f"{name} applies to a trailing maximum loss only")
+    return StageLimits(
+        product_id,
+        stage_value,
+        target,
+        daily,
+        maximum,
+        kind,
+        floor_restarts_after_payout,
+        floor_locks_at_start,
+    )

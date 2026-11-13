@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from propfirm.policy import Policy, ProductPolicy, percent_text
-from propfirm.rules.products import MaxLossKind, RuleSet
+from propfirm.rules.products import RuleSet, max_loss_words
 
 ONBOARDING_KINDS = (
     "created",
@@ -268,7 +268,7 @@ def render_contract(
         "allocation_usd": _usd(size_cents),
         "rsv_id": rule_set.rsv_id,
         "max_loss_percent": percent_text(rule_set.max_loss),
-        "max_loss_kind": "trailing" if rule_set.max_loss_kind is MaxLossKind.TRAILING else "static",
+        "max_loss_kind": max_loss_words(rule_set),
         "daily_loss_percent": percent_text(rule_set.daily_loss),
         "consistency": "none"
         if rule_set.consistency is None

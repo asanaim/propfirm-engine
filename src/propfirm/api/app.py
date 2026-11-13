@@ -133,6 +133,7 @@ from propfirm.policy import (
 from propfirm.rules.calendar import Calendar
 from propfirm.rules.clock import NEW_YORK_17
 from propfirm.rules.news import EventScope
+from propfirm.rules.products import KIND_WORDS
 from propfirm.seo import (
     ProductText,
     body_html,
@@ -669,7 +670,10 @@ class StageLimitsBody(_Body):
     profit_target_percent: Percent | None  # null: no target (funded stages)
     daily_loss_percent: Percent
     max_loss_percent: Percent  # the drawdown limit
-    max_loss_kind: Literal["static", "trailing"]
+    max_loss_kind: Literal["static", "trailing", "trailing_eod"]
+    # trailing kinds only; null keeps the stage's current switch
+    floor_restarts_after_payout: bool | None = None
+    floor_locks_at_start: bool | None = None
     reason: Reason
 
 
@@ -2807,6 +2811,8 @@ def create_app(
                 body.daily_loss_percent,
                 body.max_loss_percent,
                 body.max_loss_kind,
+                body.floor_restarts_after_payout,
+                body.floor_locks_at_start,
             )
             if (await _staff_policy(deps)).settings_need_second_admin:
                 return JSONResponse(
@@ -3148,7 +3154,7 @@ def create_app(
                 if first.profit_target is None
                 else f"{percent_text(first.profit_target)}% profit target"
             )
-            kind = "trailing " if first.max_loss_kind.value == "trailing" else ""
+            kind = KIND_WORDS[first.max_loss_kind]
             rules = (
                 f"{target}, {percent_text(first.daily_loss)}% daily loss, "
                 f"{percent_text(first.max_loss)}% {kind}maximum loss"

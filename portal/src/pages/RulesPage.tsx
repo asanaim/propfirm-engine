@@ -2,6 +2,7 @@ import type { Stage } from "../api/types";
 import { useAccountStream } from "../api/useAccountStream";
 import { Problem } from "../components/Problem";
 import { Card, Loading } from "../components/ui";
+import { lossFloorText, lossKindLabel } from "../lib/lossLimit";
 import { formatCents, formatPercent } from "../lib/money";
 import { Link } from "../router";
 import { AccountTabs } from "./AccountPage";
@@ -43,7 +44,7 @@ export function RulesPage({ acc }: { acc: string }) {
           </dd>
           <dt>Maximum loss</dt>
           <dd>
-            {formatPercent(r.max_loss_percent)} ({r.max_loss_kind}): {formatCents(a.max_loss_limit_cents)}
+            {formatPercent(r.max_loss_percent)} ({lossKindLabel(r.max_loss_kind)}): {formatCents(a.max_loss_limit_cents)}
           </dd>
           <dt>Minimum trading days</dt>
           <dd>{r.min_trading_days}</dd>
@@ -65,14 +66,7 @@ export function RulesPage({ acc }: { acc: string }) {
             17:00 itself.
           </li>
           <li>
-            Maximum loss ({r.max_loss_kind}):{" "}
-            {r.max_loss_kind === "static"
-              ? "the account is breached when equity falls to or below the starting balance minus the maximum loss."
-              : "the floor follows the highest equity reached, minus the maximum loss, and never rises above the starting balance."}
-            {r.max_loss_kind === "trailing" &&
-              (r.floor_restarts_after_payout === false
-                ? " A payout does not move the floor down again: once it reaches the starting balance it stays there, so a payout must leave the account above it."
-                : " After a payout the floor is set again from the new balance.")}
+            Maximum loss ({lossKindLabel(r.max_loss_kind)}): {lossFloorText(r)}
           </li>
           {a.target_balance_cents !== null && (
             <li>
