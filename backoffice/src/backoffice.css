@@ -453,15 +453,19 @@ pre.json {
 }
 
 /* each new page rises in softly; the menu and top bar stay still */
+/* opacity only: nothing moves under the pointer while a page arrives */
 .page-fade {
-  animation: page-fade-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: page-fade-in 140ms ease-out both;
 }
 
 @keyframes page-fade-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
   }
+}
+
+.page-loading {
+  min-height: 60vh;
 }
 
 @media (prefers-reduced-motion: reduce) {

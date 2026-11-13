@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { config } from "../config";
 import { PolicyGate, PolicyLinks } from "../pages/PolicyPages";
 import { Link, usePath } from "../router";
-import { MaintenanceBanner, useSiteStatus } from "./SiteStatus";
+import { FooterContact, MaintenanceBanner, useSiteStatus } from "./SiteStatus";
 
 type Theme = "light" | "dark";
 const THEME_KEY = "portal-theme";
@@ -131,6 +131,7 @@ export function Layout({ children }: { children: ReactNode }) {
       </main>
       <footer className="footer">
         <p>Trading on this platform is simulated. Nothing here is investment advice.</p>
+        <FooterContact contact={site.contact} />
         <p>
           <PolicyLinks />
           <Link href="/notices">Open-source notices</Link>

@@ -1,12 +1,15 @@
 import { Box, useTheme } from "@mui/material";
-import { type ReactNode, Suspense, useEffect } from "react";
+import { type ReactNode, Suspense, useEffect, useState } from "react";
 import { AppBar, Layout as RaLayout, TitlePortal } from "react-admin";
 import { useLocation } from "react-router-dom";
 import { CommandSearch } from "./CommandSearch";
+import { preloadScreens } from "./lazyPage";
 import { Menu } from "./Menu";
+import { NotificationBell } from "./NotificationBell";
 
 /** The top bar: the pipridge logo (the reverse logo: the bar is ink in both
-themes), "Back office", the page's title, then the Ctrl+K search (AC06). */
+themes), "Back office", the page's title, the Ctrl+K search (AC06), then
+the notifications bell beside the account button. */
 export function BrandBar() {
   return (
     <AppBar color="inherit" className="brand-bar">
@@ -18,6 +21,7 @@ export function BrandBar() {
       </Box>
       <TitlePortal variant="h6" className="brand-bar-title" />
       <CommandSearch />
+      <NotificationBell />
     </AppBar>
   );
 }
@@ -31,17 +35,37 @@ export function useThemeMark(): void {
   }, [mode]);
 }
 
+/** Shown only when a screen takes longer than a moment to arrive, so a
+fast change never flashes it; it keeps the page's height. */
+export function PageWait() {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setShown(true);
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, []);
+  return (
+    <p className="page-loading" aria-busy="true" style={{ visibility: shown ? "visible" : "hidden" }}>
+      Loading…
+    </p>
+  );
+}
+
 export function Layout({ children }: { children: ReactNode }) {
   useThemeMark();
   const { pathname } = useLocation();
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
+  useEffect(() => preloadScreens(), []);
   return (
     <RaLayout menu={Menu} appBar={BrandBar}>
       {/* keyed by the page, so each new page fades in (still for reduced motion) */}
       <div key={pathname} className="page-fade">
-        <Suspense fallback={<p className="page-loading">Loading…</p>}>{children}</Suspense>
+        <Suspense fallback={<PageWait />}>{children}</Suspense>
       </div>
     </RaLayout>
   );
