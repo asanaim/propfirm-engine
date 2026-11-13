@@ -329,6 +329,7 @@ def rule_set_view(r: RuleSet) -> dict[str, Any]:
         "floor_locks_at_start": r.floor_locks_at_start,
         # funded Standard: flat shortly before a market break of 2 hours or more
         "flat_before_breaks": r.flat_before_breaks,
+        "news_breaches": r.news_breaches,  # a fill in a news window ends the account
     }
 
 
@@ -997,4 +998,5 @@ def _rule_set(
         floor_restarts_after_payout=t.optional_boolean("floor_restarts_after_payout", True),
         floor_locks_at_start=t.optional_boolean("floor_locks_at_start", True),
         flat_before_breaks=t.optional_boolean("flat_before_breaks", False),
+        news_breaches=t.optional_boolean("news_breaches", False),
     )

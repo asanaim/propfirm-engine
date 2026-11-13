@@ -490,8 +490,9 @@ fee_refund_with_payout = 0     # 0: no fee refund
 
   [[products.stages]]
   stage = "funded"
-  version = 3              # 3: flat before long market breaks; 2: line v1 sizes
+  version = 4              # 4: news rule as FTMO; 3: market breaks; 2: line v1
   flat_before_breaks = true
+  news_breaches = true
   profit_target_percent = ""
   max_loss_percent = "6"
   max_loss_kind = "static"
@@ -537,8 +538,9 @@ fee_refund_with_payout = 0
 
   [[products.stages]]
   stage = "funded"
-  version = 2              # 2: flat before market breaks of 2 hours or more
+  version = 3              # 3: news rule as FTMO; 2: market breaks
   flat_before_breaks = true
+  news_breaches = true
   profit_target_percent = ""
   max_loss_percent = "8"
   max_loss_kind = "static"
@@ -576,8 +578,9 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
 
   [[products.stages]]
   stage = "funded"
-  version = 3              # 3: flat before long market breaks; 2: line v1, EOD trailing
+  version = 4              # 4: news rule as FTMO; 3: market breaks; 2: EOD trailing
   flat_before_breaks = true
+  news_breaches = true
   profit_target_percent = ""
   max_loss_percent = "10"
   max_loss_kind = "trailing_eod"
@@ -600,8 +603,9 @@ fee_refund_with_payout = 0
 
   [[products.stages]]
   stage = "funded"
-  version = 3              # 3: flat before long market breaks; 2: floor does not restart
+  version = 4              # 4: news rule as FTMO; 3: market breaks; 2: floor kept
   flat_before_breaks = true
+  news_breaches = true
   profit_target_percent = ""
   max_loss_percent = "5"
   max_loss_kind = "trailing"

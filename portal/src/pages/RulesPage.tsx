@@ -96,7 +96,16 @@ export function RulesPage({ acc }: { acc: string }) {
               .
             </li>
           )}
-          {r.news_restricted ? (
+          {r.news_restricted && r.news_breaches ? (
+            <li>
+              No trade opens or closes on the affected symbols from 2 minutes
+              before to 2 minutes after a listed news event: see the{" "}
+              <Link href="/news">news calendar</Link>. Pending orders on those
+              symbols are cancelled when the window opens. A stop loss, take
+              profit or trailing stop that fills inside a window ends the
+              account.
+            </li>
+          ) : r.news_restricted ? (
             <li>
               No trade opens or closes on the affected symbols from 2 minutes
               before to 2 minutes after a listed news event: see the{" "}

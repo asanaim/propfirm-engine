@@ -218,3 +218,20 @@ pass of an evaluation stage, a trading-day count. Each serious email is
 built with the feature that raises it, from a notification template
 (rule AC12). Supersedes the email of D-13.23; amends the step 6 line
 "notification events" to this list.
+
+D-14.2, news rule as FTMO (build plan step 1, line 6; section 1 news row,
+decided 13 Nov 2026). On funded accounts (`news_breaches`, new versions
+lite-funded-v4, classic-funded-v3, one-step-funded-v4, instant-funded-v4):
+- when a restricted window opens on a symbol, the account's pending and
+  trailing entries on that symbol are cancelled (`news_window`); a window
+  the engine steps over entirely cancels nothing, since nothing can fill in
+  it;
+- orders and closes stay refused inside the window, as before;
+- a stop loss, take profit or trailing stop that fills inside the window
+  breaches the account (`BreachReason.NEWS`): its other positions close and
+  it is locked. The trade is not paid out because a breached account is
+  not. The integrity case is still raised, so staff see it.
+Affected symbols follow the instrument map (CURRENT_MAP, ftmo-1). The
+Swing add-on (step 2) will lift the rule per account. Evaluations and the
+earlier funded versions keep the earlier behaviour. The trader's email on
+the breach follows D-14.1 with the breach emails.
