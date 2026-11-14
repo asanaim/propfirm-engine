@@ -16,7 +16,15 @@ import pytest
 from propfirm.journal.machine import CODEC
 from propfirm.policy import PolicyError, parse_policy, rule_set_view
 from propfirm.rules.events import AccountStatus
-from propfirm.rules.products import KIND_WORDS, RULESETS, MaxLossKind, RuleSet, max_loss_words
+from propfirm.rules.products import (
+    KIND_WORDS,
+    PRODUCTS,
+    RULESETS,
+    MaxLossKind,
+    RuleSet,
+    Stage,
+    max_loss_words,
+)
 from propfirm.settings.overlay import from_json, limits_rule_set, stage_limits, to_json
 from propfirm.trading.orders import Side
 from tests.rules_rig import RulesRig, ny
@@ -230,3 +238,15 @@ def test_older_stage_limit_records_still_read() -> None:
     kind, value = to_json(limits)
     assert not any(k.startswith("floor_") for k in value)  # unchanged form when unset
     assert from_json(kind, value) == limits
+
+
+def test_the_shipped_one_step_floor_stops_at_the_start_and_does_not_restart() -> None:
+    # D-14.10 (owner, 14 Nov 2026): the policy file and the built-in catalogue agree
+    stages = next(p for p in parse_policy(edited(lambda data: None)).products if p.id == "one-step")
+    for shipped, built_in in zip(stages.rule_sets, PRODUCTS["one-step"], strict=True):
+        assert shipped.rsv_id == built_in.rsv_id
+        assert shipped.max_loss_kind is MaxLossKind.TRAILING_EOD
+        assert shipped.floor_locks_at_start and built_in.floor_locks_at_start
+        restarts = shipped.stage is not Stage.FUNDED  # no payout is taken in the evaluation
+        assert shipped.floor_restarts_after_payout is restarts
+        assert built_in.floor_restarts_after_payout is restarts

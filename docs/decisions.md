@@ -163,6 +163,7 @@ the starting balance (`max_loss_kind = "trailing_eod"`,
 `floor_locks_at_start = false`). Supersedes the lock in D-13.17 for 1 Step;
 Instant keeps its lock (K7). Status: the fields exist (#92); the product
 change is entered in step 2.
+Replaced by D-14.10 (14 Nov 2026): the floor stops at the starting balance.
 
 D-13.21, trading hours (review D6). Taken under the owner's instruction to
 choose the most sustainable option where no decision exists: New York time;
@@ -306,3 +307,18 @@ is not reached while a confirmed case stands. Settings per product:
 the second above the first split). The contract (template v3) and the
 shop state the ladder from the same settings. The scaling rung applies
 once the scaling job (step 2, line 4) records steps.
+
+D-14.10, 1 Step loss floor (owner, 14 Nov 2026; replaces D-13.20). The 10 %
+end-of-day trailing floor stops rising at the starting balance
+(`floor_locks_at_start = true`), and on the funded stage a payout does not
+lower it again (`floor_restarts_after_payout = false`), as on Instant (K7).
+New versions `one-step-s1-v4` and `one-step-funded-v5`; accounts sold on
+`one-step-s1-v3` and `one-step-funded-v4` keep those rules. Why (the
+owner's standing rule: most cost effective, profitable, sustainable): the
+product line and its margin were modelled without a restart, while the
+code restarted the floor. A simulation of 14 Nov (40,000 traders, typical
+losing trader, $100,000 account; an estimate, not a measurement) gives a
+payout cost per order of about $163 with the lock and no restart, $150
+with no lock and no restart, and $379 with a restart. No lock saves a
+little more but leaves the trader less room after every payout. FTMO's own
+1-Step has no lock; this is a deliberate difference.
