@@ -70,7 +70,9 @@ describe("Ctrl+K search (rule AC06)", () => {
   it("matches the start of words, label words first", () => {
     expect(score("pay", "Payouts", "")).toBe(-0.5);
     expect(score("with", "Payouts", "withdrawals")).toBe(1);
-    expect(score("out", "Payouts", "")).toBeNull();
+    expect(score("out", "Payouts", "")).toBe(2); // inside a word, after word starts
+    expect(score("pyouts", "Payouts", "")).toBe(3); // a typo: its letters in order
+    expect(score("zz", "Payouts", "")).toBeNull();
     expect(score("   ", "Payouts", "")).toBeNull();
   });
 
@@ -156,5 +158,32 @@ describe("the screens", () => {
     await userEvent.type(screen.getByLabelText("Search settings"), "maintenance");
     expect(screen.queryByTestId("area-general")).toBeNull();
     expect(screen.getByTestId("area-maintenance")).toBeInTheDocument();
+  });
+});
+
+describe("search suggestions", () => {
+  it("suggests recent pages, then common ones, before anything is typed", async () => {
+    const { rememberHit, search, starters } = await import("./places");
+    window.localStorage.clear();
+    expect(starters(ADMIN, []).map((h) => h.path).slice(0, 3)).toEqual(["/", "/traders", "/payouts"]);
+    rememberHit({ label: "Cases", group: "Page", path: "/cases", icon: "cases" });
+    const first = search("", ADMIN)[0];
+    expect([first?.group, first?.path]).toEqual(["Recent", "/cases"]);
+    expect(search("", ADMIN).filter((h) => h.path === "/cases")).toHaveLength(1); // not twice
+  });
+
+  it("finds pages despite a typo, after exact matches", async () => {
+    const { search } = await import("./places");
+    expect(search("pyouts", ADMIN)[0]?.label).toBe("Payouts");
+  });
+
+  it("groups results and bolds what matches", async () => {
+    const { grouped, highlight, traderHits } = await import("./CommandSearch");
+    const traders = traderHits([{ cif: "CIF00000001", full_name: "Ada Trader", email: "ada@example.com" }]);
+    expect(traders[0]?.path).toBe("/traders?cif=CIF00000001");
+    const order = grouped([{ label: "Payouts", group: "Page", path: "/payouts", icon: "payouts" }, ...traders]).map((h) => h.group);
+    expect(order).toEqual(["Trader", "Page"]);
+    render(<>{highlight("Payouts", "pay")}</>);
+    expect(screen.getByText("Pay").tagName).toBe("STRONG");
   });
 });
