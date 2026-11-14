@@ -80,6 +80,82 @@ function Items({ items }: { items: readonly Item[] }) {
   );
 }
 
+interface Fill {
+  type: string;
+  ts: number;
+  symbol: string;
+  price_seq: number;
+  open_price?: number;
+  close_price?: number;
+  price?: number;
+}
+
+/** An account's fills, newest first, with the price number each used. */
+export function fillsOf(events: readonly Fill[]): Fill[] {
+  return events.filter((e) => (e.type === "PositionOpened" || e.type === "PositionClosed") && typeof e.price_seq === "number").reverse();
+}
+
+/** Find a bad update's price number from an account's trade history. */
+function PriceNumberFinder({ onPick }: { onPick: (symbol: string, seq: number) => void }) {
+  const { api } = useBackOffice();
+  const [acc, setAcc] = useState("");
+  const [fills, setFills] = useState<Fill[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const find = async () => {
+    setError(null);
+    try {
+      setFills(fillsOf(await api.get<Fill[]>(`/accounts/${encodeURIComponent(acc.trim())}/history?limit=1000`)).slice(0, 30));
+    } catch (exc) {
+      setFills(null);
+      setError(exc instanceof ApiError ? exc.message : "The history could not be read.");
+    }
+  };
+  return (
+    <Card>
+      <CardHeader slotProps={{ title: { component: "h2" } }} title="Find the price number" subheader="An affected account's latest fills with the price number each used; pick one to fill the form." />
+      <CardContent sx={{ pt: 0 }}>
+        <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+          <TextField size="small" label="Account" value={acc} onChange={(e) => { setAcc(e.target.value); }} placeholder="ACC00000001" />
+          <Button disabled={acc.trim() === ""} onClick={() => void find()}>
+            Show fills
+          </Button>
+        </Stack>
+        {error === null ? null : <Alert severity="error">{error}</Alert>}
+        {fills === null ? null : fills.length === 0 ? (
+          <Typography variant="body2">No fills on this account.</Typography>
+        ) : (
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Time (UTC)</TableCell>
+                <TableCell>Fill</TableCell>
+                <TableCell>Symbol</TableCell>
+                <TableCell>Price number</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {fills.map((f, i) => (
+                <TableRow key={`${f.ts.toString()}-${i.toString()}`}>
+                  <TableCell>{new Date(f.ts).toISOString().slice(0, 19).replace("T", " ")}</TableCell>
+                  <TableCell>{f.type === "PositionOpened" ? "Open" : "Close"}</TableCell>
+                  <TableCell>{f.symbol}</TableCell>
+                  <TableCell>{f.price_seq}</TableCell>
+                  <TableCell>
+                    <Button size="small" onClick={() => { onPick(f.symbol, f.price_seq); }}>
+                      Use
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Bad-price corrections (rule D-14.4): one person flags an applied price
 and sees what reversing it does to each account; a second person approves,
 and the engine corrects each balance and reinstates each account the bad
@@ -150,6 +226,13 @@ export function CorrectionsPage() {
   return (
     <Stack spacing={2.5} sx={{ mt: 2, mb: 4 }}>
       <Title title="Price corrections" />
+      <PriceNumberFinder
+        onPick={(s, n) => {
+          setSymbol(s);
+          setSeq(n.toString());
+          setPreview(null);
+        }}
+      />
       <Card>
         <CardHeader
           slotProps={{ title: { component: "h2" } }}
