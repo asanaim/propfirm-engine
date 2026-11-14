@@ -95,6 +95,71 @@ export function fillsOf(events: readonly Fill[]): Fill[] {
   return events.filter((e) => (e.type === "PositionOpened" || e.type === "PositionClosed") && typeof e.price_seq === "number").reverse();
 }
 
+interface Suspect {
+  symbol: string;
+  price_seq: number;
+  ts: number;
+  price: number;
+  before: number;
+  after: number;
+  suggested: number;
+  fills: number;
+}
+
+/** Spikes found in the stored prices: pick one and the form is filled. */
+function SuspectPrices({ digitsOf, onPick }: { digitsOf: (symbol: string) => number; onPick: (s: Suspect) => void }) {
+  const { result, reload } = useGet<Suspect[]>("/staff/corrections/suspects?hours=72");
+  return (
+    <Card>
+      <CardHeader
+        slotProps={{ title: { component: "h2" } }}
+        title="Suspect prices, last 3 days"
+        subheader="A price that jumped at least 0.2 % and straight back. Those that filled trades are listed first; pick one to fill the form with its price and the price between its neighbours."
+        action={<Button size="small" onClick={reload}>Refresh</Button>}
+      />
+      <CardContent sx={{ pt: 0 }}>
+        {result.state === "error" ? <Alert severity="error">{result.message}</Alert> : null}
+        {result.state === "ready" && result.data.length === 0 ? <Typography variant="body2">No spikes found.</Typography> : null}
+        {result.state === "ready" && result.data.length > 0 ? (
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Time (UTC)</TableCell>
+                <TableCell>Symbol</TableCell>
+                <TableCell>Before → price → after</TableCell>
+                <TableCell>Fills</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {[...result.data]
+                .sort((a, b) => b.fills - a.fills || b.ts - a.ts)
+                .map((s) => {
+                  const d = digitsOf(s.symbol);
+                  return (
+                    <TableRow key={`${s.symbol}-${s.price_seq.toString()}`}>
+                      <TableCell>{new Date(s.ts).toISOString().slice(0, 19).replace("T", " ")}</TableCell>
+                      <TableCell>{s.symbol}</TableCell>
+                      <TableCell>
+                        {fromPoints(s.before, d)} → <strong>{fromPoints(s.price, d)}</strong> → {fromPoints(s.after, d)}
+                      </TableCell>
+                      <TableCell>{s.fills}</TableCell>
+                      <TableCell>
+                        <Button size="small" disabled={s.fills === 0} onClick={() => { onPick(s); }}>
+                          Use
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+            </TableBody>
+          </Table>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Find a bad update's price number from an account's trade history. */
 function PriceNumberFinder({ onPick }: { onPick: (symbol: string, seq: number) => void }) {
   const { api } = useBackOffice();
@@ -112,7 +177,7 @@ function PriceNumberFinder({ onPick }: { onPick: (symbol: string, seq: number) =
   };
   return (
     <Card>
-      <CardHeader slotProps={{ title: { component: "h2" } }} title="Find the price number" subheader="An affected account's latest fills with the price number each used; pick one to fill the form." />
+      <CardHeader slotProps={{ title: { component: "h2" } }} title="Or find it from an account" subheader="An affected account's latest fills with the price number each used; pick one to fill the form." />
       <CardContent sx={{ pt: 0 }}>
         <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
           <TextField size="small" label="Account" value={acc} onChange={(e) => { setAcc(e.target.value); }} placeholder="ACC00000001" />
@@ -226,6 +291,15 @@ export function CorrectionsPage() {
   return (
     <Stack spacing={2.5} sx={{ mt: 2, mb: 4 }}>
       <Title title="Price corrections" />
+      <SuspectPrices
+        digitsOf={(s) => instruments.find((i) => i.symbol === s)?.digits ?? 5}
+        onPick={(s) => {
+          setSymbol(s.symbol);
+          setSeq(s.price_seq.toString());
+          setGood(fromPoints(s.suggested, instruments.find((i) => i.symbol === s.symbol)?.digits ?? 5));
+          setPreview(null);
+        }}
+      />
       <PriceNumberFinder
         onPick={(s, n) => {
           setSymbol(s);
