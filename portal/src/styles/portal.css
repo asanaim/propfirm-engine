@@ -608,6 +608,31 @@ main:focus {
   padding: 0;
 }
 
+.addons {
+  display: grid;
+  gap: var(--space-2);
+  border: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+
+.addons legend {
+  font-weight: 550;
+  margin-bottom: var(--space-2);
+}
+
+.addon {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.addon input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
 .segmented legend {
   font-weight: 550;
   margin-bottom: var(--space-2);

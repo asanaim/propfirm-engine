@@ -29,6 +29,7 @@ from propfirm.customers.providers import PayoutProvider
 from propfirm.customers.store import CifRecord, CustomerStore
 from propfirm.journal.inputs import DebitPayout
 from propfirm.policy import PolicySource, parse_percent
+from propfirm.rules.addons import addons_of
 from propfirm.settings.notices import Notices
 
 log = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ class Payouts:
             violations_cents=violations,
             confirmed_cases=await self._cases.confirmed_cases(cif.cif) if self._cases else 0,
             scaling_steps=await self._scaling.steps_taken(record.ord) if self._scaling else 0,
+            addons=addons_of(rules["rsv_id"]),
             pending_payout=pending is not None and pending.po != ignore,
             wallet_added_at=wallet.added_at if wallet else None,
             kept_floor_cents=(

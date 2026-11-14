@@ -23,6 +23,7 @@ from enum import StrEnum
 from fractions import Fraction
 
 from propfirm._checks import require_int, require_text
+from propfirm.journal.codec import added_field
 
 
 class Side(StrEnum):
@@ -179,3 +180,6 @@ class Position:
     take_profit: int | None
     margin_usd: Fraction  # exact margin held for the remaining volume, fixed at open
     close_count: int = 0  # closes so far (partial or full); numbers close ids
+    # swap-free add-on (D-13.18) only: nights of swap counted so far, charged
+    # or free; 0 and left out of records for every other account
+    swap_nights: int = added_field(0)

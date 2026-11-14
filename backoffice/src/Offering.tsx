@@ -12,15 +12,23 @@ export interface OfferingView {
   allocation_cap_cents: number;
   one_instant_funding_per_trader: boolean;
   unpaid_hold_hours: number;
+  addons?: { id: string; price_percent: string; products: string[]; on: boolean }[];
 }
+
+/** What each add-on does (D-13.18). */
+export const ADDON_TEXT: Record<string, string> = {
+  split90: "90% profit split from the first payout",
+  swing: "Swing: hold over news and weekends, leverage at most 1:30",
+  swapfree: "Swap free for the first 5 nights of each position",
+};
 
 /** "10K", "200K" for an account size in cents. */
 export function sizeLabel(cents: number): string {
   return `${Math.trunc(cents / 100_000)}K`;
 }
 
-/** What to propose: the products and sizes switched off. */
-export function proposal(productsOn: Record<string, boolean>, sizesOn: Record<number, boolean>, reason: string) {
+/** What to propose: the products, sizes and add-ons switched off. */
+export function proposal(productsOn: Record<string, boolean>, sizesOn: Record<number, boolean>, reason: string, addonsOn: Record<string, boolean> = {}) {
   return {
     products_off: Object.entries(productsOn)
       .filter(([, on]) => !on)
@@ -30,6 +38,15 @@ export function proposal(productsOn: Record<string, boolean>, sizesOn: Record<nu
       .filter(([, on]) => !on)
       .map(([size]) => Number(size))
       .sort((a, b) => a - b),
+    // left out when the screen knows no add-ons: the server keeps their switches
+    ...(Object.keys(addonsOn).length > 0
+      ? {
+          addons_off: Object.entries(addonsOn)
+            .filter(([, on]) => !on)
+            .map(([id]) => id)
+            .sort(),
+        }
+      : {}),
     reason,
   };
 }
@@ -40,7 +57,7 @@ export function OfferingPage() {
   const { result, reload } = useGet<OfferingView>("/admin/offering");
   return (
     <Stack spacing={2} sx={{ mt: 2 }}>
-      <Title title="Products and sizes" />
+      <Title title="Products, sizes and add-ons" />
       {result.state === "loading" ? <p>Loading…</p> : null}
       {result.state === "error" ? <Alert severity="error">{result.message}</Alert> : null}
       {/* keyed by what the server holds, so a reload starts the switches afresh */}
@@ -53,15 +70,16 @@ export function OfferingEditor({ view, onDone }: { view: OfferingView; onDone: (
   const { api } = useBackOffice();
   const [products, setProducts] = useState<Record<string, boolean>>(() => Object.fromEntries(view.products.map((p) => [p.id, p.on])));
   const [sizes, setSizes] = useState<Record<number, boolean>>(() => Object.fromEntries(view.sizes.map((s) => [s.size_cents, s.on])));
+  const [addons, setAddons] = useState<Record<string, boolean>>(() => Object.fromEntries((view.addons ?? []).map((a) => [a.id, a.on])));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const changed = view.products.some((p) => products[p.id] !== p.on) || view.sizes.some((s) => sizes[s.size_cents] !== s.on);
+  const changed = view.products.some((p) => products[p.id] !== p.on) || view.sizes.some((s) => sizes[s.size_cents] !== s.on) || (view.addons ?? []).some((a) => addons[a.id] !== a.on);
   const propose = async () => {
     setBusy(true);
     setMessage(null);
     try {
-      await api.put("/admin/offering", proposal(products, sizes, reason.trim()));
+      await api.put("/admin/offering", proposal(products, sizes, reason.trim(), addons));
       setMessage({ ok: true, text: "Proposed. A second admin or owner approves it under Setting proposals." });
       setReason("");
       onDone();
@@ -137,6 +155,36 @@ export function OfferingEditor({ view, onDone }: { view: OfferingView; onDone: (
           </Stack>
         </CardContent>
       </Card>
+      {(view.addons ?? []).length > 0 ? (
+        <Card>
+          <CardHeader title="Add-ons" subheader="Priced as a share of the list price. An add-on switched off is not sold; accounts that have it keep it." />
+          <CardContent>
+            <Stack spacing={1.5}>
+              {(view.addons ?? []).map((a) => {
+                const names = a.products.map((id) => view.products.find((p) => p.id === id)?.name ?? id).join(", ");
+                return (
+                  <Box key={a.id}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={addons[a.id] ?? a.on}
+                          onChange={(e) => {
+                            setAddons({ ...addons, [a.id]: e.target.checked });
+                          }}
+                        />
+                      }
+                      label={`${ADDON_TEXT[a.id] ?? a.id} (+${a.price_percent}%)`}
+                    />
+                    <Typography variant="body2" color="text.secondary">
+                      {names}
+                    </Typography>
+                  </Box>
+                );
+              })}
+            </Stack>
+          </CardContent>
+        </Card>
+      ) : null}
       <Card>
         <CardContent>
           <Stack spacing={1.5}>

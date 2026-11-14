@@ -152,10 +152,10 @@ def test_names_match_ignoring_case_and_spacing_only() -> None:
 # --- the contract ---------------------------------------------------------------------
 
 
-def contract(policy: Any = None) -> Any:
+def contract(policy: Any = None, rule_set: Any = None) -> Any:
     policy = policy or load_policy()
     product = policy.product("lite")
-    rule_set = funded_rule_set(product)
+    rule_set = rule_set or funded_rule_set(product)
     assert rule_set is not None
     return render_contract(
         policy,
@@ -173,7 +173,9 @@ def contract(policy: Any = None) -> Any:
 
 def test_the_contract_states_the_terms_in_force() -> None:
     text = contract()
-    assert text.template == "funded-agreement-v3" and text.draft
+    assert text.template == "funded-agreement-v4" and text.draft
+    assert "Template funded-agreement-v4." in text.body
+    assert "Add-ons" not in text.body  # none bought
     assert text.sha256 == hashlib.sha256(text.body.encode()).hexdigest()
     body = text.body
     assert "DRAFT" in body and "[NOT SET" in body  # firm name and law not decided
@@ -197,6 +199,23 @@ def test_the_contract_states_the_terms_in_force() -> None:
     ):
         assert fragment in " ".join(body.split()), fragment
     assert "$" not in body.replace("$50", "")  # every placeholder filled
+
+
+def test_the_contract_states_the_add_ons_bought() -> None:
+    """D-13.18: the split add-on replaces the ladder; each add-on is named."""
+    policy = load_policy()
+    funded = funded_rule_set(policy.product("lite"))
+    assert funded is not None
+    rules = policy.with_addons(funded, ("split90", "swing", "swapfree"))
+    body = " ".join(contract(policy, rules).body.split())
+    assert "receives 90 % of the profit made on the account and payable under these terms." in body
+    assert "scaling step." not in body.split("4. Profit split")[1].split("5. Scaling")[0]
+    assert (
+        "Add-ons bought with the account: the profit split is 90 % from the first payout; "
+        "positions may be held over news releases and market breaks, and leverage is at "
+        "most 1:30; no swap is charged on the first 5 nights of each position." in body
+    )
+    assert f"Rule set {funded.rsv_id}-split90-swing-swapfree:" in body
 
 
 def test_a_complete_contract_is_not_a_draft() -> None:

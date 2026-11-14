@@ -49,6 +49,12 @@ def test_the_next_stage_of_each_product() -> None:
     assert plan_for(POLICY, account("one-step", "s2")) == Plan(None, None, "no_next_stage")
 
 
+def test_add_ons_go_with_the_account_to_the_next_stage() -> None:
+    """D-13.18: an add-on is bought once, for every stage."""
+    swing = account("lite", "s1", "lite-s1-v3-swing-swapfree")
+    assert plan_for(POLICY, swing) == Plan(Stage.S2, "lite-s2-v3-swing-swapfree")
+
+
 def test_the_next_stage_uses_the_rules_in_force_at_the_pass() -> None:
     change = SettingChange(
         4, stage_limits("lite", "s2", "4", "3", "5", "static"), "admin-1", None, "offer", 1

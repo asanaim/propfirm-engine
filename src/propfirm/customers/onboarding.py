@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from propfirm.policy import Policy, ProductPolicy, ScalingPolicy, instant_funding, percent_text
+from propfirm.rules.addons import SPLIT90, SWAPFREE, SWING, addons_of
 from propfirm.rules.products import RuleSet, max_loss_words
 
 ONBOARDING_KINDS = (
@@ -252,6 +253,22 @@ def split_ladder_words(product: ProductPolicy, scaling: ScalingPolicy) -> str:
     return "; " + ", and ".join(parts)
 
 
+def addons_clause(policy: Policy, addons: tuple[str, ...]) -> str:
+    """The add-ons bought with the account (D-13.18), as a paragraph of
+    clause 2 ("" for none)."""
+    a = policy.addons
+    words = {
+        SPLIT90: f"the profit split is {percent_text(a.split)} % from the first payout",
+        SWING: "positions may be held over news releases and market breaks, and "
+        f"leverage is at most 1:{a.swing_leverage}",
+        SWAPFREE: f"no swap is charged on the first {a.swap_free_nights} nights of each position",
+    }
+    chosen = [words[x] for x in addons if x in words]
+    if not chosen:
+        return ""
+    return "\n   Add-ons bought with the account: " + "; ".join(chosen) + "."
+
+
 def render_contract(
     policy: Policy,
     *,
@@ -273,6 +290,10 @@ def render_contract(
     draft = not terms.complete
     pending = "[NOT SET: to be decided]"
     payouts, scaling = policy.payouts, policy.scaling
+    addons = addons_of(rule_set.rsv_id)
+    split = product.profit_split
+    if SPLIT90 in addons:
+        split = max(split, policy.addons.split)
     values = {
         "draft_notice": "DRAFT: not for signature outside the sandbox." if draft else "",
         "contract_id": contract_id,
@@ -292,8 +313,9 @@ def render_contract(
         if rule_set.consistency is None
         else f"best day at most {percent_text(rule_set.consistency)} % of total profit",
         "disclosure": DISCLOSURE[terms.account_disclosure],
-        "split_percent": percent_text(product.profit_split),
-        "split_ladder": split_ladder_words(product, scaling),
+        "split_percent": percent_text(split),
+        "split_ladder": "" if SPLIT90 in addons else split_ladder_words(product, scaling),
+        "addons_clause": addons_clause(policy, addons),
         "first_after_days": str(payouts.first_after_days),
         "interval_days": str(payouts.interval_days),
         "minimum_usd": _usd(payouts.minimum_cents),

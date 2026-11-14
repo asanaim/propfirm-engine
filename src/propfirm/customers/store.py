@@ -965,6 +965,7 @@ class CustomerStore:
         ts: int,
         retake_of: str | None = None,
         hold_since: int = 0,
+        addon_cents: int = 0,
     ) -> OrderRecord:
         """With `retake_of`, the order uses that breached order's retake;
         refused (RetakeTakenError) if another order placed since `hold_since`
@@ -1015,6 +1016,8 @@ class CustomerStore:
                 "rsv_id": rsv_id,
                 "provider": provider,
             }
+            if addon_cents:
+                facts["addon_cents"] = addon_cents  # the add-ons are in rsv_id
             if retake_of is not None:
                 facts["retake_of"] = retake_of
                 await conn.execute(

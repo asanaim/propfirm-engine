@@ -396,6 +396,9 @@ def test_public_catalogue_shows_targets_and_limits_but_not_gating() -> None:
         "floor_locks_at_start": True,  # a static loss: the key keeps its default
         "flat_before_breaks": False,  # evaluations: hold over breaks (as FTMO)
         "news_breaches": False,  # evaluations: news windows do not bind
+        "addons": [],  # D-13.18: a stage as sold, without add-ons
+        "leverage_cap": None,
+        "swap_free_nights": 0,
     }
     assert products[0]["stages"][-1]["flat_before_breaks"] is True  # funded (D-13.23)
     assert products[0]["stages"][-1]["news_breaches"] is True  # funded: news rule as FTMO

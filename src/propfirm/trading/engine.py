@@ -266,6 +266,9 @@ class TradingEngine:
         # accounts the market break rule binds (funded, not Swing): set by the
         # supervisor from each account's rule set, so not engine state
         self._break_bound: set[str] = set()
+        # add-ons (D-13.18), from each account's rule set like the two above
+        self._leverage_cap: dict[str, Fraction] = {}
+        self._swap_free: dict[str, int] = {}
         # symbol -> ((flat-by, close, open) of its next long break or None,
         # when to look again); derived from the hours and engine time, so
         # not engine state either
@@ -381,6 +384,12 @@ class TradingEngine:
             if terms is None:
                 continue
             nights = terms.nights[weekday]
+            free = self._swap_free.get(position.account_id, 0)
+            if free and nights:
+                # swap-free: count every night; charge only those past the free ones
+                held = position.swap_nights
+                self._positions[position.position_id] = replace(position, swap_nights=held + nights)
+                nights -= min(nights, max(0, free - held))
             rate = terms.rate(position.side is Side.BUY)
             quote = self._quotes.get(position.symbol)
             if nights == 0 or rate == 0 or quote is None:
@@ -951,6 +960,24 @@ class TradingEngine:
         """(flat-by, close, open) of the symbol's next long break, or None."""
         return self._next_break(symbol)
 
+    def set_leverage_cap(self, account_id: str, cap: Fraction | None) -> None:
+        """The highest leverage a new position of this account may use (the
+        Swing add-on); None: each instrument's own."""
+        self._account(account_id)
+        if cap is None:
+            self._leverage_cap.pop(account_id, None)
+        else:
+            self._leverage_cap[account_id] = cap
+
+    def set_swap_free(self, account_id: str, nights: int) -> None:
+        """Nights at the start of each position of this account with no swap
+        (the swap-free add-on); 0: none."""
+        self._account(account_id)
+        if nights:
+            self._swap_free[account_id] = nights
+        else:
+            self._swap_free.pop(account_id, None)
+
     def set_news_restricted(self, account_id: str, restricted: bool) -> None:
         """Whether news trade blocks bind this account (from its rule set)."""
         self._account(account_id)
@@ -1351,7 +1378,11 @@ class TradingEngine:
             free = self.free_margin(request.account_id)
         except _NoRate:
             return RejectReason.NO_CONVERSION_RATE
-        margin = notional / spec.leverage
+        leverage = spec.leverage
+        cap = self._leverage_cap.get(request.account_id)
+        if cap is not None and cap < leverage:
+            leverage = cap  # Swing add-on: at most 1:30
+        margin = notional / leverage
         margin_cents = cents_ceil(margin)
         commission_cents = cents_half_even(notional * spec.commission)
         if margin_cents + commission_cents > free:

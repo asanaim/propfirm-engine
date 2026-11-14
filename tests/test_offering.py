@@ -110,3 +110,47 @@ def test_the_file_refuses_a_catalogue_naming_nothing_real() -> None:
         check_catalogue(
             replace(POLICY, products=POLICY.products[:1]), frozenset({"instant"}), frozenset()
         )
+
+
+def test_add_ons_are_switched_with_the_offering() -> None:
+    """D-13.18: each add-on is a switch; older changes (no add-ons key) keep
+    every add-on on, and a proposal that leaves the key out keeps the
+    switches as they are."""
+    setting = Offering(frozenset(), frozenset(), frozenset({"swing"}))
+    assert offering_json(setting)["addons_off"] == ["swing"]
+    assert offering_from_json(offering_json(setting)) == setting
+    old = {"products_off": ["classic"], "sizes_off": []}
+    assert offering_from_json(old).addons_off == frozenset()
+    assert offering_json(offering_from_json(old)) == old  # stored changes read the same
+    change = SettingChange(1, setting, "admin-1", None, "r", 0, "admin-2")
+    policy = apply_changes(POLICY, [change])
+    assert policy.addons.off == {"swing"}
+
+    records = MemoryRecords()
+    kw: dict[str, Any] = {
+        "records": records,
+        "proposals": MemoryProposals(records),
+        "tiers": OWNERS,
+    }
+    shown = api("GET", "/admin/offering", **kw).json()
+    assert [(a["id"], a["on"]) for a in shown["addons"]] == [
+        ("split90", True),
+        ("swing", True),
+        ("swapfree", True),
+    ]
+    body = {"products_off": ["classic"], "sizes_off": [], "addons_off": ["swing"], "reason": "r"}
+    put = api("PUT", "/admin/offering", body, user="admin-1", **kw)
+    assert put.status_code == 200, put.text
+    _approve(kw, put.json()["proposal"]["id"])
+    shown = api("GET", "/admin/offering", **kw).json()
+    assert [a["id"] for a in shown["addons"] if not a["on"]] == ["swing"]
+    lite = api("GET", "/catalogue", signed_in=False, **kw).json()[0]
+    assert [a["id"] for a in lite["addons"]] == ["split90", "swapfree"]
+    # a screen that does not know add-ons leaves them as they are
+    sizes = {"products_off": ["classic"], "sizes_off": [500_000], "reason": "r"}
+    put = api("PUT", "/admin/offering", sizes, user="admin-1", **kw)
+    _approve(kw, put.json()["proposal"]["id"])
+    shown = api("GET", "/admin/offering", **kw).json()
+    assert [a["id"] for a in shown["addons"] if not a["on"]] == ["swing"]
+    unknown = {**body, "addons_off": ["weekly"]}
+    assert api("PUT", "/admin/offering", unknown, user="admin-1", **kw).status_code == 422

@@ -100,7 +100,7 @@ from propfirm.customers.payout_flow import payout_state
 from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
 from propfirm.customers.payouts import Eligibility, eligibility_json
-from propfirm.customers.pricing import price
+from propfirm.customers.pricing import discount_floor, price
 from propfirm.customers.scaling import Scaling, ScalingRefused
 from propfirm.customers.store import (
     AccountRecord,
@@ -121,6 +121,7 @@ from propfirm.market.symbols import AssetClass
 from propfirm.newsfeed.alerts import SourceAlerts, alert_view
 from propfirm.policy import (
     LOCKED_SWITCHES,
+    AddonsPolicy,
     CataloguePolicy,
     Policy,
     PolicyError,
@@ -135,6 +136,7 @@ from propfirm.policy import (
     rule_set_view,
     switch_value,
 )
+from propfirm.rules.addons import addons_of
 from propfirm.rules.calendar import Calendar
 from propfirm.rules.clock import NEW_YORK_17
 from propfirm.rules.news import EventScope
@@ -480,6 +482,11 @@ class PurchaseBody(_Body):
     size_cents: StrictInt
     method: Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")] | None = None
     code: Annotated[str, StringConstraints(pattern=r"^[A-Z0-9-]{3,32}$")] | None = None
+    # D-13.18: add-on ids (split90, swing, swapfree), at most one of each
+    addons: Annotated[
+        list[Annotated[str, StringConstraints(pattern=r"^[a-z0-9]{1,16}$")]],
+        Field(max_length=3),
+    ] = []
 
 
 class DecisionBody(_Body):
@@ -679,6 +686,11 @@ class OfferingBody(_Body):
         list[Annotated[str, Field(min_length=1, max_length=40)]], Field(max_length=50)
     ]
     sizes_off: Annotated[list[Annotated[int, Field(ge=1)]], Field(max_length=50)]
+    # D-13.18; left out: the add-on switches stay as they are
+    addons_off: (
+        Annotated[list[Annotated[str, Field(min_length=1, max_length=16)]], Field(max_length=10)]
+        | None
+    ) = None
     reason: Reason
 
 
@@ -723,9 +735,15 @@ class StageLimitsBody(_Body):
 # --- views ----------------------------------------------------------------------------
 
 
-def product_view(p: ProductPolicy, catalogue: CataloguePolicy | None = None) -> dict[str, Any]:
-    """A product as the shop shows it; with `catalogue`, only the sizes on sale."""
+def product_view(
+    p: ProductPolicy,
+    catalogue: CataloguePolicy | None = None,
+    addons: AddonsPolicy | None = None,
+) -> dict[str, Any]:
+    """A product as the shop shows it; with `catalogue`, only the sizes on
+    sale; with `addons`, the add-ons on sale with it (D-13.18)."""
     sizes = p.prices_cents if catalogue is None else catalogue.sizes(p)
+    offered = [] if addons is None else addons.for_product(p.id)
     return {
         "id": p.id,
         "name": p.name,
@@ -742,6 +760,11 @@ def product_view(p: ProductPolicy, catalogue: CataloguePolicy | None = None) -> 
         "fee_refund_with_payout": p.fee_refund_with_payout or None,
         "sizes": [{"size_cents": s, "price_cents": c} for s, c in sizes],
         "stages": [rule_set_view(r) for r in p.rule_sets],
+        "addons": [
+            {"id": o.id, "price_percent": percent_text(o.price)}
+            for o in offered
+            if addons is not None and o.id not in addons.off
+        ],
     }
 
 
@@ -937,6 +960,10 @@ def order_view(o: OrderRecord) -> dict[str, Any]:
         "discount_kind": o.discount_kind,
         "discount_percent": percent_text(o.discount),
         "discount_code": o.discount_code,
+        "addons": list(addons_of(o.rsv_id)),  # D-13.18
+        # what the add-ons cost: the price less the discounted list price
+        "addon_cents": o.price_cents
+        - (o.list_price_cents - discount_floor(o.list_price_cents, o.discount)),
         "price_cents": o.price_cents,
         "rsv_id": o.rsv_id,
         "status": o.status,
@@ -1680,7 +1707,7 @@ def create_app(
         limits (review D4: products and sizes switched off are not shown)."""
         policy = await _policy(deps)
         on_sale = [p for p in policy.products if policy.catalogue.on_sale(p)]
-        return [product_view(p, policy.catalogue) for p in on_sale]
+        return [product_view(p, policy.catalogue, policy.addons) for p in on_sale]
 
     @app.get("/access")
     async def access(deps: D) -> dict[str, Any]:
@@ -2117,7 +2144,7 @@ def create_app(
         await check_method(deps, body)
         try:
             order, pay_url = await _checkout(deps).place_order(
-                cif, body.product_id, body.size_cents, body.code, deps.clock()
+                cif, body.product_id, body.size_cents, body.code, deps.clock(), tuple(body.addons)
             )
         except CheckoutError as exc:
             raise _refused(exc) from exc
@@ -3288,15 +3315,28 @@ def create_app(
             "allocation_cap_cents": policy.scaling.max_allocation_cents,
             "one_instant_funding_per_trader": c.one_instant_funding_per_trader,
             "unpaid_hold_hours": c.unpaid_hold_hours,
+            "addons": [
+                {
+                    "id": o.id,
+                    "price_percent": percent_text(o.price),
+                    "products": sorted(o.products),
+                    "on": o.id not in policy.addons.off,
+                }
+                for o in policy.addons.offers
+            ],
         }
 
     @app.put("/admin/offering")
     async def propose_offering(deps: D, me: SettingsChanger, body: OfferingBody) -> dict[str, Any]:
         """Switch products or account sizes off (or on again): a proposal a
         second admin or owner approves (rule AC00). Stops new sales only."""
-        setting = Offering(frozenset(body.products_off), frozenset(body.sizes_off))
+        policy = await _policy(deps)
+        addons_off = policy.addons.off if body.addons_off is None else frozenset(body.addons_off)
+        setting = Offering(frozenset(body.products_off), frozenset(body.sizes_off), addons_off)
         try:
-            check_catalogue(await _policy(deps), setting.products_off, setting.sizes_off)
+            check_catalogue(policy, setting.products_off, setting.sizes_off)
+            if unknown := sorted(addons_off - {o.id for o in policy.addons.offers}):
+                raise PolicyError(f"unknown add-ons {unknown}")
         except PolicyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return await propose_setting(deps, me, setting, body.reason)

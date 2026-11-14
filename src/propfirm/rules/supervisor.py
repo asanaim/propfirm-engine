@@ -146,6 +146,8 @@ class RuleSupervisor:
         self._engine.set_news_restricted(account_id, rules.news_restricted)
         self._engine.set_news_strict(account_id, rules.news_breaches)
         self._engine.set_break_bound(account_id, rules.flat_before_breaks)
+        self._engine.set_leverage_cap(account_id, rules.leverage_cap)
+        self._engine.set_swap_free(account_id, rules.swap_free_nights)
         self._accounts[account_id] = _State(
             account_id=account_id,
             rules=rules,
@@ -296,6 +298,8 @@ class RuleSupervisor:
             self._engine.set_news_restricted(a.account_id, a.rules.news_restricted)
             self._engine.set_news_strict(a.account_id, a.rules.news_breaches)
             self._engine.set_break_bound(a.account_id, a.rules.flat_before_breaks)
+            self._engine.set_leverage_cap(a.account_id, a.rules.leverage_cap)
+            self._engine.set_swap_free(a.account_id, a.rules.swap_free_nights)
 
     # --- queries ------------------------------------------------------------
 
