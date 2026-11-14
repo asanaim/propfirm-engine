@@ -38,6 +38,7 @@ from propfirm.customers.providers import (
     SandboxPayouts,
     SandboxScreener,
 )
+from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.market.types import PriceUpdate
@@ -90,6 +91,7 @@ class Platform:
     identity: SandboxIdentity | None = None
     oversight: Oversight | None = None
     audit: AuditStore | None = None
+    scaling: Scaling | None = None  # scaling steps (D-14.8)
 
     async def call(
         self,
@@ -206,6 +208,7 @@ async def platform(
     )
     mailer = SandboxMailer()
     notifications = Notifications(NotificationStore(pool, config.customer_schema), mailer)
+    scaling = Scaling(pool, config.customer_schema, settings, live, gateway, wait_s)
     payouts = Payouts(
         PayoutStore(pool, config.customer_schema),
         store,
@@ -216,6 +219,7 @@ async def platform(
         identity=onboardings,
         cases=cases,
         history=HistoryReader(pool, config.read_schema),
+        scaling=scaling,
         wait_s=wait_s,
     )
     staff = Directory(
@@ -242,6 +246,7 @@ async def platform(
         customers=store,
         leaderboard=store,
         classes=store,
+        scaling=scaling,
         corrections=Corrections(
             pool, config.customer_schema, config.schema, config.read_schema, gateway, wait_s
         ),
@@ -317,6 +322,7 @@ async def platform(
             identity,
             oversight,
             trail,
+            scaling=scaling,
         )
     finally:
         await stop_engine()
@@ -500,23 +506,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,
-                7,
-                8,
-                9,
-                10,
-                11,
-                12,
-                13,
-                14,
-                15,
-            ]
+            assert await migrate(conn, schema) == list(range(1, 17))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

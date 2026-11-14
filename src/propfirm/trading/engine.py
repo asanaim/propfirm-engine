@@ -153,7 +153,12 @@ FIRM_COMMISSION = "firm:commission"
 FIRM_SWAP = "firm:swap"
 _BREAK_RECHECK_MS = 24 * 3_600_000  # no long break ahead: look again a day later
 FIRM_CORRECTIONS = "firm:corrections"  # bad-price corrections (D-14.4)
+FIRM_SCALING = "firm:scaling"  # allocation added by scaling steps (D-14.8)
 FIRM_PAYOUTS = "firm:payouts"  # paid out of trading accounts, owed to traders until sent
+
+
+def scaling_entry(scaling: str) -> str:
+    return f"scaling:{scaling}"
 
 
 def correction_entry(correction: str, account_id: str) -> str:
@@ -774,6 +779,23 @@ class TradingEngine:
                 credit=credit,
                 amount=abs(amount_cents),
                 reference=correction,
+            )
+        )
+
+    def add_allocation(self, account_id: str, amount_cents: int, scaling: str, ts: int) -> None:
+        """Add a scaling step's allocation to the balance (ledger entry
+        `scaling:<scaling>`)."""
+        self._account(account_id)
+        self._advance(ts)
+        self._ledger.post(
+            transfer(
+                scaling_entry(scaling),
+                self._now,
+                "scaling",
+                debit=balance_account(account_id),
+                credit=FIRM_SCALING,
+                amount=amount_cents,
+                reference=scaling,
             )
         )
 

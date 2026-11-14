@@ -31,10 +31,11 @@ Agreement $contract_id, issued $issued_utc (UTC).
    paid twice.
 
 5. Scaling
-   After $review_months months, with at least $min_net_profit_percent % net
-   profit and $min_paid_payouts paid payouts, the allocation may grow by
-   $scaling_step_percent % of the initial allocation, up to $max_allocation_usd
-   (USD) per trader.
+   After $review_days days from funding or the last step, with at least
+   $min_net_profit_percent % net profit and $min_paid_payouts paid payouts
+   in that period, and while the account is not under review, the
+   allocation may grow by $scaling_step_percent % of the initial allocation,
+   up to $max_allocation_usd (USD) per trader.
 
 6. Identity and signature
    The Trader signs electronically as the person verified under case

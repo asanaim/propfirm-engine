@@ -44,6 +44,7 @@ import {
   ArrowLeftRight,
   Server,
   StickyNote,
+  TrendingUp,
   Undo2,
 } from "lucide-react";
 
@@ -102,4 +103,5 @@ export const ICONS = {
   offering: Boxes,
   system: Server,
   corrections: Undo2,
+  scaling: TrendingUp,
 } satisfies Record<string, LucideIcon>;

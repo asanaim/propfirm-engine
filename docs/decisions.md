@@ -305,3 +305,19 @@ D-14.4 amended (14 Nov 2026), gaps closed:
   rises from a correction.
 - Price corrections show an account's fills with the price number each
   used ("Find the price number"), so staff need not read the journal.
+
+D-14.8, scaling job (build plan step 2, line 4; section 1, 13 Nov 2026).
+Funded Lite, Classic and 1-Step accounts; Instant is not scaled. One step
+when all hold: 60 days since funding or the last step (`review_days`;
+section 1 says 60 days, the policy file had 4 months: the approved row
+wins), net profit of at least 10 % of the starting balance in the period
+(balance now plus payout debits, less the period's opening balance), at
+least 3 payouts paid in the period, class A or B (unclassed counts as B),
+active and unlocked, and room under the $400,000 trader cap. A step adds
+20 % of the account's first starting balance, rounded down to the cent, to
+the balance and to the starting balance the loss limits use; the day's base
+and the high-water mark move with it. A check runs hourly and proposes; one
+member of staff with the progression decision right approves (D-14.7: the
+conditions are mechanical, so one reviewer is enough; the engine refuses a
+step twice). The split ladder's 90 % rung reads the steps applied. The
+contract (v3) states the period in days.

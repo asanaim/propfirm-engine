@@ -140,7 +140,10 @@ class StaffPolicy:
 
 @dataclass(frozen=True, slots=True)
 class ScalingPolicy:
-    review_months: int
+    # section 1 (owner, 13 Nov 2026): one step when all hold: the review
+    # period since funding or the last step, the net profit and the paid
+    # payouts within it, and class A or B
+    review_days: int
     min_net_profit: Fraction
     min_paid_payouts: int
     step: Fraction
@@ -724,7 +727,7 @@ def _staff(t: _Table) -> StaffPolicy:
 
 def _scaling(t: _Table) -> ScalingPolicy:
     policy = ScalingPolicy(
-        review_months=t.integer("review_months", 1),
+        review_days=t.integer("review_days", 1),
         min_net_profit=t.required_percent("min_net_profit_percent"),
         min_paid_payouts=t.integer("min_paid_payouts"),
         step=t.required_percent("step_percent"),

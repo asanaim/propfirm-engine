@@ -62,6 +62,7 @@ from propfirm.journal.inputs import (
     PlaceTrailingEntry,
     ReinstateAccount,
     RuleSetAdded,
+    ScaleAccount,
     ScheduleNews,
     SetTrailingStop,
     StateCheckpointed,
@@ -84,6 +85,7 @@ from propfirm.market.types import PriceUpdate
 from propfirm.rules.events import (
     AccountBreached,
     AccountReinstated,
+    AccountScaled,
     AccountStatus,
     AccountVoided,
     BalanceCorrected,
@@ -290,6 +292,9 @@ CODEC = Codec(
         ReinstateAccount,
         BalanceCorrected,
         AccountReinstated,
+        # scaling steps (14 Nov 2026)
+        ScaleAccount,
+        AccountScaled,
     )
 )
 

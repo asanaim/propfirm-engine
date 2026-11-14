@@ -630,6 +630,30 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        16,
+        """
+        -- scaling steps (D-14.8): the daily job proposes, staff approve, the
+        -- engine adds the allocation; one open or applied step per number
+        CREATE SEQUENCE {s}.scl_seq;
+        CREATE TABLE {s}.scaling_steps (
+            scl text PRIMARY KEY,
+            acc text NOT NULL REFERENCES {s}.accounts (acc),
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            step integer NOT NULL CHECK (step >= 1),
+            add_cents bigint NOT NULL CHECK (add_cents > 0),
+            measures jsonb NOT NULL,
+            status text NOT NULL CHECK (status IN ('proposed', 'applied', 'rejected')),
+            proposed_at bigint NOT NULL,
+            decided_by text,
+            decided_at bigint,
+            balance_after_cents bigint,
+            outcome jsonb
+        );
+        CREATE UNIQUE INDEX scaling_one_per_step ON {s}.scaling_steps (acc, step)
+            WHERE status <> 'rejected';
+        """,
+    ),
 )
 
 

@@ -71,6 +71,7 @@ from propfirm.customers.providers import (
     SandboxScreener,
     Screener,
 )
+from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.newsfeed.alerts import SourceAlerts, SourceStore
@@ -157,6 +158,7 @@ async def _lifecycle_forever(
     cases: Casework,
     payouts: Payouts | None,
     notifications: Notifications | None,
+    scaling: Scaling | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -178,6 +180,11 @@ async def _lifecycle_forever(
                 await payouts.advance(now_ms())  # each payout's next step, recorded first
             except Exception:  # retried next round
                 log.exception("payout round failed")
+        if scaling is not None:
+            try:  # proposes due scaling steps, at most hourly (D-14.8)
+                await scaling.run(now_ms())
+            except Exception:
+                log.exception("scaling check failed")
         if notifications is not None:
             try:
                 await notifications.advance(now_ms())  # security emails not sent yet
@@ -317,6 +324,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if mailer
             else None
         )
+        scaling = Scaling(pool, config.customer_schema, settings, live, gateway)
         payouts = None
         if config.sandbox and notifications is not None:
             payouts = Payouts(
@@ -330,6 +338,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 cases=cases,
                 notices=settings,
                 history=HistoryReader(pool, config.read_schema),
+                scaling=scaling,
             )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
         tasks.append(asyncio.create_task(_publish_calendars(news, live)))
@@ -359,7 +368,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         tasks.append(
             asyncio.create_task(
-                _lifecycle_forever(lifecycle, onboarding, cases, payouts, notifications)
+                _lifecycle_forever(lifecycle, onboarding, cases, payouts, notifications, scaling)
             )
         )
         app.state.deps = Deps(
@@ -372,6 +381,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             customers=customers,
             leaderboard=customers,
             classes=customers,
+            scaling=scaling,
             corrections=Corrections(
                 pool, config.customer_schema, config.schema, config.read_schema, gateway
             ),
