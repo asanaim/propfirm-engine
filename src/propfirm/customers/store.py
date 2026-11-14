@@ -589,6 +589,32 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        14,
+        """
+        -- bad-price corrections (D-14.4): one person proposes, another
+        -- approves; the engine inputs then reverse each account's effect
+        CREATE SEQUENCE {s}.cor_seq;
+        CREATE TABLE {s}.corrections (
+            cor text PRIMARY KEY,
+            symbol text NOT NULL,
+            price_seq bigint NOT NULL,
+            bad_price bigint NOT NULL,
+            good_price bigint NOT NULL,
+            price_ts bigint NOT NULL,
+            reason text NOT NULL,
+            items jsonb NOT NULL,
+            status text NOT NULL CHECK (status IN ('proposed', 'applied', 'rejected')),
+            proposed_by text NOT NULL,
+            proposed_at bigint NOT NULL,
+            decided_by text,
+            decided_at bigint,
+            outcome jsonb
+        );
+        CREATE UNIQUE INDEX corrections_one_open ON {s}.corrections (symbol, price_seq)
+            WHERE status <> 'rejected';
+        """,
+    ),
 )
 
 

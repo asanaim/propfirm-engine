@@ -49,6 +49,7 @@ from propfirm.journal.inputs import (
     CancelOrder,
     Checkpoint,
     ClosePosition,
+    CorrectBalance,
     DebitPayout,
     Input,
     InputRejected,
@@ -59,6 +60,7 @@ from propfirm.journal.inputs import (
     Outage,
     PlaceOrder,
     PlaceTrailingEntry,
+    ReinstateAccount,
     RuleSetAdded,
     ScheduleNews,
     SetTrailingStop,
@@ -81,8 +83,10 @@ from propfirm.market.symbols import AssetClass, SymbolSpec
 from propfirm.market.types import PriceUpdate
 from propfirm.rules.events import (
     AccountBreached,
+    AccountReinstated,
     AccountStatus,
     AccountVoided,
+    BalanceCorrected,
     BreachReason,
     DayStarted,
     NewsViolation,
@@ -281,6 +285,11 @@ CODEC = Codec(
         # trading hours (13 Nov 2026)
         TradingHours,
         UpdateOutsideHours,
+        # bad-price corrections (14 Nov 2026)
+        CorrectBalance,
+        ReinstateAccount,
+        BalanceCorrected,
+        AccountReinstated,
     )
 )
 

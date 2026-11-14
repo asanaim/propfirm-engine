@@ -49,6 +49,7 @@ from propfirm.audit.store import migrate as migrate_audit
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.corrections import Corrections
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowScreening
@@ -370,6 +371,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
             customers=customers,
             leaderboard=customers,
+            corrections=Corrections(
+                pool, config.customer_schema, config.schema, config.read_schema, gateway
+            ),
             checkout=checkout,
             policy=settings,
             settings=settings,

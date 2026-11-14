@@ -102,6 +102,39 @@ class NewsViolation:
     rsv_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class BalanceCorrected:
+    """A bad price's effect on the account reversed (D-14.4): `amount_cents`
+    (signed) added to the balance; `correction` names the decision (a COR
+    id, approved by two people). The day's base moves by the same amount,
+    so the correction is not counted as today's profit or loss."""
+
+    ts: int
+    account_id: str
+    correction: str
+    amount_cents: int
+    balance_cents: int
+    rsv_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AccountReinstated:
+    """A breach caused by a bad price is undone (D-14.4): the account is
+    active and unlocked again; positions the breach closed stay closed."""
+
+    ts: int
+    account_id: str
+    correction: str
+    rsv_id: str
+
+
 type RuleEvent = (
-    DayStarted | AccountBreached | StagePassed | AccountVoided | PayoutDebited | NewsViolation
+    DayStarted
+    | AccountBreached
+    | StagePassed
+    | AccountVoided
+    | PayoutDebited
+    | NewsViolation
+    | BalanceCorrected
+    | AccountReinstated
 )
