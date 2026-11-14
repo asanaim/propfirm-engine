@@ -74,3 +74,20 @@ describe("moving between portal pages", () => {
     section.remove();
   });
 });
+
+describe("moving waits for the next page's code", () => {
+  it("moves at once when the page is ready, after it arrives otherwise", async () => {
+    const { navigate, setPrepare } = await import("./router");
+    window.history.pushState(null, "", "/");
+    let arrive: () => void = () => undefined;
+    setPrepare((path) => (path === "/slow" ? new Promise<void>((r) => { arrive = r; }) : null));
+    navigate("/fast");
+    expect(window.location.pathname).toBe("/fast");
+    navigate("/slow");
+    expect(window.location.pathname).toBe("/fast"); // still fetching
+    arrive();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(window.location.pathname).toBe("/slow");
+    setPrepare(() => null);
+  });
+});
