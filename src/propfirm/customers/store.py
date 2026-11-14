@@ -615,6 +615,21 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             WHERE status <> 'rejected';
         """,
     ),
+    (
+        15,
+        """
+        -- trader classes, first use (D-14.5): an account flagged for short
+        -- holds is class C; staff set it back; every change kept
+        CREATE TABLE {s}.account_class_changes (
+            acc text NOT NULL REFERENCES {s}.accounts (acc),
+            at bigint NOT NULL,
+            class text NOT NULL CHECK (class IN ('A', 'B', 'C', 'D')),
+            reason text NOT NULL,
+            set_by text NOT NULL,
+            PRIMARY KEY (acc, at)
+        );
+        """,
+    ),
 )
 
 
@@ -1113,6 +1128,29 @@ class CustomerStore:
             cif,
         )
         return {r["ord"] for r in rows}
+
+    async def account_class(self, acc: str) -> tuple[str, str, int] | None:
+        """The account's class now (class, reason, since), or None: unclassed."""
+        row = await self._pool.fetchrow(
+            f"SELECT class, reason, at FROM {self._s}.account_class_changes WHERE acc = $1 "
+            f"ORDER BY at DESC LIMIT 1",
+            acc,
+        )
+        return None if row is None else (row["class"], row["reason"], row["at"])
+
+    async def set_account_class(self, acc: str, cls: str, reason: str, by: str, ts: int) -> None:
+        """Record a class change (kept: the latest is in force)."""
+        if cls not in ("A", "B", "C", "D"):
+            raise ValueError(f"no class {cls!r}")
+        await self._pool.execute(
+            f"INSERT INTO {self._s}.account_class_changes (acc, at, class, reason, set_by) "
+            f"VALUES ($1, $2, $3, $4, $5) ON CONFLICT (acc, at) DO NOTHING",
+            acc,
+            ts,
+            cls,
+            reason,
+            by,
+        )
 
     async def leaderboard_entrants(self) -> list[tuple[AccountRecord, str, str]]:
         """Funded accounts of customers who have not opted out of the

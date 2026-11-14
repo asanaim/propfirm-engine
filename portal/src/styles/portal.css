@@ -393,7 +393,7 @@ main:focus {
   padding: var(--space-6);
   box-shadow: var(--shadow);
   margin-bottom: var(--space-5);
-  animation: card-rise 520ms var(--ease-out) backwards;
+  animation: card-rise 360ms var(--ease-out) backwards;
   transition:
     box-shadow 260ms var(--ease-out),
     transform 320ms var(--ease-spring);
@@ -2290,7 +2290,7 @@ the headline (left) and toward the next section (bottom) */
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
-  animation: card-rise 520ms var(--ease-out) backwards;
+  animation: card-rise 360ms var(--ease-out) backwards;
   transition:
     box-shadow 260ms var(--ease-out),
     transform 320ms var(--ease-spring);
@@ -2408,12 +2408,18 @@ one rises in; the top bar is its own layer, so it stays still */
   view-transition-name: topbar;
 }
 
+/* calm motion: the old page dissolves quickly, the new one settles in with
+a soft fade and a slight scale, on the system's spring-like curve */
 ::view-transition-old(root) {
-  animation: page-out 140ms ease-in both;
+  animation: page-out 120ms cubic-bezier(0.4, 0, 1, 1) both;
 }
 
 ::view-transition-new(root) {
-  animation: page-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: page-in 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.page-wait {
+  min-height: 60vh;
 }
 
 ::view-transition-group(topbar) {
@@ -2423,14 +2429,13 @@ one rises in; the top bar is its own layer, so it stays still */
 @keyframes page-out {
   to {
     opacity: 0;
-    transform: translateY(6px);
   }
 }
 
 @keyframes page-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: scale(0.992);
   }
 }
 
