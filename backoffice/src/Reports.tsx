@@ -2,6 +2,7 @@ import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, Stack, Table, 
 import { useState } from "react";
 import { Title } from "react-admin";
 import { ActionButton } from "./ActionButton";
+import { NewsEntry } from "./NewsEntry";
 import { when } from "./format";
 import { useGet } from "./useGet";
 import { monthGrid, plainError } from "./work";
@@ -265,9 +266,8 @@ function MonthGrid({ calendar, now }: { calendar: Calendar; now: number }) {
 }
 
 /** The news desk: sources the collector cannot read (in plain words, with
-what to do), each month's releases as a calendar, the desk's latest
-actions. Adding or cancelling an event goes through the API
-(POST /staff/news/events; an admin cancels). */
+what to do), a form to add a missed release by hand, each month's releases
+as a calendar, the desk's latest actions (an admin cancels an event). */
 export function NewsDesk() {
   const { result, reload } = useGet<NewsPage>("/staff/news");
   const [now] = useState(() => Date.now());
@@ -313,6 +313,7 @@ export function NewsDesk() {
           </CardContent>
         </Card>
       )}
+      <NewsEntry onDone={reload} />
       {n.calendars.map((c) => (
         <MonthGrid key={c.month} calendar={c} now={now} />
       ))}
