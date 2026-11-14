@@ -100,6 +100,22 @@ it("shows the catalogue to anyone and asks a visitor to sign in to buy", async (
   expect(auth.signIn).toHaveBeenCalledWith("/shop");
 });
 
+it("offers the retake price after a breach", async () => {
+  const offer = { of_ord: "ORD00000001", product_id: "lite", size_cents: 1_000_000, list_price_cents: 4_400, discount_percent: "10", price_cents: 3_960 };
+  const fetcher = fakeFetch([
+    ["GET", "/catalogue", 200, [{ ...LITE, retake_discount_percent: "10" }]],
+    ["GET", "/me", 200, ME],
+    ["GET", "/me/retakes", 200, [offer]],
+    ["POST", "/orders", 201, {}],
+  ]);
+  renderWith(<ShopPage />, fakeAuth(), fetcher);
+  expect(await screen.findByText(/one retake of the same size at 10 % off/)).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Retake for $39.60" }));
+  const order = fetcher.mock.calls.find(([url]) => url === "/api/orders");
+  expect(JSON.parse(order?.[1]?.body as string)).toEqual({ product_id: "lite", size_cents: 1_000_000 });
+});
+
 it("places an order and completes a sandbox payment", async () => {
   const placed = {
     ord: "ORD00000001",

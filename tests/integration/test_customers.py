@@ -366,12 +366,15 @@ def test_register_buy_pay_and_trade(database_url: str, valkey_url: str, pg_schem
             assert (await p.call("POST", "/me", body=ADULT)).status_code == 409
 
             await p.store.add_code("WELCOME10", Fraction(1, 10), now_ms())
-            bought = await p.call("POST", "/orders", body={**LITE_10K, "code": "WELCOME10"})
+            no_code = await p.call("POST", "/orders", body={**LITE_10K, "code": "WELCOME10"})
+            assert no_code.status_code == 422  # D-13.17: no codes on Lite 10K
+            lite_25k = {**LITE_10K, "size_cents": 2_500_000}
+            bought = await p.call("POST", "/orders", body={**lite_25k, "code": "WELCOME10"})
             assert bought.status_code == 201, bought.text
             order = bought.json()
             assert (order["ord"], order["price_cents"], order["status"]) == (
                 "ORD00000001",
-                4_950,  # Lite 10K $55 (product line v1) less 10 %
+                9_810,  # Lite 25K $109 (product line v1) less 10 %
                 "pending",
             )
             assert (order["discount_kind"], order["discount_percent"]) == ("code", "10")
@@ -399,7 +402,7 @@ def test_register_buy_pay_and_trade(database_url: str, valkey_url: str, pg_schem
             second = (await p.call("POST", "/orders", body=LITE_10K)).json()  # nothing paid yet
             # K4 (12 Nov 2026): no repeat discount, the list price
             assert second["discount_kind"] == "none" and second["price_cents"] == 5_500
-            coded = await p.call("POST", "/orders", body={**LITE_10K, "code": "WELCOME10"})
+            coded = await p.call("POST", "/orders", body={**lite_25k, "code": "WELCOME10"})
             assert coded.status_code == 422  # codes are for first accounts only
 
     asyncio.run(scenario())
@@ -506,7 +509,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 17))
+            assert await migrate(conn, schema) == list(range(1, 18))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

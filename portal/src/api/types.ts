@@ -29,6 +29,8 @@ export interface Product {
   split_percent_after_payouts?: string | null;
   code_discount_max_percent: string | null;
   repeat_discount_percent: string[];
+  retake_discount_percent?: string | null; // one retake after a breach, same size
+  code_free_sizes_cents?: number[]; // sizes on which no discount code is valid
   fee_refund_with_payout: number | null;
   sizes: { size_cents: number; price_cents: number }[];
   stages: Stage[];
@@ -316,4 +318,14 @@ export interface Bar {
   low: number;
   close: number;
   updates: number;
+}
+
+/** A breached account the trader may retake at the retake price. */
+export interface RetakeOffer {
+  of_ord: string;
+  product_id: string;
+  size_cents: number;
+  list_price_cents: number;
+  discount_percent: string;
+  price_cents: number;
 }

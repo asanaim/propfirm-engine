@@ -344,3 +344,19 @@ member of staff with the progression decision right approves (D-14.7: the
 conditions are mechanical, so one reviewer is enough; the engine refuses a
 step twice). The split ladder's 90 % rung reads the steps applied. The
 contract (v3) states the period in days.
+
+D-14.9, retake price and the Lite 10K code block (build plan step 2;
+D-13.6, D-13.17; details taken under D-14.7). A breached account gives one
+new account of the same product and size at 10 % off the list price
+(`retake_discount_percent`, an owner setting), rounded down to the cent.
+Same size only: a cheap account breached on purpose must not buy a discount
+on a large one. One retake per breach, and one at a time: no retake price
+while another retake order is unpaid in its hold or its account still holds
+capital; a failed or lapsed retake order frees the breach. None on Instant
+(0 %: its fee must cover a no-skill withdrawal, as with codes). A retake
+never combines with a code (codes are for first accounts) and takes the
+place of a repeat discount (none on sale, K4). Discount codes are refused
+on the sizes in `code_free_sizes_cents`: Lite 10K. The trader sees the
+offer in the shop (`GET /me/retakes`). No minimum price per product is set:
+no decision asks for one, and with codes at most 10 % and none on Instant
+the existing limits already hold the fee above cost.
