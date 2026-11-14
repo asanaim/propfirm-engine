@@ -31,6 +31,7 @@ const AnomalyReport = lazyPage(() => import("./Reports"), "AnomalyReport");
 const AuditTrail = lazyPage(() => import("./Reports"), "AuditTrail");
 const NewsDesk = lazyPage(() => import("./Reports"), "NewsDesk");
 const CorrectionsPage = lazyPage(() => import("./Corrections"), "CorrectionsPage");
+const StaffProfilePage = lazyPage(() => import("./StaffProfile"), "StaffProfilePage");
 const CaseList = lazyPage(() => import("./resources/cases"), "CaseList");
 const CaseShow = lazyPage(() => import("./resources/cases"), "CaseShow");
 const NotificationList = lazyPage(() => import("./resources/notifications"), "NotificationList");
@@ -91,6 +92,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
                 {screens.has("audit") ? <Route path="/audit" element={<AuditTrail />} /> : null}
                 {screens.has("news") ? <Route path="/news" element={<NewsDesk />} /> : null}
                 {screens.has("cases") ? <Route path="/corrections" element={<CorrectionsPage />} /> : null}
+                <Route path="/profile" element={<StaffProfilePage />} />
                 {screens.has("policies") ? <Route path="/policies" element={<PolicyPages />} /> : null}
                 {screens.has("site") ? <Route path="/site" element={<SiteEditorPage />} /> : null}
                 {screens.has("settings") ? <Route path="/settings" element={<SettingsHub />} /> : null}
