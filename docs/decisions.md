@@ -377,6 +377,20 @@ with no lock and no restart, and $379 with a restart. No lock saves a
 little more but leaves the trader less room after every payout. FTMO's own
 1-Step has no lock; this is a deliberate difference.
 
+D-14.11, CI minutes (owner, 15 Nov 2026: continue without a paid plan;
+D-14.7). The repository is private, so GitHub Actions minutes are billed:
+2,000 a month on the free plan, and 1 to 14 November used them all (about
+12 minutes a run, run twice per change). CI now runs once per pull request
+and not again on the merge to main; the engine (`ci`: test, security),
+`portal` and `backoffice` workflows each run only when their own files
+change; a newer push cancels the older run; the security job alone also
+runs on Mondays, for advisories published since the last change. Expected
+use: about 600 minutes a month. Risk accepted: a pull request merged
+without updating to the latest main is not retested after the merge. While
+minutes are exhausted, every check is run locally before each pull request
+and the results are written in its description; the runtime image scan
+(Grype) waits for the next run on GitHub. The Actions budget stays at $0.
+
 D-14.12, add-ons built (build plan step 2; D-13.18; details taken under
 D-14.7, 15 Nov 2026).
 - What: 90 % split from the first payout (Lite, 1-Step; +20 %); Swing:
