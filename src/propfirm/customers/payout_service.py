@@ -37,6 +37,10 @@ SEND_RETRY_MS = 60_000  # a failed send is tried again after this
 DEBIT_RETRY_MS = 60_000  # an unanswered debit is published again after this
 
 
+class StepCount(Protocol):
+    async def steps_taken(self, ord_id: str) -> int: ...
+
+
 class TradeHistory(Protocol):
     async def account_events(
         self, account_id: str, after_seq: int = 0, limit: int = 200
@@ -69,6 +73,7 @@ class Payouts:
         cases: Casework | None = None,
         notices: NoticeSource | None = None,  # notification templates (rule AC12)
         history: TradeHistory | None = None,  # projected account events (short holds)
+        scaling: StepCount | None = None,  # scaling steps taken (the split ladder)
         wait_s: float = 5.0,
     ) -> None:
         self._store = store
@@ -81,6 +86,7 @@ class Payouts:
         self._cases = cases
         self._notices = notices
         self._history = history
+        self._scaling = scaling
         self._wait_s = wait_s
 
     @property
@@ -135,7 +141,7 @@ class Payouts:
             open_case=await self._cases.has_open_case(cif.cif) if self._cases else False,
             violations_cents=violations,
             confirmed_cases=await self._cases.confirmed_cases(cif.cif) if self._cases else 0,
-            # scaling steps: none are taken until the scaling job (step 2, line 4)
+            scaling_steps=await self._scaling.steps_taken(record.ord) if self._scaling else 0,
             pending_payout=pending is not None and pending.po != ignore,
             wallet_added_at=wallet.added_at if wallet else None,
             kept_floor_cents=(

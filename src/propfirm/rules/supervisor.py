@@ -46,6 +46,7 @@ from propfirm.rules.clock import NEW_YORK_17, TradingClock
 from propfirm.rules.events import (
     AccountBreached,
     AccountReinstated,
+    AccountScaled,
     AccountStatus,
     AccountVoided,
     BalanceCorrected,
@@ -57,7 +58,7 @@ from propfirm.rules.events import (
     StagePassed,
 )
 from propfirm.rules.products import MaxLossKind, RuleSet, TargetBasis, TieRule
-from propfirm.trading.engine import TradingEngine, correction_entry, payout_entry
+from propfirm.trading.engine import TradingEngine, correction_entry, payout_entry, scaling_entry
 from propfirm.trading.events import (
     CloseReason,
     CommissionCharged,
@@ -404,6 +405,42 @@ class RuleSupervisor:
         )
         if state.status is AccountStatus.ACTIVE:
             events += self._check(state)
+        return events
+
+    def scaling_refusal(self, account_id: str, scaling: str) -> str | None:
+        """Why a scaling step cannot be applied, or None: once per step, on
+        an active account."""
+        if self._engine.has_entry(scaling_entry(scaling)):
+            return "duplicate_scaling"
+        if self._state(account_id).status is not AccountStatus.ACTIVE:
+            return "account_not_active"
+        return None
+
+    def scale(self, account_id: str, add_cents: int, scaling: str, ts: int) -> list[Event]:
+        """A scaling step (D-14.8): the allocation grows by `add_cents`, in the
+        balance and in the starting balance the loss limits use. The day's
+        base and the high-water mark move with it, so the step is neither
+        today's profit nor room taken from the trailing floor."""
+        refusal = self.scaling_refusal(account_id, scaling)
+        if refusal is not None:
+            raise ValueError(refusal)
+        state = self._state(account_id)
+        events = self._roll(ts)
+        self._engine.add_allocation(account_id, add_cents, scaling, ts)
+        state.initial_balance += add_cents
+        state.day_base += add_cents
+        state.high_water += add_cents
+        events.append(
+            AccountScaled(
+                self._engine.now,
+                account_id,
+                scaling,
+                add_cents,
+                state.initial_balance,
+                self._engine.balance(account_id),
+                state.rules.rsv_id,
+            )
+        )
         return events
 
     def reinstatement_refusal(self, account_id: str, price_ts: int | None = None) -> str | None:

@@ -337,6 +337,26 @@ class ReinstateAccount:
 
 
 @dataclass(frozen=True, slots=True)
+class ScaleAccount:
+    """A scaling step approved by two people (D-14.8): add `add_cents` of
+    allocation; `scaling` is the step's SCL id, applied once."""
+
+    account_id: str
+    add_cents: int
+    scaling: str
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("account_id", self.account_id)
+        if isinstance(self.add_cents, bool) or not isinstance(self.add_cents, int):
+            raise TypeError("add_cents must be an int")
+        if self.add_cents <= 0:
+            raise ValueError("add_cents must be positive")
+        require_text("scaling", self.scaling)
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
 class Checkpoint:
     """Record a digest of the whole engine state in the chain and store a
     snapshot of it, so start-up can resume from here (sent by the scheduler)."""
@@ -368,6 +388,7 @@ type Input = (
     | SetTrailingStop
     | CorrectBalance
     | ReinstateAccount
+    | ScaleAccount
 )
 
 INPUT_TYPES = (
@@ -391,6 +412,7 @@ INPUT_TYPES = (
     SetTrailingStop,
     CorrectBalance,
     ReinstateAccount,
+    ScaleAccount,
 )
 
 
@@ -415,6 +437,7 @@ class InputRejectReason(StrEnum):
     DUPLICATE_CORRECTION = "duplicate_correction"
     ACCOUNT_NOT_BREACHED = "account_not_breached"
     STILL_BREACHED = "still_breached"  # correct the balance first
+    DUPLICATE_SCALING = "duplicate_scaling"
 
 
 @dataclass(frozen=True, slots=True)
@@ -573,6 +596,13 @@ def apply(
             if refusal is not None:
                 return reject(item.account_id, InputRejectReason(refusal))
             return list(sup.reinstate(item.account_id, item.correction, item.price_ts, item.ts))
+        case ScaleAccount():
+            if not sup.has_account(item.account_id):
+                return reject(item.account_id, InputRejectReason.UNKNOWN_ACCOUNT)
+            refusal = sup.scaling_refusal(item.account_id, item.scaling)
+            if refusal is not None:
+                return reject(item.account_id, InputRejectReason(refusal))
+            return list(sup.scale(item.account_id, item.add_cents, item.scaling, item.ts))
         case Checkpoint():
             raise TypeError("Checkpoint is applied by the journal machine")
         case Malformed():

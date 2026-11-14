@@ -298,7 +298,8 @@ def render_contract(
         "interval_days": str(payouts.interval_days),
         "minimum_usd": _usd(payouts.minimum_cents),
         "approvals": str(payouts.approvals_required),
-        "review_months": str(scaling.review_months),
+        "review_days": str(scaling.review_days),
+        "review_months": str(scaling.review_days // 30),  # earlier templates
         "min_net_profit_percent": percent_text(scaling.min_net_profit),
         "min_paid_payouts": str(scaling.min_paid_payouts),
         "scaling_step_percent": percent_text(scaling.step),

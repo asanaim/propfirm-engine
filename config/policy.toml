@@ -79,7 +79,12 @@ short_hold_seconds = 60
 short_hold_share_percent = 50
 
 [scaling]                      # Lite, Classic and 1-Step funded accounts
-review_months = 4
+# One step when all hold (section 1, 13 Nov 2026): review_days since funding
+# or the last step, min_net_profit_percent net profit and min_paid_payouts
+# paid payouts in that period, and class A or B. A daily job proposes it; a
+# second person approves; the step adds step_percent of the starting balance,
+# within max_allocation_cents per trader.
+review_days = 60              # section 1, approved 13 Nov 2026 (was 4 months)
 min_net_profit_percent = "10"
 min_paid_payouts = 3
 step_percent = "20"            # added to initial capital per step

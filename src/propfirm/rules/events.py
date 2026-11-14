@@ -128,6 +128,21 @@ class AccountReinstated:
     rsv_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class AccountScaled:
+    """A scaling step (D-14.8): `add_cents` of allocation added to the
+    balance and to the starting balance the loss limits are measured from;
+    `scaling` names the approved step (an SCL id)."""
+
+    ts: int
+    account_id: str
+    scaling: str
+    add_cents: int
+    initial_balance_cents: int
+    balance_cents: int
+    rsv_id: str
+
+
 type RuleEvent = (
     DayStarted
     | AccountBreached
@@ -137,4 +152,5 @@ type RuleEvent = (
     | NewsViolation
     | BalanceCorrected
     | AccountReinstated
+    | AccountScaled
 )
