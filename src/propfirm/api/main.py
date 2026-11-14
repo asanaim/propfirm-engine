@@ -328,6 +328,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 identity=onboardings,
                 cases=cases,
                 notices=settings,
+                history=HistoryReader(pool, config.read_schema),
             )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
         tasks.append(asyncio.create_task(_publish_calendars(news, live)))
