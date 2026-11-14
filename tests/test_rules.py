@@ -81,6 +81,9 @@ def test_catalogue_matches_confirmed_configuration() -> None:
         "classic-funded-v3": None,
         "one-step-funded-v4": None,
         "instant-funded-v4": None,
+        # 1-Step floor stops at the starting balance (D-14.10, 14 Nov 2026)
+        "one-step-s1-v4": Fraction(10, 100),
+        "one-step-funded-v5": None,
     }
     assert [s.stage for s in PRODUCTS["lite"]] == [Stage.S1, Stage.S2, Stage.FUNDED]
     assert INSTANT.max_loss_kind is MaxLossKind.TRAILING
@@ -93,24 +96,32 @@ def test_catalogue_matches_confirmed_configuration() -> None:
         "one-step-funded-v2",
         "one-step-funded-v3",
         "one-step-funded-v4",
+        "one-step-s1-v4",
+        "one-step-funded-v5",
         "instant-funded-v1",
         "instant-funded-v2",
         "instant-funded-v3",
         "instant-funded-v4",
     }
     on_sale = PRODUCTS["one-step"]
-    assert all(r.max_loss_kind is MaxLossKind.TRAILING_EOD for r in on_sale)  # D-13.20
-    assert not any(r.floor_locks_at_start for r in on_sale)  # FTMO: no lock
+    assert all(r.max_loss_kind is MaxLossKind.TRAILING_EOD for r in on_sale)  # D-13.17
+    assert [r.rsv_id for r in on_sale] == ["one-step-s1-v4", "one-step-funded-v5"]
+    assert all(r.floor_locks_at_start for r in on_sale)  # D-14.10: stops at the start
+    assert not RULESETS["one-step-s1-v3"].floor_locks_at_start  # sold accounts keep D-13.20
+    assert not RULESETS["one-step-funded-v4"].floor_locks_at_start
+    assert RULESETS["one-step-funded-v4"].floor_restarts_after_payout
     assert all(500_000 not in r.sizes_cents for r in (*PRODUCTS["lite"], *on_sale))  # no 5K
     restart = {r.rsv_id for r in RULESETS.values() if not r.floor_restarts_after_payout}
-    kept = {"instant-funded-v2", "instant-funded-v3", "instant-funded-v4"}
-    assert restart == kept  # D1: Instant keeps its floor
+    kept = {"instant-funded-v2", "instant-funded-v3", "instant-funded-v4", "one-step-funded-v5"}
+    assert restart == kept  # D1: Instant keeps its floor; D-14.10: funded 1-Step too
     every = [r for st in PRODUCTS.values() for r in st]
     on_sale_funded = {r.rsv_id for r in every if r.stage is Stage.FUNDED}
     breaks = {r.rsv_id for r in every if r.flat_before_breaks}
     assert breaks == on_sale_funded  # D-13.23: every funded stage on sale, no evaluation
     news = {r.rsv_id for r in RULESETS.values() if r.news_breaches}
-    assert news == on_sale_funded  # news rule as FTMO: funded stages from 14 Nov 2026
+    # news rule as FTMO: funded stages from 14 Nov 2026; one-step-funded-v4 was
+    # retired the same day by D-14.10 and keeps the rule for accounts sold on it
+    assert news == on_sale_funded | {"one-step-funded-v4"}
 
 
 def test_size_must_be_on_the_price_list() -> None:

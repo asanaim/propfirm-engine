@@ -590,13 +590,13 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
 
   [[products.stages]]
   stage = "s1"
-  version = 3              # 3: product line v1, FTMO's end-of-day trailing loss
+  version = 4              # 4: floor stops at the start (D-14.10); 3: product line v1
   profit_target_percent = "10"
-  # D-13.17 and D-13.20: 10 % of the starting balance below the highest
-  # balance at a 17:00 New York close; it keeps rising (no lock), as FTMO
+  # D-13.17 and D-14.10: 10 % of the starting balance below the highest
+  # balance at a 17:00 New York close; it stops at the starting balance
   max_loss_percent = "10"
   max_loss_kind = "trailing_eod"
-  floor_locks_at_start = false
+  floor_locks_at_start = true
   daily_loss_percent = "3"
   min_trading_days = 4
   consistency_percent = "50"
@@ -605,13 +605,14 @@ fee_refund_with_payout = 3     # refunded with the 3rd payout
 
   [[products.stages]]
   stage = "funded"
-  version = 4              # 4: news rule as FTMO; 3: market breaks; 2: EOD trailing
+  version = 5              # 5: floor stops at the start, no restart (D-14.10); 4: news rule
   flat_before_breaks = true
   news_breaches = true
   profit_target_percent = ""
   max_loss_percent = "10"
   max_loss_kind = "trailing_eod"
-  floor_locks_at_start = false
+  floor_locks_at_start = true
+  floor_restarts_after_payout = false  # a payout does not lower the floor
   daily_loss_percent = "3"
   min_trading_days = 0
   consistency_percent = "50"

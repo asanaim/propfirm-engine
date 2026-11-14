@@ -183,7 +183,7 @@ def test_the_shipped_funded_stages_and_settings() -> None:
     assert funded == {
         "lite-funded-v4",
         "classic-funded-v3",
-        "one-step-funded-v4",
+        "one-step-funded-v5",
         "instant-funded-v4",
     }
     hours = {i.name: i.hours for i in policy.trading.instruments}

@@ -7,13 +7,17 @@ fractions of the initial balance.
 | Product | Stages | Targets | Max loss | Daily loss | Consistency |
 | Lite    | S1 S2 FND | 6% then 6% | 6% static | 3% | none |
 | Classic | S1 S2 FND | 10% then 5% | 8% static | 4% | none |
-| 1-Step  | S1 FND | 10% | 10% trailing at end of day, no lock | 3% | best day <= 50% of profit |
+| 1-Step  | S1 FND | 10% | 10% end-of-day trail, stops at start | 3% | best day <= 50% of profit |
 | Instant | FND | none | 5% trailing, stops at start | 3% | best day <= 50% of profit |
 
 Product line version 1 (13 Nov 2026, D-13.17 and D-13.20): Lite and 1-Step
 are sold from 10K (5K removed; Lite v3/funded v2), and 1-Step moves to
 FTMO's end-of-day trailing loss (v3/funded v2). Earlier versions stay in
 RETIRED for the accounts sold on them.
+
+1-Step floor (14 Nov 2026, D-14.10, replaces D-13.20): the end-of-day
+trailing floor stops at the starting balance and, on the funded stage, a
+payout does not lower it again (s1 v4, funded v5).
 
 Max loss kinds: static; trailing (intraday, on equity); trailing at end of
 day (on the balance at each 17:00 New York reset). A trailing floor may lock
@@ -251,7 +255,8 @@ def _one_step(stage: Stage, target: Fraction | None, line_v1: bool = True) -> Ru
         product="one-step",
         stage=stage,
         profit_target=target,
-        # line v1: FTMO's 10 % end-of-day trailing loss that keeps rising
+        # line v1: a 10 % end-of-day trailing loss; it kept rising (D-13.20)
+        # until D-14.10 stopped it at the starting balance (_floor_stops)
         max_loss=_P(10, 100) if line_v1 else _P(6, 100),
         max_loss_kind=MaxLossKind.TRAILING_EOD if line_v1 else MaxLossKind.STATIC,
         daily_loss=_P(3, 100),
@@ -301,6 +306,23 @@ def _news(rules: RuleSet, version: int) -> RuleSet:
 _LITE_FUNDED_V3 = _breaks(_lite(Stage.FUNDED, None), 3)
 _CLASSIC_FUNDED_V2 = _breaks(_classic(Stage.FUNDED, None), 2)
 _ONE_STEP_FUNDED_V3 = _breaks(_one_step(Stage.FUNDED, None), 3)
+_ONE_STEP_S1_V3 = _one_step(Stage.S1, _P(10, 100))
+_ONE_STEP_FUNDED_V4 = _news(_ONE_STEP_FUNDED_V3, 4)
+
+
+def _floor_stops(rules: RuleSet, version: int) -> RuleSet:
+    """A 1-Step rule set whose end-of-day trailing floor stops at the
+    starting balance, as its next version (owner decision D-14.10, 14 Nov
+    2026; replaces D-13.20). Funded: a payout does not lower the floor
+    again, as on Instant (K7)."""
+    base = rules.rsv_id.rsplit("-v", 1)[0]
+    return replace(
+        rules,
+        rsv_id=f"{base}-v{version}",
+        floor_locks_at_start=True,
+        floor_restarts_after_payout=rules.stage is not Stage.FUNDED,
+    )
+
 
 # The rule sets on sale, per product, in stage order.
 PRODUCTS: dict[str, tuple[RuleSet, ...]] = {
@@ -315,14 +337,17 @@ PRODUCTS: dict[str, tuple[RuleSet, ...]] = {
         _news(_CLASSIC_FUNDED_V2, 3),
     ),
     "one-step": (
-        _one_step(Stage.S1, _P(10, 100)),
-        _news(_ONE_STEP_FUNDED_V3, 4),
+        _floor_stops(_ONE_STEP_S1_V3, 4),
+        _floor_stops(_ONE_STEP_FUNDED_V4, 5),
     ),
     "instant": (_news(_INSTANT_V3, 4),),
 }
 
 # Versions no longer sold; accounts opened on them keep them.
 RETIRED: tuple[RuleSet, ...] = (
+    # 1-Step before its floor stopped at the starting balance (D-14.10)
+    _ONE_STEP_S1_V3,
+    _ONE_STEP_FUNDED_V4,
     _INSTANT_V1,
     _INSTANT_V2,
     # funded stages before the news rule as FTMO (14 Nov 2026)
