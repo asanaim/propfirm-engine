@@ -6,13 +6,14 @@ import { CommandSearch } from "./CommandSearch";
 import { preloadScreens } from "./lazyPage";
 import { Menu } from "./Menu";
 import { NotificationBell } from "./NotificationBell";
+import { StaffUserMenu } from "./StaffProfile";
 
 /** The top bar: the pipridge logo (the reverse logo: the bar is ink in both
 themes), "Back office", the page's title, the Ctrl+K search (AC06), then
 the notifications bell beside the account button. */
 export function BrandBar() {
   return (
-    <AppBar color="inherit" className="brand-bar">
+    <AppBar color="inherit" className="brand-bar" userMenu={<StaffUserMenu />}>
       <Box component="a" href="#/" aria-label="pipridge back office home" sx={{ display: "flex", alignItems: "center", gap: 1.25, mr: 2.5 }}>
         <img src="/brand/logo-on-dark.svg" alt="" width={124} height={30} style={{ display: "block", height: 30, width: "auto" }} />
         <Box component="span" className="brand-bar-label">

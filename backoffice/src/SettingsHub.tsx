@@ -2,6 +2,7 @@ import { Alert, Box, Button, Card, CardActions, CardContent, Chip, InputAdornmen
 import { useState } from "react";
 import { Link, Title, usePermissions } from "react-admin";
 import { config } from "./config";
+import { QuickSwitches, SWITCHED } from "./QuickSwitches";
 import { ICONS, SIZE, STROKE } from "./icons";
 import { type Area, canOpen, filterAreas } from "./places";
 import { screensFor } from "./screens";
@@ -24,6 +25,7 @@ function AreaCard({ area, screens }: { area: Area; screens: ReadonlySet<string> 
           {area.explains}
         </Typography>
       </CardContent>
+      {open && SWITCHED.has(area.key) ? <QuickSwitches area={area.key} /> : null}
       <CardActions>
         {open && area.path !== null ? (
           <Button component={Link} to={area.path} size="small">

@@ -40,7 +40,7 @@ describe("the menu in sections (rule AC28)", () => {
     const keys = new Set<string>(GROUPS.map((g) => g.key));
     for (const p of PLACES) if (p.group !== null) expect(keys).toContain(p.group);
     expect(PLACES.filter((p) => p.group === null && p.bar !== true).map((p) => p.label)).toEqual(["My work"]);
-    expect(PLACES.filter((p) => p.bar === true).map((p) => p.label)).toEqual(["Notifications"]); // the bell in the top bar
+    expect(PLACES.filter((p) => p.bar === true).map((p) => p.label)).toEqual(["Notifications", "Profile"]); // the bell in the top bar
   });
 
   it("opens the section of the page in view and keeps the others closed", () => {
@@ -77,5 +77,12 @@ describe("the notifications bell", () => {
     const { bellState } = await import("./NotificationBell");
     expect(bellState([])).toEqual({ count: 0, urgent: false });
     expect(bellState([{ urgent: false }, { urgent: true }])).toEqual({ count: 2, urgent: true });
+  });
+});
+
+describe("the staff profile", () => {
+  it("links to the sign-in service's account page", async () => {
+    const { accountUrl } = await import("./StaffProfile");
+    expect(accountUrl("https://id.example/realms/propfirm/")).toBe("https://id.example/realms/propfirm/account");
   });
 });
