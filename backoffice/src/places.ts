@@ -250,9 +250,19 @@ export const AREAS: readonly Area[] = [
 /** Lower case words of a text. */
 const words = (text: string): string[] => text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
+/** Whether the letters of `w` appear in `x` in order ("pyt" in "payout"). */
+function inOrder(w: string, x: string): boolean {
+  let i = 0;
+  for (const ch of x) if (ch === w[i]) i++;
+  return i === w.length;
+}
+
 /**
- * How well an entry matches a query: null when some query word is not the
- * start of any of its words; otherwise lower is better (label hits first).
+ * How well an entry matches a query: null when some query word matches
+ * nothing; otherwise lower is better. Per query word, best first: the start
+ * of a label word (0), the start of a keyword (1), inside a word (2), its
+ * letters in order in a label word, for typos such as "pyouts" (3, words of
+ * three letters or more). A label that starts with the whole query gains.
  */
 export function score(query: string, label: string, keywords: string): number | null {
   const wanted = words(query);
@@ -262,14 +272,41 @@ export function score(query: string, label: string, keywords: string): number | 
   let total = 0;
   for (const w of wanted) {
     if (inLabel.some((x) => x.startsWith(w))) continue;
-    if (all.some((x) => x.startsWith(w))) {
-      total += 1;
-      continue;
-    }
-    return null;
+    if (all.some((x) => x.startsWith(w))) total += 1;
+    else if (w.length >= 3 && all.some((x) => x.includes(w))) total += 2;
+    else if (w.length >= 3 && inLabel.some((x) => x[0] === w[0] && inOrder(w, x))) total += 3;
+    else return null;
   }
   return label.toLowerCase().startsWith(query.trim().toLowerCase()) ? total - 0.5 : total;
 }
+
+const RECENT_KEY = "pipridge.search.recent";
+const RECENT_MAX = 5;
+
+/** The pages last opened from the search, newest first (this browser only). */
+export function recentHits(): Hit[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_KEY);
+    const list: unknown = raw === null ? [] : JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    return list.filter((h): h is Hit => typeof h === "object" && h !== null && "path" in h && "label" in h && "icon" in h).slice(0, RECENT_MAX);
+  } catch {
+    return [];
+  }
+}
+
+/** Keep a hit opened from the search at the top of the recent list. */
+export function rememberHit(hit: Hit): void {
+  try {
+    const kept = [hit, ...recentHits().filter((h) => h.path !== hit.path)].slice(0, RECENT_MAX);
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(kept));
+  } catch {
+    // storage refused (private mode): the search still works without it
+  }
+}
+
+/** Shown before anything is typed, after the recent pages. */
+const STARTERS = ["/", "/traders", "/payouts", "/cases", "/settings"];
 
 /** The hub's cards a query keeps (all of them for an empty query). */
 export function filterAreas(query: string, areas: readonly Area[] = AREAS): Area[] {
@@ -286,7 +323,7 @@ export function canOpen(area: Area, screens: ReadonlySet<string>): boolean {
 export interface Hit {
   label: string;
   /** What kind of thing it is, shown beside the label. */
-  group: "Record" | "Page" | "Setting";
+  group: "Record" | "Page" | "Setting" | "Recent" | "Trader";
   path: string;
   icon: IconKey;
 }
@@ -315,8 +352,21 @@ export function recordHit(query: string, screens: ReadonlySet<string>): Hit | nu
   return { label: `${kind.label} ${ref}`, group: "Record", path: kind.path(ref), icon: kind.icon };
 }
 
+/** Suggestions for an empty query: recent pages, then common ones. */
+export function starters(screens: ReadonlySet<string>, recent: readonly Hit[] = recentHits(), limit = 8): Hit[] {
+  const out: Hit[] = recent.map((h) => ({ ...h, group: "Recent" }));
+  for (const path of STARTERS) {
+    const p = PLACES.find((x) => x.path === path);
+    if (p === undefined || (p.screen !== null && !screens.has(p.screen))) continue;
+    if (out.some((h) => h.path === p.path)) continue;
+    out.push({ label: p.label, group: "Page", path: p.path, icon: p.icon });
+  }
+  return out.slice(0, limit);
+}
+
 /** The Ctrl+K results for a query, best first, at most `limit`. */
 export function search(query: string, screens: ReadonlySet<string>, limit = 8): Hit[] {
+  if (words(query).length === 0) return starters(screens, recentHits(), limit);
   const record = recordHit(query, screens);
   const ranked: { hit: Hit; score: number; order: number }[] = [];
   PLACES.forEach((p, order) => {
