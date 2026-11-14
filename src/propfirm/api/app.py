@@ -100,6 +100,7 @@ from propfirm.customers.payout_flow import payout_state
 from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
 from propfirm.customers.payouts import Eligibility, eligibility_json
+from propfirm.customers.pricing import price
 from propfirm.customers.scaling import Scaling, ScalingRefused
 from propfirm.customers.store import (
     AccountRecord,
@@ -736,6 +737,8 @@ def product_view(p: ProductPolicy, catalogue: CataloguePolicy | None = None) -> 
         else None,
         "code_discount_max_percent": percent_text(p.code_discount_max),
         "repeat_discount_percent": [percent_text(d) for d in p.repeat_discounts],
+        "retake_discount_percent": percent_text(p.retake_discount) if p.retake_discount else None,
+        "code_free_sizes_cents": list(p.code_free_sizes),
         "fee_refund_with_payout": p.fee_refund_with_payout or None,
         "sizes": [{"size_cents": s, "price_cents": c} for s, c in sizes],
         "stages": [rule_set_view(r) for r in p.rule_sets],
@@ -1897,6 +1900,30 @@ def create_app(
                     break
                 after = int(page[-1]["seq"])
         return {"accounts": owned, **analyse(trades_from(events), since, until)}
+
+    @app.get("/me/retakes")
+    async def my_retakes(deps: D, me: Trader) -> list[dict[str, Any]]:
+        """Breached accounts the trader may retake at the retake price (D-13.6)."""
+        cif = await _cif(deps, me)
+        policy = await _policy(deps)
+        out = []
+        for order in await _checkout(deps).retake_offers(cif.cif, deps.clock()):
+            product = policy.product(order.product_id)
+            on_sale = dict(policy.catalogue.sizes(product))
+            if product.id in policy.catalogue.products_off or order.size_cents not in on_sale:
+                continue  # not on sale now
+            quote = price(product, order.size_cents, 1, retake=True)
+            out.append(
+                {
+                    "of_ord": order.ord,
+                    "product_id": product.id,
+                    "size_cents": order.size_cents,
+                    "list_price_cents": quote.list_price_cents,
+                    "discount_percent": percent_text(quote.discount),
+                    "price_cents": quote.price_cents,
+                }
+            )
+        return out
 
     @app.get("/me/wallet")
     async def my_wallet(deps: D, me: Trader) -> dict[str, Any]:

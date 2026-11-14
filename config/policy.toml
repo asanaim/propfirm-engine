@@ -476,6 +476,8 @@ profit_split_percent = "80"
 split_after_payouts = 3
 split_percent_after_payouts = "85"
 code_discount_max_percent = "10"
+retake_discount_percent = "10"  # D-13.6 (13 Nov 2026): one retake after a breach, same size
+code_free_sizes_cents = [1000000]  # D-13.17: no discount code on Lite 10K
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 0     # 0: no fee refund
 
@@ -528,6 +530,7 @@ profit_split_percent = "80"
 split_after_payouts = 3
 split_percent_after_payouts = "85"
 code_discount_max_percent = "10"
+retake_discount_percent = "10"  # D-13.6 (13 Nov 2026): one retake after a breach, same size
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 0
 
@@ -581,6 +584,7 @@ profit_split_percent = "80"
 split_after_payouts = 3
 split_percent_after_payouts = "85"
 code_discount_max_percent = "10"
+retake_discount_percent = "10"  # D-13.6 (13 Nov 2026): one retake after a breach, same size
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 3     # refunded with the 3rd payout
 
@@ -621,6 +625,7 @@ sizes_cents = [500000, 1000000, 2500000]
 prices_cents = [10900, 19900, 47900]
 profit_split_percent = "80"
 code_discount_max_percent = "0"  # no codes on Instant
+retake_discount_percent = "0"  # D-13.6: none on Instant (the fee must cover a no-skill withdrawal)
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 0
 

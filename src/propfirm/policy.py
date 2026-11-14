@@ -174,6 +174,11 @@ class ProductPolicy:
     # 0 payouts: no rung. Scaling (`[scaling] split_after_step`) is the next.
     split_after_payouts: int = 0
     split_after_payouts_value: Fraction | None = None
+    # D-13.6 retake: this share off the list price of one new account of the
+    # same product and size after a breach (0: none); D-13.17: sizes on which
+    # no discount code is valid
+    retake_discount: Fraction = Fraction(0)
+    code_free_sizes: tuple[int, ...] = ()
 
     def rule_set(self, stage: Stage) -> RuleSet | None:
         return next((r for r in self.rule_sets if r.stage is stage), None)
@@ -960,8 +965,19 @@ def _product(t: _Table) -> ProductPolicy:
         if t.has("split_percent_after_payouts")
         else None
     )
+    retake = (
+        t.required_percent("retake_discount_percent")
+        if t.has("retake_discount_percent")
+        else Fraction(0)
+    )
+    code_free = t.integers("code_free_sizes_cents", 1) if t.has("code_free_sizes_cents") else ()
     stages = [_stage(s, product_id, sizes) for s in t.tables("stages")]
     t.done()
+    if not 0 <= retake < 1 or not set(code_free) <= set(sizes):
+        raise PolicyError(
+            f"{product_id}: retake_discount_percent below 100, "
+            "code_free_sizes_cents among the sizes"
+        )
     if not 0 < split <= 1 or not 0 <= code_max < 1:
         raise PolicyError(f"{t.name('id')}: split must be in (0, 100], discounts below 100")
     order = [_STAGE_ORDER[r.stage] for r in stages]
@@ -983,6 +999,8 @@ def _product(t: _Table) -> ProductPolicy:
         rule_sets=tuple(stages),
         split_after_payouts=rung_after,
         split_after_payouts_value=rung,
+        retake_discount=retake,
+        code_free_sizes=tuple(code_free),
     )
 
 

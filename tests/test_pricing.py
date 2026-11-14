@@ -30,12 +30,51 @@ def test_first_account_pays_list_price() -> None:
 
 
 def test_code_on_a_first_account() -> None:
-    quote = price(LITE, 1_000_000, 0, TEN)
+    quote = price(LITE, 2_500_000, 0, TEN)
     assert (quote.discount_kind, quote.discount_cents, quote.price_cents) == (
         DiscountKind.CODE,
+        1_090,
+        9_810,
+    )
+
+
+def test_no_code_on_lite_10k() -> None:
+    """D-13.17: the shipped policy blocks codes on Lite 10K only."""
+    assert LITE.code_free_sizes == (1_000_000,)
+    assert all(not p.code_free_sizes for p in POLICY.products if p.id != "lite")
+    with pytest.raises(PricingError, match="account size"):
+        price(LITE, 1_000_000, 0, TEN)
+
+
+def test_retake_after_a_breach() -> None:
+    """D-13.6: 10 % off the list price, rounded down to the cent."""
+    quote = price(LITE, 1_000_000, 1, retake=True)
+    assert (quote.discount_kind, quote.discount, quote.discount_cents, quote.price_cents) == (
+        DiscountKind.RETAKE,
+        TEN,
         550,
         4_950,
     )
+    one_step = price(POLICY.product("one-step"), 2_500_000, 3, retake=True)
+    assert (one_step.discount_cents, one_step.price_cents) == (1_990, 17_910)
+
+
+def test_no_retake_on_instant() -> None:
+    assert INSTANT.retake_discount == 0
+    quote = price(INSTANT, 1_000_000, 1, retake=True)
+    assert (quote.discount_kind, quote.price_cents) == (DiscountKind.NONE, 19_900)
+
+
+def test_retake_takes_the_place_of_a_repeat_discount() -> None:
+    retaking = replace(REPEATING, retake_discount=Fraction(5, 100))
+    quote = price(retaking, 1_000_000, 1, retake=True)
+    assert (quote.discount_kind, quote.discount) == (DiscountKind.RETAKE, Fraction(5, 100))
+    assert price(retaking, 1_000_000, 1).discount_kind is DiscountKind.REPEAT
+
+
+def test_retake_needs_an_earlier_account() -> None:
+    with pytest.raises(ValueError, match="earlier account"):
+        price(LITE, 1_000_000, 0, retake=True)
 
 
 @pytest.mark.parametrize(
@@ -49,7 +88,7 @@ def test_code_on_a_first_account() -> None:
 )
 def test_codes_that_do_not_apply(product: object, prior: int, code: Fraction) -> None:
     with pytest.raises(PricingError):
-        price(product, 1_000_000, prior, code)  # type: ignore[arg-type]
+        price(product, 2_500_000, prior, code)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
