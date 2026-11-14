@@ -31,6 +31,7 @@ export interface Product {
   repeat_discount_percent: string[];
   retake_discount_percent?: string | null; // one retake after a breach, same size
   code_free_sizes_cents?: number[]; // sizes on which no discount code is valid
+  addons?: { id: string; price_percent: string }[]; // on sale with this product
   fee_refund_with_payout: number | null;
   sizes: { size_cents: number; price_cents: number }[];
   stages: Stage[];

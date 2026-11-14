@@ -26,6 +26,7 @@ from propfirm.customers.progression import next_stage
 from propfirm.customers.store import AccountRecord
 from propfirm.journal.inputs import Input, OpenAccount
 from propfirm.policy import Policy, PolicySource
+from propfirm.rules.addons import addons_of, with_addons
 from propfirm.rules.products import Stage
 from propfirm.service.gateway import Outcome
 from propfirm.settings.notices import Notices
@@ -48,7 +49,8 @@ def plan_for(policy: Policy, account: AccountRecord) -> Plan:
         return Plan(None, None, "no_next_stage")
     if following.stage is Stage.FUNDED:
         return Plan(Stage.FUNDED, None)  # the funded rule set is chosen at funding
-    return Plan(following.stage, following.rsv_id)
+    # the account's add-ons (D-13.18) go with it to the next stage
+    return Plan(following.stage, with_addons(following.rsv_id, addons_of(account.rsv_id)))
 
 
 class NoticeSource(Protocol):

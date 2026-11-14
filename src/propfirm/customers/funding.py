@@ -33,6 +33,7 @@ from propfirm.customers.providers import Screener
 from propfirm.customers.store import CifRecord, CustomerStore
 from propfirm.journal.inputs import Input, OpenAccount
 from propfirm.policy import PolicySource
+from propfirm.rules.addons import addons_of, base_id
 from propfirm.service.gateway import Outcome
 
 log = logging.getLogger(__name__)
@@ -280,9 +281,12 @@ class Onboarding:
         except KeyError:
             log.warning("%s waits: product %s is not in the policy", onb, record.product_id)
             return record
-        rule_set = next((r for r in product.rule_sets if r.rsv_id == record.rsv_id), None)
+        base = base_id(record.rsv_id)
+        rule_set = next((r for r in product.rule_sets if r.rsv_id == base), None)
         if rule_set is None:
             rule_set = funded_rule_set(product)
+        if rule_set is not None and addons_of(record.rsv_id):
+            rule_set = policy.with_addons(rule_set, addons_of(record.rsv_id))  # D-13.18
         if rule_set is None or rule_set.rsv_id != record.rsv_id:
             log.warning("%s waits: rule set %s is not in the policy", onb, record.rsv_id)
             return record

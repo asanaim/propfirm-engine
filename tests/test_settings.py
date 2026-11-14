@@ -148,10 +148,13 @@ def test_malformed_limits_are_refused(args: tuple[Any, ...]) -> None:
 def test_an_engine_started_after_a_change_publishes_only_what_it_lacks() -> None:
     machine = Machine(CODEC.encode(setup_from_policy(BASE)), {1: bytes(32)})
     in_force = apply_changes(BASE, [change(7, ONE_STEP_S1)])
-    (item,) = policy_changes(in_force, machine, T0)
-    assert isinstance(item, AddRuleSet) and item.rule_set.rsv_id == "one-step-s1-v4-a7"
+    items = policy_changes(in_force, machine, T0)
+    ids = [i.rule_set.rsv_id for i in items if isinstance(i, AddRuleSet)]
+    assert len(ids) == len(items) == 8  # with its add-on rule sets (D-13.18)
+    assert ids[0] == "one-step-s1-v4-a7" and "one-step-s1-v4-a7-swing" in ids
     machine.use_price_key(1)
-    machine.apply("1-0", item)
+    for n, item in enumerate(items):
+        machine.apply(f"1-{n}", item)
     assert policy_changes(in_force, machine, T0) == []
 
 

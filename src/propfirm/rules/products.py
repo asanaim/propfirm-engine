@@ -150,6 +150,12 @@ class RuleSet:
     # minutes. False for evaluations and for rule sets before 13 Nov 2026;
     # the Swing add-on (step 2) will sell a funded stage without it.
     flat_before_breaks: bool = added_field(False)
+    # Add-ons (D-13.18), on derived rule sets only (`propfirm.rules.addons`):
+    # the highest leverage a new position may use (Swing: 30, i.e. 1:30;
+    # an instrument's own lower leverage still applies), and the nights at
+    # the start of each position on which no swap is charged (swap-free: 5).
+    leverage_cap: Fraction | None = added_field(None)  # noqa: RUF009 (default None)
+    swap_free_nights: int = added_field(0)
 
     def __post_init__(self) -> None:
         require_text("rsv_id", self.rsv_id)
@@ -181,6 +187,11 @@ class RuleSet:
             raise TypeError("floor_locks_at_start must be a bool")
         if not isinstance(self.flat_before_breaks, bool):
             raise TypeError("flat_before_breaks must be a bool")
+        if self.leverage_cap is not None and (
+            not isinstance(self.leverage_cap, Fraction) or self.leverage_cap <= 0
+        ):
+            raise ValueError("leverage_cap must be a positive Fraction or None")
+        require_int("swap_free_nights", self.swap_free_nights, minimum=0)
         if not self.max_loss_kind.trails:
             if not self.floor_restarts_after_payout:
                 raise ValueError("only a trailing max loss has a floor that could restart")

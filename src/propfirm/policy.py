@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import MarketSpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass
+from propfirm.rules.addons import ADDON_IDS, addons_of, derive
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
 from propfirm.staff.records import SECTIONS_APPROVALS, Limits
 from propfirm.trading.hours import ALWAYS, TradingHours, day_minute, new_york_ms, week_minute
@@ -185,6 +186,36 @@ class ProductPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class AddonOffer:
+    """One add-on as sold (D-13.18): its price as a share of the account's
+    list price, and the products it may be bought with."""
+
+    id: str
+    price: Fraction
+    products: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class AddonsPolicy:
+    """The add-ons (D-13.18) and the numbers their rule sets use. `off`:
+    switched off (not sold); accounts that have one keep it. The defaults
+    (no add-ons) are for policy files written before them."""
+
+    offers: tuple[AddonOffer, ...] = ()
+    split: Fraction = Fraction(9, 10)  # split90: the funded split
+    swing_leverage: Fraction = Fraction(30)  # swing: at most 1:30
+    swap_free_nights: int = 5  # swapfree: first nights of each position
+    off: frozenset[str] = frozenset()
+
+    def for_product(self, product_id: str) -> tuple[AddonOffer, ...]:
+        """The add-ons offered with `product_id`, in id order (on or off)."""
+        return tuple(o for o in self.offers if product_id in o.products)
+
+    def offer(self, addon_id: str) -> AddonOffer | None:
+        return next((o for o in self.offers if o.id == addon_id), None)
+
+
+@dataclass(frozen=True, slots=True)
 class CataloguePolicy:
     """What is on sale, and the limits on buying it (review D4, owner
     decisions K2 of 12 Nov 2026). Products and sizes switched off are not
@@ -260,9 +291,31 @@ class Policy:
     cases: CasePolicy
     staff: StaffPolicy = field(default_factory=StaffPolicy)
     catalogue: CataloguePolicy = field(default_factory=CataloguePolicy)
+    addons: AddonsPolicy = field(default_factory=AddonsPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
+        """Each product's stages, in order."""
         return tuple(r for p in self.products for r in p.rule_sets)
+
+    def published_rule_sets(self) -> tuple[RuleSet, ...]:
+        """Every rule set the engine knows: each stage's, then, for each,
+        one derived rule set per combination of the product's add-ons."""
+        out = []
+        for p in self.products:
+            offered = [o.id for o in self.addons.for_product(p.id)]
+            combos = [
+                tuple(a for i, a in enumerate(offered) if mask >> i & 1)
+                for mask in range(1, 1 << len(offered))
+            ]
+            for r in p.rule_sets:
+                out.append(r)
+                out.extend(self.with_addons(r, c) for c in combos)
+        return tuple(out)
+
+    def with_addons(self, rules: RuleSet, addons: tuple[str, ...]) -> RuleSet:
+        """`rules` with `addons`, by this policy's add-on numbers."""
+        a = self.addons
+        return derive(rules, addons, a.swing_leverage, a.swap_free_nights)
 
     def product(self, product_id: str) -> ProductPolicy:
         for p in self.products:
@@ -315,7 +368,7 @@ def percent_text(share: Fraction | None) -> str | None:
     return f"{value.numerator}/{value.denominator}"
 
 
-_RSV_STAGE = re.compile(r"-(s1|s2|funded)-v[0-9]+(?:-a[0-9]+)?$")
+_RSV_STAGE = re.compile(r"-(s1|s2|funded)-v[0-9]+(?:-a[0-9]+)?(?:-(?:split90|swing|swapfree))*$")
 
 
 def stage_of(rsv_id: str) -> Stage:
@@ -343,6 +396,9 @@ def rule_set_view(r: RuleSet) -> dict[str, Any]:
         "flat_to_pass": r.flat_to_pass,  # no open position or pending order to pass
         "tie_rule": r.tie_rule.value,  # a breach and a pass on the same check
         "news_restricted": r.news_restricted,  # restricted news windows bind this stage
+        "addons": list(addons_of(r.rsv_id)),  # D-13.18
+        "leverage_cap": None if r.leverage_cap is None else str(r.leverage_cap),  # 30: 1:30
+        "swap_free_nights": r.swap_free_nights,
         # trailing loss: a payout restarts the floor below the new balance
         "floor_restarts_after_payout": r.floor_restarts_after_payout,
         # trailing loss: the floor stops rising at the starting balance
@@ -486,6 +542,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             cases=_cases(root.table("cases")),
             staff=_staff(root.table("staff")),
             catalogue=_catalogue(root.table("catalogue")),
+            addons=_addons(root.table("addons")) if root.has("addons") else AddonsPolicy(),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -497,6 +554,9 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
     if len(set(ids)) != len(ids):
         raise PolicyError("product ids must be unique")
     check_catalogue(policy, policy.catalogue.products_off, policy.catalogue.sizes_off)
+    for offer in policy.addons.offers:
+        if unknown := sorted(offer.products - set(ids)):
+            raise PolicyError(f"addons.{offer.id}: unknown products {unknown}")
     refunds = [c for p in policy.products if p.fee_refund_with_payout for _, c in p.prices_cents]
     if policy.payouts.maximum_cents and policy.payouts.maximum_cents < max(refunds, default=0):
         # the fee refund is paid with a payout and counts towards its maximum
@@ -516,6 +576,35 @@ def _catalogue(t: _Table) -> CataloguePolicy:
     t.done()
     if len(set(off)) != len(off) or len(set(sizes)) != len(sizes):
         raise PolicyError("catalogue: a product or size is listed twice")
+    return policy
+
+
+def _addons(t: _Table) -> AddonsPolicy:
+    offers = []
+    for addon_id in ADDON_IDS:
+        if not t.has(addon_id):
+            continue
+        o = t.table(addon_id)
+        offers.append(
+            AddonOffer(
+                id=addon_id,
+                price=o.required_percent("price_percent"),
+                products=frozenset(o.texts("products")),
+            )
+        )
+        o.done()
+    policy = AddonsPolicy(
+        offers=tuple(offers),
+        split=t.required_percent("split_percent"),
+        swing_leverage=Fraction(t.integer("swing_leverage", 1)),
+        swap_free_nights=t.integer("swap_free_nights", 1),
+        off=frozenset(t.texts("off")),
+    )
+    t.done()
+    if any(not 0 < o.price < 1 or not o.products for o in policy.offers):
+        raise PolicyError("addons: each price_percent between 0 and 100, with products")
+    if not 0 < policy.split <= 1 or not policy.off <= {o.id for o in policy.offers}:
+        raise PolicyError("addons: split_percent up to 100; off names offered add-ons")
     return policy
 
 

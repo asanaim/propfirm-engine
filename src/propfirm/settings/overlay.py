@@ -250,7 +250,13 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
         catalogue = replace(
             catalogue, products_off=offering.products_off, sizes_off=offering.sizes_off
         )
-    return replace(base, access=access, products=tuple(products), catalogue=catalogue)
+        offered = {o.id for o in base.addons.offers}
+        addons = replace(base.addons, off=offering.addons_off & offered)
+    else:
+        addons = base.addons
+    return replace(
+        base, access=access, products=tuple(products), catalogue=catalogue, addons=addons
+    )
 
 
 def policy_pages(changes: Iterable[SettingChange]) -> dict[str, list[PageVersion]]:

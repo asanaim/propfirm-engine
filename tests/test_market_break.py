@@ -17,6 +17,7 @@ from propfirm.journal.machine import CODEC, Machine
 from propfirm.ledger import Ledger
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import PolicyError, load_policy, parse_policy
+from propfirm.rules.addons import addons_of
 from propfirm.rules.products import PRODUCTS
 from propfirm.service.setup import setup_from_policy
 from propfirm.trading.engine import EngineState, TradingEngine
@@ -179,7 +180,9 @@ def test_an_older_state_keeps_its_encoding() -> None:
 
 def test_the_shipped_funded_stages_and_settings() -> None:
     policy = load_policy()
-    funded = {r.rsv_id for r in policy.rule_sets() if r.flat_before_breaks}
+    funded = {r.rsv_id for r in policy.published_rule_sets() if r.flat_before_breaks}
+    assert not any("swing" in r for r in funded)  # D-13.18: Swing holds over breaks
+    funded = {r for r in funded if not addons_of(r)}
     assert funded == {
         "lite-funded-v4",
         "classic-funded-v3",

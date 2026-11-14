@@ -88,3 +88,15 @@ def test_a_rung_needs_both_keys_and_must_raise_the_split() -> None:
         with pytest.raises(PolicyError):
             parse_policy(edited(change))
     assert replace(POLICY.product("lite"), split_after_payouts=0).split_after_payouts == 0
+
+
+def test_the_split_add_on_pays_90_percent_from_the_first_payout() -> None:
+    """D-13.18: the add-on's split from the first payout; a later rung or the
+    scaling step never lowers it, and a confirmed case does not take it."""
+    bought = replace(account("lite", paid=0), addons=("split90",))
+    assert split_for(POLICY, bought) == (Fraction(90, 100), "the split add-on")
+    assert split_for(POLICY, replace(bought, payouts_paid=3))[0] == Fraction(90, 100)
+    assert split_for(POLICY, replace(bought, confirmed_cases=1))[0] == Fraction(90, 100)
+    assert split_for(POLICY, replace(account("lite", paid=0), addons=("swing",)))[0] == Fraction(
+        80, 100
+    )

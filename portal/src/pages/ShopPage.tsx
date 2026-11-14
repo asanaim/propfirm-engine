@@ -51,10 +51,28 @@ function StageRules({ stage }: { stage: Stage }) {
   );
 }
 
-function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size: number) => void; busy: boolean }) {
+/** What each add-on does (D-13.18). */
+export const ADDON_TEXT: Record<string, string> = {
+  split90: "90 % profit split from your first payout",
+  swing: "Swing: hold over news and weekends (leverage up to 1:30)",
+  swapfree: "No swap on the first 5 nights of each position",
+};
+
+/** `percent` (exact text, "15" or "12.5") of `cents`, rounded down, as the
+server prices it. Whole numbers only, so the result is exact. */
+export function percentOf(cents: number, percent: string): number {
+  const [whole = "", part = ""] = percent.split(".");
+  const scale = 10 ** part.length;
+  return Math.floor((cents * Number(whole + part)) / (100 * scale));
+}
+
+function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size: number, addons: string[]) => void; busy: boolean }) {
   const first = product.sizes[0]?.size_cents ?? 0;
   const [size, setSize] = useState(first);
-  const price = product.sizes.find((s) => s.size_cents === size)?.price_cents;
+  const [chosen, setChosen] = useState<string[]>([]);
+  const list = product.sizes.find((s) => s.size_cents === size)?.price_cents;
+  const offered = product.addons ?? [];
+  const price = list === undefined ? undefined : list + offered.filter((a) => chosen.includes(a.id)).reduce((sum, a) => sum + percentOf(list, a.price_percent), 0);
   const id = `size-${product.id}`;
   return (
     <Card
@@ -63,7 +81,7 @@ function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size:
         <Button
           busy={busy}
           onClick={() => {
-            onBuy(size);
+            onBuy(size, chosen);
           }}
         >
           Buy {formatSize(size)} for {price === undefined ? "—" : formatCents(price)}
@@ -95,6 +113,25 @@ function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size:
           </label>
         ))}
       </fieldset>
+      {offered.length > 0 ? (
+        <fieldset className="addons">
+          <legend>Add-ons</legend>
+          {offered.map((a) => (
+            <label key={a.id} className="addon">
+              <input
+                type="checkbox"
+                checked={chosen.includes(a.id)}
+                onChange={(e) => {
+                  setChosen(e.target.checked ? [...chosen, a.id] : chosen.filter((c) => c !== a.id));
+                }}
+              />
+              <span>
+                {ADDON_TEXT[a.id] ?? a.id} <span className="muted">+{a.price_percent} %</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
       <div className="stages">
         {product.stages.map((stage) => (
           <StageRules key={stage.rsv_id} stage={stage} />
@@ -149,7 +186,7 @@ export function ShopPage() {
     });
   }, [api, ready, order]);
 
-  const buy = async (product: Product, size: number) => {
+  const buy = async (product: Product, size: number, addons: string[] = []) => {
     if (auth.status !== "signed_in") {
       await auth.signIn("/shop");
       return;
@@ -162,7 +199,7 @@ export function ShopPage() {
     setError(null);
     setPaid(false);
     try {
-      const body = { product_id: product.id, size_cents: size, ...(method === null ? {} : { method }) };
+      const body = { product_id: product.id, size_cents: size, ...(addons.length > 0 ? { addons } : {}), ...(method === null ? {} : { method }) };
       setOrder(await api.post<PlacedOrder>("/orders", body));
     } catch (reason) {
       setError(reason);
@@ -245,7 +282,7 @@ export function ShopPage() {
       ) : (
         <div className="grid products">
           {(products ?? []).map((p) => (
-            <ProductCard key={p.id} product={p} busy={busy === p.id} onBuy={(size) => void buy(p, size)} />
+            <ProductCard key={p.id} product={p} busy={busy === p.id} onBuy={(size, addons) => void buy(p, size, addons)} />
           ))}
         </div>
       )}

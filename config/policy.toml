@@ -363,7 +363,7 @@ classes = ["forex", "metal", "oil"]
 # M18). Text in config/contracts/<template>.txt. Until firm_name (C14) and
 # governing_law (counsel) are set, a contract is issued only in the sandbox,
 # marked DRAFT.
-template = "funded-agreement-v3"  # v3: the split ladder
+template = "funded-agreement-v4"  # v3: the split ladder; v4: add-ons (D-13.18)
 firm_name = ""
 governing_law = ""
 account_disclosure = "simulated"  # D1: "simulated" or "live"
@@ -649,3 +649,26 @@ fee_refund_with_payout = 0
   consistency_percent = "50"
   consistency_at_pass = false
   news_restricted = true
+
+[addons]
+# Add-ons (owner decision D-13.18, 13 Nov 2026), bought with an account and
+# kept through every stage. Each is priced as a share of the account's list
+# price; a discount is taken off the list price only. An account with an
+# add-on runs on a derived rule set: the stage's id followed by the add-on
+# ids (lite-funded-v3-swing). A weekly payout add-on was rejected.
+split_percent = "90"      # split90: the funded split from the first payout
+swing_leverage = 30       # swing: leverage at most 1:30 (lower instrument leverage stays)
+swap_free_nights = 5      # swapfree: no swap on each position's first 5 nights
+off = []                  # add-ons switched off (not sold); accounts keep theirs
+
+[addons.split90]
+price_percent = "20"
+products = ["lite", "one-step"]
+
+[addons.swing]            # weekend and news holding: no news or market break rule
+price_percent = "15"
+products = ["lite", "one-step"]
+
+[addons.swapfree]
+price_percent = "10"
+products = ["lite", "classic", "one-step", "instant"]

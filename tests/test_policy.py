@@ -273,8 +273,18 @@ def test_a_new_rule_set_version_is_published() -> None:
         lite(data)["stages"][0].update(version=4, daily_loss_percent="4")
 
     policy = parse_policy(edited(change))
-    (item,) = policy_changes(policy, machine(), T0)
-    assert isinstance(item, AddRuleSet) and item.rule_set.rsv_id == "lite-s1-v4"
+    items = policy_changes(policy, machine(), T0)
+    assert all(isinstance(i, AddRuleSet) for i in items)
+    assert [i.rule_set.rsv_id for i in items if isinstance(i, AddRuleSet)] == [
+        "lite-s1-v4",  # and one per combination of Lite's three add-ons (D-13.18)
+        "lite-s1-v4-split90",
+        "lite-s1-v4-swing",
+        "lite-s1-v4-split90-swing",
+        "lite-s1-v4-swapfree",
+        "lite-s1-v4-split90-swapfree",
+        "lite-s1-v4-swing-swapfree",
+        "lite-s1-v4-split90-swing-swapfree",
+    ]
 
 
 def test_changed_numbers_without_a_new_version_are_refused() -> None:

@@ -6,7 +6,7 @@ import { Problem } from "../components/Problem";
 import { fakeAuth, fakeFetch, renderWith } from "../test-utils";
 import { AccountsPage } from "./AccountsPage";
 import { OverviewPage } from "./OverviewPage";
-import { ShopPage } from "./ShopPage";
+import { percentOf, ShopPage } from "./ShopPage";
 
 const LITE: Product = {
   id: "lite",
@@ -98,6 +98,27 @@ it("shows the catalogue to anyone and asks a visitor to sign in to buy", async (
   await user.click(screen.getByRole("radio", { name: "$10K" }));
   await user.click(screen.getByRole("button", { name: "Buy $10K for $44.00" }));
   expect(auth.signIn).toHaveBeenCalledWith("/shop");
+});
+
+it("prices add-ons on the list price and sends them with the order", async () => {
+  const addons = [
+    { id: "split90", price_percent: "20" },
+    { id: "swing", price_percent: "15" },
+  ];
+  const fetcher = fakeFetch([
+    ["GET", "/catalogue", 200, [{ ...LITE, addons }]],
+    ["GET", "/me", 200, ME],
+    ["GET", "/me/retakes", 200, []],
+    ["POST", "/orders", 201, { ord: "ORD00000003", product_id: "lite", size_cents: 500_000, list_price_cents: 2_400, discount_kind: "none", discount_percent: "0", discount_code: null, price_cents: 2_760, rsv_id: "lite-s1-v3-swing", status: "pending", acc: null, failure: null, created_at: 0, paid_at: null, pay_url: "/dev/payments/ORD00000003/complete" }],
+  ]);
+  renderWith(<ShopPage />, fakeAuth(), fetcher);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("checkbox", { name: /Swing: hold over news and weekends/ }));
+  // $24 + 15 %
+  await user.click(await screen.findByRole("button", { name: "Buy $5K for $27.60" }));
+  const order = fetcher.mock.calls.find(([url]) => url === "/api/orders");
+  expect(JSON.parse(order?.[1]?.body as string)).toEqual({ product_id: "lite", size_cents: 500_000, addons: ["swing"] });
+  expect(percentOf(5_500, "12.5")).toBe(687);
 });
 
 it("offers the retake price after a breach", async () => {

@@ -61,6 +61,36 @@ describe("products and sizes (review D4)", () => {
     expect(await screen.findByText(/A second admin or owner approves it/)).toBeInTheDocument();
   });
 
+  it("switches an add-on off", () => {
+    const put = vi.fn();
+    const api: Api = {
+      get: () => Promise.reject(new Error("no")),
+      post: () => Promise.reject(new Error("no")),
+      put: <T,>(path: string, body?: unknown) => {
+        put(path, body);
+        return Promise.resolve({} as T);
+      },
+    };
+    const view: OfferingView = {
+      ...VIEW,
+      addons: [
+        { id: "split90", price_percent: "20", products: ["lite"], on: true },
+        { id: "swing", price_percent: "15", products: ["lite"], on: true },
+      ],
+    };
+    render(
+      <AdminContext dataProvider={testDataProvider()}>
+        <BackOfficeContext.Provider value={{ api, manager: {} as UserManager }}>
+          <OfferingEditor view={view} onDone={() => undefined} />
+        </BackOfficeContext.Provider>
+      </AdminContext>,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: /Swing: hold over news and weekends.*\(\+15%\)/ }));
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "pause Swing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Propose the change" }));
+    expect(put).toHaveBeenCalledWith("/admin/offering", { products_off: ["classic"], sizes_off: [], addons_off: ["swing"], reason: "pause Swing" });
+  });
+
   it("is offered to logins that change settings", () => {
     expect(screensFor(["settings.view", "settings.change"]).has("offering")).toBe(true);
     expect(screensFor(["staff.view"]).has("offering")).toBe(false);

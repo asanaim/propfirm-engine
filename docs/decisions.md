@@ -390,3 +390,33 @@ without updating to the latest main is not retested after the merge. While
 minutes are exhausted, every check is run locally before each pull request
 and the results are written in its description; the runtime image scan
 (Grype) waits for the next run on GitHub. The Actions budget stays at $0.
+
+D-14.12, add-ons built (build plan step 2; D-13.18; details taken under
+D-14.7, 15 Nov 2026).
+- What: 90 % split from the first payout (Lite, 1-Step; +20 %); Swing:
+  no news rule and no market break rule, leverage at most 1:30, an
+  instrument's own lower leverage kept (Lite, 1-Step; +15 %); swap free on
+  each position's first 5 nights (every product; +10 %). Prices, products,
+  the split, the leverage and the nights are policy settings (`[addons]`).
+- Price: each add-on is its share of the list price, rounded down to the
+  cent. A discount (code, retake, repeat) comes off the list price only,
+  never off an add-on: the add-on prices the extra risk, which a discount
+  does not reduce.
+- Rules: an account with add-ons runs on a derived rule set, the stage's
+  id followed by the add-on ids in a fixed order
+  (`lite-funded-v4-swing-swapfree`). Every rule outcome names them, and they
+  go with the account to each next stage and to funded. Every combination
+  is published with each stage, so an admin's change of limits carries them
+  too.
+- Swap free counts each night of a position, Wednesday's 3 included, and
+  charges only the nights past the free ones; other accounts are not
+  counted.
+- Switches: each add-on is switched on or off with the products and sizes
+  (one proposal, a second admin or owner approves); off stops new sales,
+  and accounts keep theirs. A screen that sends no add-on switches leaves
+  them as they are.
+- Contract template v4 names the add-ons bought; with the split add-on it
+  states 90 % and no ladder. Template v3's header named itself v2 (a typo);
+  v3 is left as issued.
+- Not built: the free trial, coupons screen and referral ledger (later
+  lines of step 2).

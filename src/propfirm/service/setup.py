@@ -24,7 +24,7 @@ def setup_from_policy(policy: Policy) -> EngineSetup:
     return EngineSetup(
         config_version=policy.trading.config_version,
         instruments=policy.trading.instruments,
-        rule_sets=policy.rule_sets(),
+        rule_sets=policy.published_rule_sets(),
         guard=policy.trading.guard,
         news_windows=(),
         trade_blocks=(),
@@ -42,7 +42,7 @@ def policy_changes(policy: Policy, machine: Machine, ts: int) -> list[Input]:
     PolicyError for a change that needs a new version number first."""
     changes: list[Input] = []
     known = machine.rule_sets
-    for rule_set in policy.rule_sets():
+    for rule_set in policy.published_rule_sets():
         current = known.get(rule_set.rsv_id)
         if current is None:
             changes.append(AddRuleSet(rule_set, ts))

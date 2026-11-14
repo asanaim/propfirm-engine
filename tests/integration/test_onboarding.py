@@ -98,7 +98,7 @@ def test_a_funded_review_ends_in_a_signed_funded_account(
                 "CTR00000001",
             )
             contract = (await p.call("GET", "/me/onboardings/ONB00000001/contract")).json()
-            assert contract["draft"] is True and contract["template"] == "funded-agreement-v3"
+            assert contract["draft"] is True and contract["template"] == "funded-agreement-v4"
             assert "Account ACC00000003" in contract["body"] and "Ada Trader" in contract["body"]
 
             url = "/me/onboardings/ONB00000001/sign"

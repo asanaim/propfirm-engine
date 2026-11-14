@@ -15,14 +15,19 @@
   discounts for later ones, and a retake takes the place of a repeat.
 - Rounding: the discount is rounded down to the cent (`discount_floor`),
   so a customer never gets more than the stated percentage.
+- Add-ons (D-13.18): each adds its share of the list price, rounded down
+  to the cent; a discount is taken off the list price only, never off an
+  add-on (D-14.12).
 """
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from fractions import Fraction
 
-from propfirm.policy import ProductPolicy
+from propfirm.policy import AddonOffer, ProductPolicy
+from propfirm.rules.addons import ordered
 
 
 class PricingError(ValueError):
@@ -42,7 +47,9 @@ class PriceQuote:
     discount_kind: DiscountKind
     discount: Fraction  # share of the list price
     discount_cents: int
-    price_cents: int
+    price_cents: int  # list price less the discount, plus the add-ons
+    addons: tuple[str, ...] = ()  # in id order
+    addon_cents: int = 0
 
 
 def discount_floor(list_price_cents: int, share: Fraction) -> int:
@@ -56,11 +63,13 @@ def price(
     prior_accounts: int,
     code_discount: Fraction | None = None,
     retake: bool = False,
+    addons: Sequence[AddonOffer] = (),
 ) -> PriceQuote:
     """Price one account of `size_cents`. `prior_accounts` counts the
     customer's earlier paid accounts of this product; `code_discount` is the
     share a valid code offers, if a code was given; `retake`: the customer
-    holds an unused breach of this product and size."""
+    holds an unused breach of this product and size; `addons`: the add-ons
+    chosen, each offered with this product."""
     prices = dict(product.prices_cents)
     if size_cents not in prices:
         raise PricingError(f"{product.name} is not sold in size {size_cents} cents")
@@ -83,4 +92,9 @@ def price(
     elif 1 <= prior_accounts <= len(product.repeat_discounts):
         kind, share = DiscountKind.REPEAT, product.repeat_discounts[prior_accounts - 1]
     off = discount_floor(list_price, share)
-    return PriceQuote(list_price, kind, share, off, list_price - off)
+    for offer in addons:
+        if product.id not in offer.products:
+            raise PricingError(f"{offer.id} is not sold with {product.name}")
+    chosen = ordered([o.id for o in addons])
+    extra = sum(discount_floor(list_price, o.price) for o in addons)
+    return PriceQuote(list_price, kind, share, off, list_price - off + extra, chosen, extra)

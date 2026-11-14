@@ -49,7 +49,15 @@ from propfirm.customers.pricing import DiscountKind, PricingError, price
 from propfirm.customers.providers import PaymentProvider, Screener
 from propfirm.customers.store import CifRecord, CustomerStore, OrderRecord, RetakeTakenError
 from propfirm.journal.inputs import Input, OpenAccount
-from propfirm.policy import Policy, PolicySource, ProductPolicy, instant_funding, stage_of
+from propfirm.policy import (
+    AddonOffer,
+    Policy,
+    PolicySource,
+    ProductPolicy,
+    instant_funding,
+    stage_of,
+)
+from propfirm.rules.addons import ordered, with_addons
 from propfirm.rules.products import Stage
 from propfirm.service.gateway import Outcome
 
@@ -162,9 +170,17 @@ class Checkout:
     # --- ordering -------------------------------------------------------------------
 
     async def place_order(
-        self, cif: CifRecord, product_id: str, size_cents: int, code: str | None, ts: int
+        self,
+        cif: CifRecord,
+        product_id: str,
+        size_cents: int,
+        code: str | None,
+        ts: int,
+        addons: tuple[str, ...] = (),
     ) -> tuple[OrderRecord, str]:
-        """Create an order and its invoice; return (order, payment URL)."""
+        """Create an order and its invoice; return (order, payment URL).
+        `addons`: add-on ids (D-13.18); the account opens on its stage's
+        rule set with them."""
         if cif.status != "registered":
             raise CheckoutError("blocked", "this customer cannot buy")
         policy = await self._policy.current()
@@ -173,6 +189,7 @@ class Checkout:
         except KeyError:
             raise CheckoutError("unknown_product", f"no product {product_id!r}") from None
         await self._check_offer(policy, cif.cif, product_id, size_cents, ts)
+        offers = self._addon_offers(policy, product, addons)
         if not await self._store.screened_clear(cif.cif):
             screening = await self._screener.screen(
                 cif.full_name, cif.date_of_birth.isoformat(), cif.residence_country
@@ -197,7 +214,9 @@ class Checkout:
         if code_share is None:
             basis = await self.retake_basis(cif.cif, product, size_cents, ts)
         try:
-            quote = price(product, size_cents, prior, code_share, retake=basis is not None)
+            quote = price(
+                product, size_cents, prior, code_share, retake=basis is not None, addons=offers
+            )
         except PricingError as exc:
             raise CheckoutError("pricing", str(exc)) from exc
         if quote.discount_kind is not DiscountKind.RETAKE:
@@ -213,17 +232,38 @@ class Checkout:
                 discount=quote.discount,
                 discount_code=code if quote.discount_kind is DiscountKind.CODE else None,
                 price_cents=quote.price_cents,
-                rsv_id=first_stage.rsv_id,
+                rsv_id=with_addons(first_stage.rsv_id, quote.addons),
                 provider=self._payments.name,
                 ts=ts,
                 retake_of=basis,
                 hold_since=hold_since,
+                addon_cents=quote.addon_cents,
             )
         except RetakeTakenError:
             raise CheckoutError("retake_taken", "this breach's retake is already in use") from None
         invoice = await self._payments.create_invoice(order.ord, order.price_cents)
         stored = await self._store.set_provider_ref(order.ord, invoice.provider_ref, ts)
         return stored, invoice.pay_url
+
+    @staticmethod
+    def _addon_offers(
+        policy: Policy, product: ProductPolicy, addons: tuple[str, ...]
+    ) -> tuple[AddonOffer, ...]:
+        """The offers for `addons`; CheckoutError for one unknown, not sold
+        with this product, switched off, or named twice."""
+        try:
+            chosen = ordered(list(addons))
+        except ValueError as exc:
+            raise CheckoutError("addon", str(exc)) from None
+        offers = []
+        for addon_id in chosen:
+            offer = policy.addons.offer(addon_id)
+            if offer is None or product.id not in offer.products:
+                raise CheckoutError("addon", f"{addon_id} is not sold with {product.name}")
+            if addon_id in policy.addons.off:
+                raise CheckoutError("addon", f"{addon_id} is not on sale")
+            offers.append(offer)
+        return tuple(offers)
 
     async def retake_basis(
         self, cif: str, product: ProductPolicy, size_cents: int, now: int

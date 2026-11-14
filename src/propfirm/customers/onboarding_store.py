@@ -25,6 +25,7 @@ from propfirm.customers.onboarding import (
 )
 from propfirm.customers.store import OrderRecord
 from propfirm.pgschema import Conn, check_schema
+from propfirm.rules.addons import addons_of, with_addons
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +104,9 @@ class OnboardingStore:
         missing from it wait). Return the new ONB ids."""
         s = self._s
         rows = await self._pool.fetch(
-            f"SELECT p.* FROM {s}.progressions p LEFT JOIN {s}.onboardings o ON o.prg = p.prg "
+            f"SELECT p.*, a.rsv_id AS from_rsv_id FROM {s}.progressions p "
+            f"JOIN {s}.accounts a ON a.acc = p.from_acc "
+            f"LEFT JOIN {s}.onboardings o ON o.prg = p.prg "
             f"WHERE p.status = 'approved' AND p.to_stage = 'funded' AND o.onb IS NULL "
             f"ORDER BY p.prg"
         )
@@ -112,6 +115,8 @@ class OnboardingStore:
             rsv_id = rsv_for.get(row["product_id"])
             if rsv_id is None:
                 continue
+            # the passed account's add-ons (D-13.18) go with it to funded
+            rsv_id = with_addons(rsv_id, addons_of(row["from_rsv_id"]))
             async with self._pool.acquire() as conn, conn.transaction():
                 await conn.execute(
                     f"SELECT 1 FROM {s}.progressions WHERE prg = $1 FOR UPDATE", row["prg"]
