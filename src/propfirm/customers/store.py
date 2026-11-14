@@ -578,6 +578,17 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             CHECK (kind IN ('wallet_changed', 'market_break_close', 'stage_passed'));
         """,
     ),
+    (
+        13,
+        """
+        -- the public leaderboard (14 Nov 2026): a trader who opts out is
+        -- left off it; one row per customer, removed when they opt back in
+        CREATE TABLE {s}.leaderboard_hidden (
+            cif text PRIMARY KEY REFERENCES {s}.cif (cif),
+            hidden_at bigint NOT NULL
+        );
+        """,
+    ),
 )
 
 
@@ -1076,6 +1087,42 @@ class CustomerStore:
             cif,
         )
         return {r["ord"] for r in rows}
+
+    async def leaderboard_entrants(self) -> list[tuple[AccountRecord, str, str]]:
+        """Funded accounts of customers who have not opted out of the
+        leaderboard, each with the owner's full name and country."""
+        s = self._s
+        rows = await self._pool.fetch(
+            f"SELECT a.*, c.full_name AS owner_name, c.residence_country AS owner_country "
+            f"FROM {s}.accounts a JOIN {s}.cif c USING (cif) WHERE a.stage = 'funded' "
+            f"AND NOT EXISTS (SELECT 1 FROM {s}.leaderboard_hidden h WHERE h.cif = a.cif) "
+            f"ORDER BY a.acc"
+        )
+        out = []
+        for r in rows:
+            fields = dict(r)
+            name, country = fields.pop("owner_name"), fields.pop("owner_country")
+            out.append((AccountRecord(**fields), name, country))
+        return out
+
+    async def leaderboard_visible(self, cif: str) -> bool:
+        hidden = await self._pool.fetchval(
+            f"SELECT 1 FROM {self._s}.leaderboard_hidden WHERE cif = $1", cif
+        )
+        return hidden is None
+
+    async def set_leaderboard_visible(self, cif: str, visible: bool, ts: int) -> None:
+        if visible:
+            await self._pool.execute(
+                f"DELETE FROM {self._s}.leaderboard_hidden WHERE cif = $1", cif
+            )
+        else:
+            await self._pool.execute(
+                f"INSERT INTO {self._s}.leaderboard_hidden (cif, hidden_at) VALUES ($1, $2) "
+                f"ON CONFLICT (cif) DO NOTHING",
+                cif,
+                ts,
+            )
 
     async def accounts_for(self, cif: str) -> list[AccountRecord]:
         rows = await self._pool.fetch(

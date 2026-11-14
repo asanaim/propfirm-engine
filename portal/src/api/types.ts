@@ -75,11 +75,36 @@ export interface Customer {
   created_at: number;
 }
 
+/** A stage passed (PRG): the evaluation account and what it led to. */
+export interface Progression {
+  prg: string;
+  ord: string;
+  product_id: string;
+  size_cents: number;
+  from_acc: string;
+  from_stage: string;
+  to_stage: string | null;
+  status: string;
+  to_acc: string | null;
+  passed_at: number;
+}
+
 export interface Me extends Customer {
   accounts: AccountRecord[];
   orders: Order[];
-  progressions: unknown[];
+  progressions: Progression[];
   onboardings: Onboarding[];
+}
+
+/** One row of the public leaderboard. */
+export interface LeaderboardRow {
+  rank: number;
+  name: string;
+  country: string;
+  product_id: string;
+  size_cents: number;
+  gain_cents: number;
+  gain_basis_points: number;
 }
 
 /** Funded onboarding (ONB): identity check, review, contract, signature. */

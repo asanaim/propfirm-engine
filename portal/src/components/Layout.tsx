@@ -42,6 +42,7 @@ const PUBLIC_NAV = [
   { href: "/shop", label: "Challenges" },
   { href: "/#how", label: "How it works" },
   { href: "/tools", label: "Tools" },
+  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/#faq", label: "FAQ" },
 ];
 
@@ -51,10 +52,13 @@ const NAV = [
   { href: "/shop", label: "Challenges" },
   { href: "/funded", label: "Funded" },
   { href: "/payouts", label: "Payouts" },
+  { href: "/certificates", label: "Certificates" },
+  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/news", label: "News" },
   { href: "/analysis", label: "Analysis" },
   { href: "/tools", label: "Tools" },
-  { href: "/security", label: "Security" },
+  { href: "/billing", label: "Billing" },
+  { href: "/profile", label: "Profile" },
 ];
 
 export function Layout({ children }: { children: ReactNode }) {
