@@ -16,10 +16,44 @@ export function land(path: string): void {
   else window.scrollTo({ top: 0, left: 0 });
 }
 
-/** Moves to a portal path. Where the browser can, the old page fades into
-the new one (a view transition: the top bar stays put); otherwise, and for
-people who prefer reduced motion, the page changes at once. */
+/** Readies a path before the move: a promise while its page's code is
+still being fetched, null when it is ready. Set by the app. */
+let prepare: (path: string) => Promise<unknown> | null = () => null;
+
+export function setPrepare(fn: (path: string) => Promise<unknown> | null): void {
+  prepare = fn;
+}
+
+/** The longest a move waits for its page's code before it goes anyway. */
+export const READY_WAIT_MS = 350;
+
+/** null when the path can move at once; otherwise when it may. */
+export function ready(path: string, wait: number = READY_WAIT_MS): Promise<void> | null {
+  const pending = prepare(path);
+  if (pending === null) return null;
+  return Promise.race([
+    pending.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => window.setTimeout(resolve, wait)),
+  ]);
+}
+
+/** Moves to a portal path. The new page's code is fetched first (at most
+a moment), then, where the browser can, the old page fades into the new
+one (a view transition: the top bar stays put); otherwise, and for people
+who prefer reduced motion, the page changes at once. */
 export function navigate(path: string): void {
+  const waiting = ready(path.split("#")[0] ?? path);
+  if (waiting === null) move(path);
+  else
+    void waiting.then(() => {
+      move(path);
+    });
+}
+
+function move(path: string): void {
   const go = () => {
     window.history.pushState(null, "", path);
     flushSync(() => {
@@ -55,5 +89,9 @@ export function Link({ href, onClick, ...rest }: AnchorHTMLAttributes<HTMLAnchor
     event.preventDefault();
     navigate(href);
   };
-  return <a href={href} onClick={click} {...rest} />;
+  // the pointer resting on a link starts fetching its page, so the click is instant
+  const warm = () => {
+    void prepare(href.split("#")[0] ?? href);
+  };
+  return <a href={href} onClick={click} onPointerEnter={warm} onFocus={warm} {...rest} />;
 }

@@ -44,7 +44,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from propfirm.policy import Policy, ProductPolicy, percent_text
+from propfirm.policy import Policy, ProductPolicy, ScalingPolicy, instant_funding, percent_text
 from propfirm.rules.products import RuleSet, max_loss_words
 
 ONBOARDING_KINDS = (
@@ -234,6 +234,24 @@ DISCLOSURE = {
 }
 
 
+def split_ladder_words(product: ProductPolicy, scaling: ScalingPolicy) -> str:
+    """The ladder after the first split, as a clause tail ("" for none):
+    "; X % from the payout after N paid payouts while no case of the Trader
+    has been confirmed, and Y % from the first scaling step"."""
+    if instant_funding(product):
+        return ""
+    parts = []
+    if product.split_after_payouts_value is not None:
+        parts.append(
+            f"{percent_text(product.split_after_payouts_value)} % from the payout after "
+            f"{product.split_after_payouts} paid payouts while no case against the Trader "
+            "has been confirmed"
+        )
+    step = "first" if scaling.split_after_step == 1 else f"number {scaling.split_after_step}"
+    parts.append(f"{percent_text(scaling.split_after)} % from the {step} scaling step")
+    return "; " + ", and ".join(parts)
+
+
 def render_contract(
     policy: Policy,
     *,
@@ -275,6 +293,7 @@ def render_contract(
         else f"best day at most {percent_text(rule_set.consistency)} % of total profit",
         "disclosure": DISCLOSURE[terms.account_disclosure],
         "split_percent": percent_text(product.profit_split),
+        "split_ladder": split_ladder_words(product, scaling),
         "first_after_days": str(payouts.first_after_days),
         "interval_days": str(payouts.interval_days),
         "minimum_usd": _usd(payouts.minimum_cents),

@@ -98,6 +98,14 @@ class CaseStore:
         async with self._pool.acquire() as conn, conn.transaction():
             return await self._raise(conn, cif, acc, source, kind, severity, detail, due_at, ts)
 
+    async def confirmed_cases(self, cif: str) -> int:
+        """The customer's cases closed with a violation confirmed (actioned)."""
+        count: int = await self._pool.fetchval(
+            f"SELECT count(*) FROM {self._s}.cases WHERE cif = $1 AND outcome = 'actioned'",
+            cif,
+        )
+        return count
+
     async def has_alert(self, acc: str, source: str, key: str) -> bool:
         """Whether an alert from `source` with this `key` in its detail was
         raised on the account (one alert per payout period, say)."""

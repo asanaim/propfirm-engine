@@ -8,6 +8,13 @@ import { lossKindLabel } from "../lib/lossLimit";
 import { formatCents, formatPercent, formatSize } from "../lib/money";
 import { navigate } from "../router";
 
+
+/** The split ladder in a line, or null for a product without one (Instant). */
+export function ladderText(p: { split_after_payouts?: number | null; split_percent_after_payouts?: string | null }): string | null {
+  if (p.split_after_payouts === null || p.split_after_payouts === undefined || !p.split_percent_after_payouts) return null;
+  return `${p.split_percent_after_payouts} % after ${p.split_after_payouts.toString()} paid payouts, more with scaling`;
+}
+
 export function ordinal(n: number): string {
   const teen = n % 100 >= 11 && n % 100 <= 13;
   const suffix = teen ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
@@ -64,6 +71,7 @@ function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size:
       }
     >
       <p className="split">{product.profit_split_percent} % profit split</p>
+      {ladderText(product) === null ? null : <p className="split-ladder muted">{ladderText(product)}</p>}
       {product.fee_refund_with_payout !== null && (
         <p className="muted">Fee refunded with your {ordinal(product.fee_refund_with_payout)} payout.</p>
       )}

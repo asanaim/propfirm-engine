@@ -83,7 +83,7 @@ review_months = 4
 min_net_profit_percent = "10"
 min_paid_payouts = 3
 step_percent = "20"            # added to initial capital per step
-split_after_step = 2           # from this step the split below applies
+split_after_step = 1           # from this step the split below applies (section 1: the first)
 split_percent_after = "90"
 max_allocation_cents = 40000000  # $400,000 per trader
 
@@ -358,7 +358,7 @@ classes = ["forex", "metal", "oil"]
 # M18). Text in config/contracts/<template>.txt. Until firm_name (C14) and
 # governing_law (counsel) are set, a contract is issued only in the sandbox,
 # marked DRAFT.
-template = "funded-agreement-v2"
+template = "funded-agreement-v3"  # v3: the split ladder
 firm_name = ""
 governing_law = ""
 account_disclosure = "simulated"  # D1: "simulated" or "live"
@@ -466,6 +466,10 @@ name = "Lite"
 sizes_cents = [1000000, 2500000, 5000000, 10000000, 20000000]
 prices_cents = [5500, 10900, 21500, 38900, 77900]
 profit_split_percent = "80"
+# the ladder (section 1, 13 Nov 2026): 85 % from the payout after 3 paid
+# payouts with no confirmed case; 90 % from the first scaling step
+split_after_payouts = 3
+split_percent_after_payouts = "85"
 code_discount_max_percent = "10"
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 0     # 0: no fee refund
@@ -514,6 +518,10 @@ name = "Classic"
 sizes_cents = [1000000, 2500000, 5000000, 10000000, 20000000]
 prices_cents = [5400, 11900, 20900, 40900, 79900]
 profit_split_percent = "80"
+# the ladder (section 1, 13 Nov 2026): 85 % from the payout after 3 paid
+# payouts with no confirmed case; 90 % from the first scaling step
+split_after_payouts = 3
+split_percent_after_payouts = "85"
 code_discount_max_percent = "10"
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 0
@@ -563,6 +571,10 @@ name = "1-Step"
 sizes_cents = [1000000, 2500000, 5000000, 10000000, 20000000]
 prices_cents = [9500, 19900, 29900, 49900, 99900]
 profit_split_percent = "80"
+# the ladder (section 1, 13 Nov 2026): 85 % from the payout after 3 paid
+# payouts with no confirmed case; 90 % from the first scaling step
+split_after_payouts = 3
+split_percent_after_payouts = "85"
 code_discount_max_percent = "10"
 repeat_discount_percent = []  # K4 (12 Nov 2026): no repeat discount
 fee_refund_with_payout = 3     # refunded with the 3rd payout

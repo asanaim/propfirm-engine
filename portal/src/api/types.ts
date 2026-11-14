@@ -25,6 +25,8 @@ export interface Product {
   id: string;
   name: string;
   profit_split_percent: string;
+  split_after_payouts?: number | null; // the ladder: the payout rung, after this many paid payouts
+  split_percent_after_payouts?: string | null;
   code_discount_max_percent: string | null;
   repeat_discount_percent: string[];
   fee_refund_with_payout: number | null;
