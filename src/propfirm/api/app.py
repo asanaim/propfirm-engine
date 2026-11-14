@@ -711,6 +711,11 @@ def product_view(p: ProductPolicy, catalogue: CataloguePolicy | None = None) -> 
         "id": p.id,
         "name": p.name,
         "profit_split_percent": percent_text(p.profit_split),
+        # the ladder (section 1): None where the product has no payout rung
+        "split_after_payouts": p.split_after_payouts or None,
+        "split_percent_after_payouts": percent_text(p.split_after_payouts_value)
+        if p.split_after_payouts_value is not None
+        else None,
         "code_discount_max_percent": percent_text(p.code_discount_max),
         "repeat_discount_percent": [percent_text(d) for d in p.repeat_discounts],
         "fee_refund_with_payout": p.fee_refund_with_payout or None,

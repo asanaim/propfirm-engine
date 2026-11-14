@@ -274,3 +274,15 @@ price still open) are listed for staff to handle by hand.
 Not covered: a trailing loss limit's high-water mark raised by a bad
 price is not lowered (a reinstated trailing account keeps it); flag such
 cases by hand until the trader classes and risk desk exist (step 5).
+
+D-14.6, profit split ladder (build plan step 2, line 3; section 1 decided
+13 Nov 2026). Lite, Classic and 1-Step: 80 % at funding; 85 % from the
+payout after 3 paid payouts on the order's accounts while no case of the
+trader has been confirmed (closed as actioned); 90 % from the first
+scaling step (`[scaling] split_after_step = 1`, was 2). Instant stays at
+80 %. A rung is never lost by a later case once paid, but the 85 % rung
+is not reached while a confirmed case stands. Settings per product:
+`split_after_payouts`, `split_percent_after_payouts` (both or neither,
+the second above the first split). The contract (template v3) and the
+shop state the ladder from the same settings. The scaling rung applies
+once the scaling job (step 2, line 4) records steps.

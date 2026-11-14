@@ -57,7 +57,7 @@ from typing import Any
 
 from propfirm.access.gating import check_country
 from propfirm.money import share_floor
-from propfirm.policy import Policy, ProductPolicy, percent_text
+from propfirm.policy import Policy, ProductPolicy, instant_funding, percent_text
 from propfirm.rules.clock import NEW_YORK_17
 
 PASS, FAIL, LATER = "pass", "fail", "not_decided_here"
@@ -107,6 +107,9 @@ class FundedAccount:
     # the max loss floor when the rule set keeps it after a payout (Instant
     # from version 2, review D1); None: the floor restarts, or is static
     kept_floor_cents: int | None = None
+    # the split ladder (section 1, 13 Nov 2026)
+    confirmed_cases: int = 0  # the customer's cases closed as actioned
+    scaling_steps: int = 0  # scaling steps taken on this order's accounts
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +141,29 @@ def _utc_iso(ts: int) -> str:
     return datetime.fromtimestamp(ts / 1000, UTC).isoformat()
 
 
+def split_for(policy: Policy, account: FundedAccount) -> tuple[Fraction, str]:
+    """The split this payout uses, and why (section 1, 13 Nov 2026): the
+    product's; then its payout rung, from the payout after the rung's count
+    of paid payouts while no case was confirmed; then the scaled split from
+    the scaling step `[scaling] split_after_step`. Never lower than an
+    earlier rung. Products sold funded (Instant) keep theirs."""
+    product = account.product
+    split, why = product.profit_split, "the product's split"
+    if instant_funding(product):
+        return split, why
+    rung = product.split_after_payouts_value
+    if (
+        rung is not None
+        and account.payouts_paid >= product.split_after_payouts
+        and account.confirmed_cases == 0
+    ):
+        split, why = max(split, rung), f"after {product.split_after_payouts} paid payouts"
+    scaling = policy.scaling
+    if account.scaling_steps >= scaling.split_after_step:
+        split, why = max(split, scaling.split_after), "from the scaling step"
+    return split, why
+
+
 def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility:
     payouts = policy.payouts
     checks: list[Check] = []
@@ -154,7 +180,7 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
         # keep the closed balance above it (a breach is at or below)
         room = max(0, account.balance_cents - violations - account.kept_floor_cents - 1)
         payable = min(payable, room)
-    split = account.product.profit_split
+    split, _ = split_for(policy, account)
     trader_share = share_floor(payable, split)
     payout_number = account.payouts_paid + 1
     refund_due = account.product.fee_refund_with_payout == payout_number

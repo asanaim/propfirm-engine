@@ -134,6 +134,8 @@ class Payouts:
             document_country=tier2.document_country if tier2 else None,
             open_case=await self._cases.has_open_case(cif.cif) if self._cases else False,
             violations_cents=violations,
+            confirmed_cases=await self._cases.confirmed_cases(cif.cif) if self._cases else 0,
+            # scaling steps: none are taken until the scaling job (step 2, line 4)
             pending_payout=pending is not None and pending.po != ignore,
             wallet_added_at=wallet.added_at if wallet else None,
             kept_floor_cents=(

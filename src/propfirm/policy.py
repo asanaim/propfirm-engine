@@ -166,6 +166,11 @@ class ProductPolicy:
     repeat_discounts: tuple[Fraction, ...]
     fee_refund_with_payout: int  # 0: none
     rule_sets: tuple[RuleSet, ...]  # stage order
+    # the split ladder (section 1, 13 Nov 2026): from the payout after
+    # `split_after_payouts` paid payouts with no confirmed case, this split;
+    # 0 payouts: no rung. Scaling (`[scaling] split_after_step`) is the next.
+    split_after_payouts: int = 0
+    split_after_payouts_value: Fraction | None = None
 
     def rule_set(self, stage: Stage) -> RuleSet | None:
         return next((r for r in self.rule_sets if r.stage is stage), None)
@@ -946,6 +951,12 @@ def _product(t: _Table) -> ProductPolicy:
         for v in t.texts("repeat_discount_percent")
     )
     refund = t.integer("fee_refund_with_payout")
+    rung_after = t.integer("split_after_payouts", 1) if t.has("split_after_payouts") else 0
+    rung = (
+        t.required_percent("split_percent_after_payouts")
+        if t.has("split_percent_after_payouts")
+        else None
+    )
     stages = [_stage(s, product_id, sizes) for s in t.tables("stages")]
     t.done()
     if not 0 < split <= 1 or not 0 <= code_max < 1:
@@ -953,6 +964,11 @@ def _product(t: _Table) -> ProductPolicy:
     order = [_STAGE_ORDER[r.stage] for r in stages]
     if order != sorted(set(order)) or stages[-1].stage is not Stage.FUNDED:
         raise PolicyError(f"{product_id}: stages must be distinct, in order, ending funded")
+    if (rung_after == 0) != (rung is None) or (rung is not None and not split < rung <= 1):
+        raise PolicyError(
+            f"{product_id}: split_after_payouts and split_percent_after_payouts go together, "
+            "the second above profit_split_percent"
+        )
     return ProductPolicy(
         id=product_id,
         name=name,
@@ -962,6 +978,8 @@ def _product(t: _Table) -> ProductPolicy:
         repeat_discounts=tuple(r for r in repeats if r is not None),
         fee_refund_with_payout=refund,
         rule_sets=tuple(stages),
+        split_after_payouts=rung_after,
+        split_after_payouts_value=rung,
     )
 
 
