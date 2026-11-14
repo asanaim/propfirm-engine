@@ -83,6 +83,39 @@ EVENTS: Mapping[str, Event] = {
             "previous_wallet_line": "\n  Previous wallet: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
         },
     ),
+    # D-14.1 as amended 14 Nov 2026: an evaluation pass is emailed
+    "stage_passed": Event(
+        label="Evaluation stage passed",
+        variables={
+            "full_name": "the customer's registered name",
+            "acc": "the account that passed",
+            "stage": "the stage passed, such as Stage 1",
+            "time": "when it passed, in UTC",
+            "next_step": "what happens next, in one or two sentences",
+        },
+        required=frozenset({"acc", "stage", "next_step"}),
+        subject="You passed {stage} on account {acc}",
+        body="\n".join(
+            [
+                "Hello {full_name},",
+                "",
+                "Congratulations: account {acc} passed {stage} on {time}.",
+                "",
+                "{next_step}",
+                "",
+                "You can follow every step in your dashboard.",
+            ]
+        ),
+        sample={
+            "full_name": "Ada Trader",
+            "acc": "ACC00000001",
+            "stage": "Stage 1",
+            "time": "2026-11-14 10:05 UTC",
+            "next_step": (
+                "Your Stage 2 account opens after a short review; it will appear in your dashboard."
+            ),
+        },
+    ),
 }
 DEFAULT_WRAPPER = "{body}"
 

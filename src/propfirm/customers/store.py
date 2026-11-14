@@ -569,6 +569,15 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         DROP TABLE {s}.break_cursor;
         """,
     ),
+    (
+        12,
+        """
+        -- D-14.1 as amended 14 Nov 2026: an evaluation pass is emailed
+        ALTER TABLE {s}.notifications DROP CONSTRAINT notifications_kind_check;
+        ALTER TABLE {s}.notifications ADD CONSTRAINT notifications_kind_check
+            CHECK (kind IN ('wallet_changed', 'market_break_close', 'stage_passed'));
+        """,
+    ),
 )
 
 

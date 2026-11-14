@@ -55,8 +55,8 @@ def test_an_unknown_notice_kind_is_refused() -> None:
 
 def test_the_migration_allows_exactly_the_notice_kinds() -> None:
     sql = dict(_MIGRATIONS)[7]
-    latest = re.search(r"kind IN \(('wallet_changed'[^)]*)\)", dict(_MIGRATIONS)[10])
-    assert latest is not None  # migration 10 widened the check (market break emails)
+    latest = re.search(r"kind IN \(('wallet_changed'[^)]*)\)", dict(_MIGRATIONS)[12])
+    assert latest is not None  # migration 12 widened the check (pass emails)
     allowed = tuple(re.findall(r"'([a-z_]+)'", latest.group(1)))
     assert set(NOTICE_KINDS) <= set(allowed)  # rows written before D-14.1 stay valid
     assert "BEFORE UPDATE ON {s}.notification_events" in sql  # events: append-only
@@ -235,3 +235,16 @@ def test_smtp_settings() -> None:
 def test_invalid_smtp_settings_are_refused(change: dict[str, str]) -> None:
     with pytest.raises(ConfigError):
         ServiceConfig.from_env({**ENV, **change})
+
+
+def test_a_pass_email_names_the_stage_and_the_next_step() -> None:
+    from propfirm.customers.notifications import pass_notice
+
+    first = pass_notice("a@example.com", "Ada Trader", "ACC00000001", "s1", "s2", 0)
+    assert (first.kind, first.recipient) == ("stage_passed", "a@example.com")
+    assert first.subject == "You passed Stage 1 on account ACC00000001"
+    assert "Stage 2 account opens after a short review" in first.body
+    funded = pass_notice("a@example.com", "Ada Trader", "ACC00000002", "s2", "funded", 0)
+    assert "identity check and the trader agreement" in funded.body
+    held = pass_notice("a@example.com", "Ada Trader", "ACC00000003", "s1", None, 0)
+    assert "Our team reviews the result" in held.body

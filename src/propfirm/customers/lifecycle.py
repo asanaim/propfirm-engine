@@ -28,6 +28,7 @@ from propfirm.journal.inputs import Input, OpenAccount
 from propfirm.policy import Policy, PolicySource
 from propfirm.rules.products import Stage
 from propfirm.service.gateway import Outcome
+from propfirm.settings.notices import Notices
 
 
 class Submitter(Protocol):
@@ -50,6 +51,10 @@ def plan_for(policy: Policy, account: AccountRecord) -> Plan:
     return Plan(following.stage, following.rsv_id)
 
 
+class NoticeSource(Protocol):
+    async def notices(self) -> Notices: ...
+
+
 class Lifecycle:
     def __init__(
         self,
@@ -58,14 +63,17 @@ class Lifecycle:
         gateway: Submitter,
         wait_s: float = 5.0,
         cases: Casework | None = None,
+        notices: NoticeSource | None = None,
     ) -> None:
         """`cases`: no funded review is approved while the customer has a
-        case not closed."""
+        case not closed. `notices`: the email wording in force (rule AC12);
+        the built-in wording without it."""
         self._store = store
         self._policy = policy
         self._gateway = gateway
         self._wait_s = wait_s
         self._cases = cases
+        self._notices = notices
 
     @property
     def store(self) -> ProgressionStore:
@@ -74,7 +82,8 @@ class Lifecycle:
     async def poll(self, ts: int) -> list[str]:
         """Record the passes journaled since the last poll; return new PRG ids."""
         policy = await self._policy.current()
-        return await self._store.record_passes(lambda a: plan_for(policy, a), ts)
+        wording = None if self._notices is None else await self._notices.notices()
+        return await self._store.record_passes(lambda a: plan_for(policy, a), ts, notices=wording)
 
     async def advance(self, ts: int) -> int:
         """Try to open the next account of every progression still

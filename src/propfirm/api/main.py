@@ -297,7 +297,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 callback_url=config.public_url,
                 cases=cases,
             )
-        lifecycle = Lifecycle(progressions, settings, gateway, cases=cases)
+        lifecycle = Lifecycle(progressions, settings, gateway, cases=cases, notices=settings)
         mailer: Mailer | None = None
         if config.smtp_host:
             assert config.mail_from is not None
