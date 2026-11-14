@@ -173,7 +173,7 @@ def contract(policy: Any = None) -> Any:
 
 def test_the_contract_states_the_terms_in_force() -> None:
     text = contract()
-    assert text.template == "funded-agreement-v2" and text.draft
+    assert text.template == "funded-agreement-v3" and text.draft
     assert text.sha256 == hashlib.sha256(text.body.encode()).hexdigest()
     body = text.body
     assert "DRAFT" in body and "[NOT SET" in body  # firm name and law not decided
@@ -184,6 +184,9 @@ def test_the_contract_states_the_terms_in_force() -> None:
         "Rule set lite-funded-v4: maximum loss 6 % (static)",
         "daily loss limit 3 %",
         "receives 80 % of the profit",
+        # the ladder (section 1, 13 Nov 2026)
+        "terms; 85 % from the payout after 3 paid payouts while no case against the "
+        "Trader has been confirmed, and 90 % from the first scaling step.",
         "from the trading day 14 days after that of the first trade on the account",
         "each later one 14 days after the previous payout",
         "once approved, it is taken from the account and sent to the Trader's own wallet",

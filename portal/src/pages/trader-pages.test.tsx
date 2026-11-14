@@ -96,3 +96,11 @@ describe("the client area pages", () => {
     expect(screen.getByText("Singapore")).toBeInTheDocument();
   });
 });
+
+describe("the split ladder in the shop", () => {
+  it("says the next rungs, and nothing for a product without a ladder", async () => {
+    const { ladderText } = await import("./ShopPage");
+    expect(ladderText({ split_after_payouts: 3, split_percent_after_payouts: "85" })).toBe("85 % after 3 paid payouts, more with scaling");
+    expect(ladderText({ split_after_payouts: null, split_percent_after_payouts: null })).toBeNull();
+  });
+});
