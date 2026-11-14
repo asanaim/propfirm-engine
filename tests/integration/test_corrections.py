@@ -49,6 +49,17 @@ def test_a_breach_from_a_bad_price_is_reversed_by_two_people(
             await market.price(good)  # the real price, back
             await project(p, database_url)
 
+            # the spike is offered without looking up its number
+            found = await p.call(
+                "GET", "/staff/corrections/suspects?hours=1", "staff-1", None, STAFF
+            )
+            assert found.status_code == 200, found.text
+            spike = next(s for s in found.json() if s["price_seq"] == bad_seq)
+            assert (spike["symbol"], spike["fills"], spike["suggested"]) == (
+                "EUR/USD",
+                1,
+                good,
+            )  # the stop-out at the spike
             q = f"symbol=EUR/USD&price_seq={bad_seq}&good_price={good}"
             seen = await p.call("GET", f"/staff/corrections/preview?{q}", "staff-1", None, STAFF)
             assert seen.status_code == 200, seen.text
