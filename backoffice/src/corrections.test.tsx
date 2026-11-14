@@ -31,3 +31,10 @@ describe("finding a price number and the class", () => {
     expect(classText(null)).toBe("Not classed yet");
   });
 });
+
+describe("scaling", () => {
+  it("shows dollars from cents", async () => {
+    const { usd } = await import("./Scaling");
+    expect(usd(200_000)).toBe("$2,000.00");
+  });
+});

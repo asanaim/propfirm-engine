@@ -630,7 +630,48 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        16,
+        """
+        -- scaling steps (D-14.8): the daily job proposes, staff approve, the
+        -- engine adds the allocation; one open or applied step per number
+        CREATE SEQUENCE {s}.scl_seq;
+        CREATE TABLE {s}.scaling_steps (
+            scl text PRIMARY KEY,
+            acc text NOT NULL REFERENCES {s}.accounts (acc),
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            step integer NOT NULL CHECK (step >= 1),
+            add_cents bigint NOT NULL CHECK (add_cents > 0),
+            measures jsonb NOT NULL,
+            status text NOT NULL CHECK (status IN ('proposed', 'applied', 'rejected')),
+            proposed_at bigint NOT NULL,
+            decided_by text,
+            decided_at bigint,
+            balance_after_cents bigint,
+            outcome jsonb
+        );
+        CREATE UNIQUE INDEX scaling_one_per_step ON {s}.scaling_steps (acc, step)
+            WHERE status <> 'rejected';
+        """,
+    ),
+    (
+        17,
+        """
+        -- retakes (D-13.6): the order bought at the retake price and the
+        -- breached order it uses; a failed or lapsed order frees the breach
+        CREATE TABLE {s}.retakes (
+            ord text PRIMARY KEY REFERENCES {s}.orders (ord),
+            of_ord text NOT NULL REFERENCES {s}.orders (ord),
+            created_at bigint NOT NULL
+        );
+        CREATE INDEX ON {s}.retakes (of_ord);
+        """,
+    ),
 )
+
+
+class RetakeTakenError(Exception):
+    """The breach's one retake is already used by another order."""
 
 
 class AlreadyRegisteredError(Exception):
@@ -896,6 +937,19 @@ class CustomerStore:
         )
         return count
 
+    async def retakes(self, cif: str, hold_since: int) -> dict[str, str]:
+        """The customer's live retake orders: ord -> the breached ord it uses
+        (paid, or pending since `hold_since`)."""
+        rows = await self._pool.fetch(
+            f"SELECT r.ord, r.of_ord FROM {self._s}.retakes r "
+            f"JOIN {self._s}.orders o ON o.ord = r.ord WHERE o.cif = $1 AND "
+            f"(o.status IN ('paid', 'provisioned') "
+            f"OR (o.status = 'pending' AND o.created_at >= $2))",
+            cif,
+            hold_since,
+        )
+        return {r["ord"]: r["of_ord"] for r in rows}
+
     async def create_order(
         self,
         cif: str,
@@ -909,9 +963,26 @@ class CustomerStore:
         rsv_id: str,
         provider: str,
         ts: int,
+        retake_of: str | None = None,
+        hold_since: int = 0,
     ) -> OrderRecord:
+        """With `retake_of`, the order uses that breached order's retake;
+        refused (RetakeTakenError) if another order placed since `hold_since`
+        or paid already uses it. The breached order's row is locked, so two
+        orders cannot take one retake."""
         s = self._s
         async with self._pool.acquire() as conn, conn.transaction():
+            if retake_of is not None:
+                await conn.execute(f"SELECT 1 FROM {s}.orders WHERE ord = $1 FOR UPDATE", retake_of)
+                taken = await conn.fetchval(
+                    f"SELECT r.ord FROM {s}.retakes r JOIN {s}.orders o ON o.ord = r.ord "
+                    f"WHERE r.of_ord = $1 AND (o.status IN ('paid', 'provisioned') "
+                    f"OR (o.status = 'pending' AND o.created_at >= $2))",
+                    retake_of,
+                    hold_since,
+                )
+                if taken is not None:
+                    raise RetakeTakenError(retake_of)
             number = await conn.fetchval(f"SELECT nextval('{s}.ord_seq')")
             ord_id = f"ORD{number:08d}"
             await conn.execute(
@@ -944,6 +1015,14 @@ class CustomerStore:
                 "rsv_id": rsv_id,
                 "provider": provider,
             }
+            if retake_of is not None:
+                facts["retake_of"] = retake_of
+                await conn.execute(
+                    f"INSERT INTO {s}.retakes (ord, of_ord, created_at) VALUES ($1, $2, $3)",
+                    ord_id,
+                    retake_of,
+                    ts,
+                )
             return await self._append(conn, ord_id, "created", ts, facts)
 
     async def set_provider_ref(self, ord_id: str, provider_ref: str, ts: int) -> OrderRecord:

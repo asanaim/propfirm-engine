@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApi, useMe } from "../api/ApiProvider";
-import type { PlacedOrder, Product, Stage } from "../api/types";
+import type { PlacedOrder, Product, RetakeOffer, Stage } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Problem } from "../components/Problem";
 import { Button, Card, Loading, Notice } from "../components/ui";
@@ -72,6 +72,9 @@ function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size:
     >
       <p className="split">{product.profit_split_percent} % profit split</p>
       {ladderText(product) === null ? null : <p className="split-ladder muted">{ladderText(product)}</p>}
+      {product.retake_discount_percent ? (
+        <p className="muted">After a breach: one retake of the same size at {product.retake_discount_percent} % off.</p>
+      ) : null}
       {product.fee_refund_with_payout !== null && (
         <p className="muted">Fee refunded with your {ordinal(product.fee_refund_with_payout)} payout.</p>
       )}
@@ -123,6 +126,8 @@ export function ShopPage() {
   const [paid, setPaid] = useState(false);
   const [methods, setMethods] = useState<PayMethod[]>([]);
   const [method, setMethod] = useState<string | null>(null);
+  const [retakes, setRetakes] = useState<RetakeOffer[]>([]);
+  const ready = me.status === "ready";
 
   useEffect(() => {
     api.get<Product[]>("/catalogue").then(setProducts, setError);
@@ -136,6 +141,13 @@ export function ShopPage() {
       },
     );
   }, [api]);
+
+  useEffect(() => {
+    if (!ready) return;
+    api.get<RetakeOffer[]>("/me/retakes").then(setRetakes, () => {
+      setRetakes([]); // no offer shown when the list cannot be read
+    });
+  }, [api, ready, order]);
 
   const buy = async (product: Product, size: number) => {
     if (auth.status !== "signed_in") {
@@ -209,6 +221,25 @@ export function ShopPage() {
           )}
         </Card>
       )}
+      {retakes.map((r) => {
+        const product = (products ?? []).find((p) => p.id === r.product_id);
+        if (product === undefined) return null;
+        return (
+          <Card
+            key={r.of_ord}
+            title={`Retake ${formatSize(r.size_cents)} ${product.name}`}
+            actions={
+              <Button busy={busy === product.id} onClick={() => void buy(product, r.size_cents)}>
+                Retake for {formatCents(r.price_cents)}
+              </Button>
+            }
+          >
+            <p>
+              <s className="muted">{formatCents(r.list_price_cents)}</s> {r.discount_percent} % off after your breach.
+            </p>
+          </Card>
+        );
+      })}
       {products === null && error === null ? (
         <Loading />
       ) : (

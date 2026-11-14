@@ -100,6 +100,8 @@ from propfirm.customers.payout_flow import payout_state
 from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
 from propfirm.customers.payouts import Eligibility, eligibility_json
+from propfirm.customers.pricing import price
+from propfirm.customers.scaling import Scaling, ScalingRefused
 from propfirm.customers.store import (
     AccountRecord,
     AlreadyRegisteredError,
@@ -346,6 +348,7 @@ class Deps:
     leaderboard: LeaderboardStore | None = None  # the public leaderboard and its opt-outs
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
+    scaling: Scaling | None = None  # scaling steps (D-14.8)
     client_ip_header: str | None = None  # set by a trusted proxy (X-Forwarded-For), else None
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
@@ -734,6 +737,8 @@ def product_view(p: ProductPolicy, catalogue: CataloguePolicy | None = None) -> 
         else None,
         "code_discount_max_percent": percent_text(p.code_discount_max),
         "repeat_discount_percent": [percent_text(d) for d in p.repeat_discounts],
+        "retake_discount_percent": percent_text(p.retake_discount) if p.retake_discount else None,
+        "code_free_sizes_cents": list(p.code_free_sizes),
         "fee_refund_with_payout": p.fee_refund_with_payout or None,
         "sizes": [{"size_cents": s, "price_cents": c} for s, c in sizes],
         "stages": [rule_set_view(r) for r in p.rule_sets],
@@ -1304,6 +1309,7 @@ OnbId = Annotated[str, Path(pattern=r"^ONB[0-9]{8}$")]
 CasId = Annotated[str, Path(pattern=r"^CAS[0-9]{8}$")]
 PoId = Annotated[str, Path(pattern=r"^PO[0-9]{8}$")]
 CorId = Annotated[str, Path(pattern=r"^COR[0-9]{8}$")]
+SclId = Annotated[str, Path(pattern=r"^SCL[0-9]{8}$")]
 PAYOUT_STATUS = Literal[
     "requested", "approved", "debited", "sent", "paid", "denied", "cancelled", "failed"
 ]
@@ -1740,9 +1746,55 @@ def create_app(
         assert found is not None
         return {"acc": acc, "class": found[0], "reason": found[1], "since": found[2]}
 
+    def _scaling(deps: Deps) -> Scaling:
+        if deps.scaling is None:
+            raise HTTPException(status_code=503, detail="scaling not available")
+        return deps.scaling
+
+    def _scaling_refused(exc: ScalingRefused) -> HTTPException:
+        status = 404 if exc.code == "unknown" else 409
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    @app.get("/staff/scaling")
+    async def list_scaling(deps: D, me: Approver) -> list[dict[str, Any]]:
+        """Scaling steps, newest first: proposed by the daily job, applied
+        or rejected by staff (D-14.8)."""
+        return await _scaling(deps).recent()
+
+    @app.post("/staff/scaling/run")
+    async def run_scaling(deps: D, me: Approver) -> dict[str, Any]:
+        """Run the scaling check now, instead of waiting for the hourly run."""
+        return {"proposed": await _scaling(deps).run(deps.clock(), every_ms=0)}
+
+    @app.post("/staff/scaling/{scl}/approve")
+    async def approve_scaling(deps: D, me: Approver, scl: SclId) -> dict[str, Any]:
+        try:
+            return await _scaling(deps).approve(scl, me.subject, deps.clock())
+        except ScalingRefused as exc:
+            raise _scaling_refused(exc) from exc
+
+    @app.post("/staff/scaling/{scl}/reject")
+    async def reject_scaling(deps: D, me: Approver, scl: SclId) -> dict[str, Any]:
+        try:
+            return await _scaling(deps).reject(scl, me.subject, deps.clock())
+        except ScalingRefused as exc:
+            raise _scaling_refused(exc) from exc
+
     @app.get("/staff/corrections")
     async def list_corrections(deps: D, me: CaseWorker) -> list[dict[str, Any]]:
         return await _corrections(deps).recent()
+
+    @app.get("/staff/corrections/suspects")
+    async def suspect_prices(
+        deps: D,
+        me: CaseWorker,
+        hours: Annotated[int, Query(ge=1, le=24 * 31)] = 72,
+        min_basis_points: Annotated[int, Query(ge=1, le=10_000)] = 20,
+    ) -> list[dict[str, Any]]:
+        """Spikes in the stored prices (a move out and straight back), newest
+        first, with the fills each caused: candidates for a correction."""
+        since = deps.clock() - hours * 3_600_000
+        return await _corrections(deps).suspects(since, min_basis_points)
 
     @app.get("/staff/corrections/preview")
     async def preview_correction(
@@ -1860,6 +1912,30 @@ def create_app(
                     break
                 after = int(page[-1]["seq"])
         return {"accounts": owned, **analyse(trades_from(events), since, until)}
+
+    @app.get("/me/retakes")
+    async def my_retakes(deps: D, me: Trader) -> list[dict[str, Any]]:
+        """Breached accounts the trader may retake at the retake price (D-13.6)."""
+        cif = await _cif(deps, me)
+        policy = await _policy(deps)
+        out = []
+        for order in await _checkout(deps).retake_offers(cif.cif, deps.clock()):
+            product = policy.product(order.product_id)
+            on_sale = dict(policy.catalogue.sizes(product))
+            if product.id in policy.catalogue.products_off or order.size_cents not in on_sale:
+                continue  # not on sale now
+            quote = price(product, order.size_cents, 1, retake=True)
+            out.append(
+                {
+                    "of_ord": order.ord,
+                    "product_id": product.id,
+                    "size_cents": order.size_cents,
+                    "list_price_cents": quote.list_price_cents,
+                    "discount_percent": percent_text(quote.discount),
+                    "price_cents": quote.price_cents,
+                }
+            )
+        return out
 
     @app.get("/me/wallet")
     async def my_wallet(deps: D, me: Trader) -> dict[str, Any]:

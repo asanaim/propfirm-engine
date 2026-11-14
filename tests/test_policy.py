@@ -205,6 +205,22 @@ def test_invalid_policies_are_refused(change: Callable[[dict[str, Any]], None]) 
         parse_policy(edited(change))
 
 
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("retake_discount_percent", "100"),
+        ("retake_discount_percent", "-1"),
+        ("code_free_sizes_cents", [123]),  # not a size of the product
+    ],
+)
+def test_bad_retake_and_code_free_sizes_are_refused(key: str, value: object) -> None:
+    def change(data: dict[str, Any]) -> None:
+        lite(data)[key] = value
+
+    with pytest.raises(PolicyError):
+        parse_policy(edited(change))
+
+
 def test_reversed_stage_order_is_refused() -> None:
     def change(data: dict[str, Any]) -> None:
         lite(data)["stages"].reverse()

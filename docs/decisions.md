@@ -308,6 +308,60 @@ the second above the first split). The contract (template v3) and the
 shop state the ladder from the same settings. The scaling rung applies
 once the scaling job (step 2, line 4) records steps.
 
+D-14.7, standing rule (owner, 14 Nov 2026). Where a decision is left open,
+take the most cost-effective one: lowest cost, profitable for the firm and
+sustainable. Record the choice and its reason here.
+
+D-14.5 confirmed (owner, 14 Nov 2026): class C means staff review of every
+payout.
+
+D-14.4, trailing loss limit after a correction, confirmed under D-14.7
+(owner, 14 Nov 2026). A windfall taken back lowers the high-water mark by
+the same amount, never below the start; a loss given back leaves it.
+Reason: keeping a floor raised by the firm's own bad price would breach
+traders for profit they never had; each such breach is a dispute, a likely
+chargeback and a public complaint, which cost more than the payout risk.
+The floor never rises from a correction, so the firm's exposure is never
+increased by one.
+
+D-14.4 amended (14 Nov 2026): staff no longer look up a price number.
+Price corrections lists suspect prices (a move of 0.2 % or more and
+straight back) of the last 3 days with the fills each caused; "Use" fills
+the form with the price between its neighbours (rounded down) as the good
+price. The account search stays as a second way.
+
+D-14.8, scaling job (build plan step 2, line 4; section 1, 13 Nov 2026).
+Funded Lite, Classic and 1-Step accounts; Instant is not scaled. One step
+when all hold: 60 days since funding or the last step (`review_days`;
+section 1 says 60 days, the policy file had 4 months: the approved row
+wins), net profit of at least 10 % of the starting balance in the period
+(balance now plus payout debits, less the period's opening balance), at
+least 3 payouts paid in the period, class A or B (unclassed counts as B),
+active and unlocked, and room under the $400,000 trader cap. A step adds
+20 % of the account's first starting balance, rounded down to the cent, to
+the balance and to the starting balance the loss limits use; the day's base
+and the high-water mark move with it. A check runs hourly and proposes; one
+member of staff with the progression decision right approves (D-14.7: the
+conditions are mechanical, so one reviewer is enough; the engine refuses a
+step twice). The split ladder's 90 % rung reads the steps applied. The
+contract (v3) states the period in days.
+
+D-14.9, retake price and the Lite 10K code block (build plan step 2;
+D-13.6, D-13.17; details taken under D-14.7). A breached account gives one
+new account of the same product and size at 10 % off the list price
+(`retake_discount_percent`, an owner setting), rounded down to the cent.
+Same size only: a cheap account breached on purpose must not buy a discount
+on a large one. One retake per breach, and one at a time: no retake price
+while another retake order is unpaid in its hold or its account still holds
+capital; a failed or lapsed retake order frees the breach. None on Instant
+(0 %: its fee must cover a no-skill withdrawal, as with codes). A retake
+never combines with a code (codes are for first accounts) and takes the
+place of a repeat discount (none on sale, K4). Discount codes are refused
+on the sizes in `code_free_sizes_cents`: Lite 10K. The trader sees the
+offer in the shop (`GET /me/retakes`). No minimum price per product is set:
+no decision asks for one, and with codes at most 10 % and none on Instant
+the existing limits already hold the fee above cost.
+
 D-14.10, 1 Step loss floor (owner, 14 Nov 2026; replaces D-13.20). The 10 %
 end-of-day trailing floor stops rising at the starting balance
 (`floor_locks_at_start = true`), and on the funded stage a payout does not

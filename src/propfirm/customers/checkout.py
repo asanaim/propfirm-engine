@@ -47,9 +47,9 @@ from propfirm.access.gating import age_on, check_country
 from propfirm.customers.casework import Casework
 from propfirm.customers.pricing import DiscountKind, PricingError, price
 from propfirm.customers.providers import PaymentProvider, Screener
-from propfirm.customers.store import CifRecord, CustomerStore, OrderRecord
+from propfirm.customers.store import CifRecord, CustomerStore, OrderRecord, RetakeTakenError
 from propfirm.journal.inputs import Input, OpenAccount
-from propfirm.policy import Policy, PolicySource, instant_funding, stage_of
+from propfirm.policy import Policy, PolicySource, ProductPolicy, instant_funding, stage_of
 from propfirm.rules.products import Stage
 from propfirm.service.gateway import Outcome
 
@@ -192,27 +192,84 @@ class Checkout:
             if code_share is None:
                 raise CheckoutError("unknown_code", "this code is not valid")
         prior = await self._store.prior_accounts(cif.cif, product.id)
+        hold_since = ts - policy.catalogue.unpaid_hold_hours * 3_600_000
+        basis = None
+        if code_share is None:
+            basis = await self.retake_basis(cif.cif, product, size_cents, ts)
         try:
-            quote = price(product, size_cents, prior, code_share)
+            quote = price(product, size_cents, prior, code_share, retake=basis is not None)
         except PricingError as exc:
             raise CheckoutError("pricing", str(exc)) from exc
+        if quote.discount_kind is not DiscountKind.RETAKE:
+            basis = None
         first_stage = product.rule_sets[0]
-        order = await self._store.create_order(
-            cif=cif.cif,
-            product_id=product.id,
-            size_cents=size_cents,
-            list_price_cents=quote.list_price_cents,
-            discount_kind=quote.discount_kind.value,
-            discount=quote.discount,
-            discount_code=code if quote.discount_kind is DiscountKind.CODE else None,
-            price_cents=quote.price_cents,
-            rsv_id=first_stage.rsv_id,
-            provider=self._payments.name,
-            ts=ts,
-        )
+        try:
+            order = await self._store.create_order(
+                cif=cif.cif,
+                product_id=product.id,
+                size_cents=size_cents,
+                list_price_cents=quote.list_price_cents,
+                discount_kind=quote.discount_kind.value,
+                discount=quote.discount,
+                discount_code=code if quote.discount_kind is DiscountKind.CODE else None,
+                price_cents=quote.price_cents,
+                rsv_id=first_stage.rsv_id,
+                provider=self._payments.name,
+                ts=ts,
+                retake_of=basis,
+                hold_since=hold_since,
+            )
+        except RetakeTakenError:
+            raise CheckoutError("retake_taken", "this breach's retake is already in use") from None
         invoice = await self._payments.create_invoice(order.ord, order.price_cents)
         stored = await self._store.set_provider_ref(order.ord, invoice.provider_ref, ts)
         return stored, invoice.pay_url
+
+    async def retake_basis(
+        self, cif: str, product: ProductPolicy, size_cents: int, now: int
+    ) -> str | None:
+        """The breached order a new account of `product` and `size_cents`
+        may use for the retake price (D-13.6), oldest first, or None."""
+        if product.retake_discount <= 0:
+            return None
+        for order in await self.retake_offers(cif, now):
+            if order.product_id == product.id and order.size_cents == size_cents:
+                return order.ord
+        return None
+
+    async def retake_offers(self, cif: str, now: int) -> list[OrderRecord]:
+        """The breached orders the customer may retake at the retake price,
+        oldest first. One retake at a time: none while another retake order
+        is unpaid in its hold or its account still holds capital. Each
+        breach gives one retake; a failed or lapsed retake order frees it.
+        Products with no retake discount are left out."""
+        if self._live is None:
+            return []
+        policy = await self._policy.current()
+        rate = {p.id: p.retake_discount for p in policy.products}
+        hours = policy.catalogue.unpaid_hold_hours
+        live = await self._store.retakes(cif, now - hours * 3_600_000)
+        held = {o.ord for o in await self.committed(cif, now, hours)}
+        if held & live.keys():
+            return []
+        used = set(live.values())
+        accounts: dict[str, list[str]] = {}
+        for account in await self._store.accounts_for(cif):
+            accounts.setdefault(account.ord, []).append(account.acc)
+        offers = []
+        for order in await self._store.orders_for(cif):
+            opened = accounts.get(order.ord)
+            if (
+                rate.get(order.product_id, 0) <= 0
+                or order.status != "provisioned"
+                or order.ord in used
+                or not opened
+            ):
+                continue
+            view = await self._live.account(max(opened))
+            if view is not None and view.get("status") == "breached":
+                offers.append(order)
+        return offers
 
     async def committed(self, cif: str, now: int, hold_hours: int) -> list[OrderRecord]:
         """The trader's orders that hold capital now (see the module text)."""

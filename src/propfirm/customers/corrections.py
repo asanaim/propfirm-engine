@@ -184,6 +184,56 @@ class Corrections:
             row["symbol"], row["seq"], row["source_ts"], row["receive_ts"], row["price"]
         )
 
+    async def suspects(
+        self, since: int, min_basis_points: int = 20, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Prices that look bad, newest first: an update that moved at least
+        `min_basis_points` from the one before AND back by as much at the
+        next (a spike), with how many fills used it. Staff pick one instead
+        of looking up a price number (owner remark, 14 Nov 2026)."""
+        rows = await self._pool.fetch(
+            f"""
+            WITH p AS (
+                SELECT symbol, seq, receive_ts, price,
+                       lag(price) OVER w AS before, lead(price) OVER w AS after
+                FROM {self._j}.prices
+                WHERE receive_ts >= $1
+                WINDOW w AS (PARTITION BY symbol ORDER BY seq)
+            )
+            SELECT symbol, seq, receive_ts, price, before, after FROM p
+            WHERE before IS NOT NULL AND after IS NOT NULL
+              AND abs(price - before) * 10000 >= $2::bigint * before
+              AND abs(after - price) * 10000 >= $2::bigint * before
+              AND sign(price - before) <> sign(after - price)
+            ORDER BY receive_ts DESC LIMIT $3
+            """,
+            since,
+            min_basis_points,
+            limit,
+        )
+        out = []
+        for r in rows:
+            fills = await self._pool.fetchval(
+                f"SELECT count(*) FROM {self._r}.account_events WHERE event->>'symbol' = $1 "
+                f"AND (event->>'price_seq')::bigint = $2",
+                r["symbol"],
+                r["seq"],
+            )
+            out.append(
+                {
+                    "symbol": r["symbol"],
+                    "price_seq": r["seq"],
+                    "ts": r["receive_ts"],
+                    "price": r["price"],
+                    "before": r["before"],
+                    "after": r["after"],
+                    # the good price, proposed: the neighbours' midpoint
+                    "suggested": (r["before"] + r["after"]) // 2,
+                    "fills": int(fills),
+                }
+            )
+        return out
+
     async def preview(
         self, symbol: str, price_seq: int, good: int
     ) -> tuple[PriceUpdate, list[Item]]:
