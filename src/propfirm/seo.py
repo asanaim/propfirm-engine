@@ -23,7 +23,6 @@ The home page's built-in wording is kept in step with the portal's own
 import html
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from xml.sax.saxutils import escape as xml_escape
 
 # public pages: path -> (built-in title, built-in description)
 PAGES: dict[str, tuple[str, str]] = {
@@ -275,7 +274,7 @@ def sitemap_xml(base_url: str, slugs: Sequence[str], seo_noindex: Sequence[str] 
     """Every public page except those an editor set to noindex."""
     base = base_url.rstrip("/")
     paths = [p for p in [*PAGES, *(LEGAL + s for s in sorted(slugs))] if p not in seo_noindex]
-    urls = "".join(f"<url><loc>{xml_escape(base + p)}</loc></url>" for p in paths)
+    urls = "".join(f"<url><loc>{html.escape(base + p, quote=False)}</loc></url>" for p in paths)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>'

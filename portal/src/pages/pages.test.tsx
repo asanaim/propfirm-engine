@@ -106,7 +106,12 @@ it("offers the retake price after a breach", async () => {
     ["GET", "/catalogue", 200, [{ ...LITE, retake_discount_percent: "10" }]],
     ["GET", "/me", 200, ME],
     ["GET", "/me/retakes", 200, [offer]],
-    ["POST", "/orders", 201, {}],
+    [
+      "POST",
+      "/orders",
+      201,
+      { ...offer, ord: "ORD00000002", discount_kind: "retake", discount_code: null, rsv_id: "lite-s1-v3", status: "pending", acc: null, failure: null, created_at: 0, paid_at: null, pay_url: "/dev/payments/ORD00000002/complete" },
+    ],
   ]);
   renderWith(<ShopPage />, fakeAuth(), fetcher);
   expect(await screen.findByText(/one retake of the same size at 10 % off/)).toBeInTheDocument();
@@ -114,6 +119,7 @@ it("offers the retake price after a breach", async () => {
   await user.click(await screen.findByRole("button", { name: "Retake for $39.60" }));
   const order = fetcher.mock.calls.find(([url]) => url === "/api/orders");
   expect(JSON.parse(order?.[1]?.body as string)).toEqual({ product_id: "lite", size_cents: 1_000_000 });
+  expect(await screen.findByText("Order ORD00000002")).toBeInTheDocument();
 });
 
 it("places an order and completes a sandbox payment", async () => {
