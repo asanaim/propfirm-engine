@@ -371,6 +371,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
             customers=customers,
             leaderboard=customers,
+            classes=customers,
             corrections=Corrections(
                 pool, config.customer_schema, config.schema, config.read_schema, gateway
             ),

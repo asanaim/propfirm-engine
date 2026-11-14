@@ -11,6 +11,7 @@ import {
   type RaRecord,
 } from "react-admin";
 import { ActionButton } from "../ActionButton";
+import { ClassControl } from "../ClassControl";
 import { MoneyField, TimeField } from "../fields";
 import { History } from "./History";
 
@@ -29,6 +30,7 @@ export function PayoutList() {
         <MoneyField source="trader_amount_cents" label="To the trader" />
         <TextField source="status" />
         <FunctionField label="Approvals" render={(r: RaRecord) => ((r.approvals as string[] | undefined) ?? []).length} />
+        <ClassControl />
         <FunctionField label="Short holds this period" render={(r: RaRecord) => shortHoldText(r.short_hold as ShortHoldView | null | undefined)} />
         <TimeField source="requested_at" label="Requested" />
       </Datagrid>

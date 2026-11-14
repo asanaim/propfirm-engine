@@ -14,3 +14,20 @@ describe("price corrections", () => {
     expect([cents(60_000), cents(-1_234), cents(0)]).toEqual(["+$600.00", "-$12.34", "$0.00"]);
   });
 });
+
+describe("finding a price number and the class", () => {
+  it("lists fills newest first", async () => {
+    const { fillsOf } = await import("./Corrections");
+    const list = fillsOf([
+      { type: "PositionOpened", ts: 1, symbol: "EUR/USD", price_seq: 5 },
+      { type: "DayStarted", ts: 2, symbol: "", price_seq: 0 },
+      { type: "PositionClosed", ts: 3, symbol: "EUR/USD", price_seq: 9 },
+    ]);
+    expect(list.map((f) => f.price_seq)).toEqual([9, 5]);
+  });
+  it("says what a class means", async () => {
+    const { classText } = await import("./ClassControl");
+    expect(classText({ class: "C", reason: "short holds: 62.50% of profit", since: 0 })).toBe("Class C, every payout reviewed (short holds: 62.50% of profit)");
+    expect(classText(null)).toBe("Not classed yet");
+  });
+});
