@@ -294,3 +294,25 @@ D-14.4 amended (14 Nov 2026), gaps closed:
   rises from a correction.
 - Price corrections show an account's fills with the price number each
   used ("Find the price number"), so staff need not read the journal.
+
+D-14.7, standing rule (owner, 14 Nov 2026). Where a decision is left open,
+take the most cost-effective one: lowest cost, profitable for the firm and
+sustainable. Record the choice and its reason here.
+
+D-14.5 confirmed (owner, 14 Nov 2026): class C means staff review of every
+payout.
+
+D-14.4, trailing loss limit after a correction, confirmed under D-14.7
+(owner, 14 Nov 2026). A windfall taken back lowers the high-water mark by
+the same amount, never below the start; a loss given back leaves it.
+Reason: keeping a floor raised by the firm's own bad price would breach
+traders for profit they never had; each such breach is a dispute, a likely
+chargeback and a public complaint, which cost more than the payout risk.
+The floor never rises from a correction, so the firm's exposure is never
+increased by one.
+
+D-14.4 amended (14 Nov 2026): staff no longer look up a price number.
+Price corrections lists suspect prices (a move of 0.2 % or more and
+straight back) of the last 3 days with the fills each caused; "Use" fills
+the form with the price between its neighbours (rounded down) as the good
+price. The account search stays as a second way.
