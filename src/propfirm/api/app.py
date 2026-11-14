@@ -1784,6 +1784,18 @@ def create_app(
     async def list_corrections(deps: D, me: CaseWorker) -> list[dict[str, Any]]:
         return await _corrections(deps).recent()
 
+    @app.get("/staff/corrections/suspects")
+    async def suspect_prices(
+        deps: D,
+        me: CaseWorker,
+        hours: Annotated[int, Query(ge=1, le=24 * 31)] = 72,
+        min_basis_points: Annotated[int, Query(ge=1, le=10_000)] = 20,
+    ) -> list[dict[str, Any]]:
+        """Spikes in the stored prices (a move out and straight back), newest
+        first, with the fills each caused: candidates for a correction."""
+        since = deps.clock() - hours * 3_600_000
+        return await _corrections(deps).suspects(since, min_basis_points)
+
     @app.get("/staff/corrections/preview")
     async def preview_correction(
         deps: D,

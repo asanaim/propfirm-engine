@@ -37,6 +37,7 @@ export interface Place {
 export const PLACES: readonly Place[] = [
   { group: null, screen: null, label: "My work", path: "/", icon: "work", keywords: "home to do todo dashboard duties training" },
   { group: null, screen: null, label: "Notifications", path: "/notifications", icon: "notifications", keywords: "alerts messages inbox bell", bar: true },
+  { group: null, screen: null, label: "Profile", path: "/profile", icon: "traders", keywords: "me account password authenticator my grants roles", bar: true },
   { group: "traders", screen: "traders", label: "Traders", path: "/traders", icon: "traders", keywords: "customers clients users cif accounts kyc segments" },
   { group: "traders", screen: "onboardings", label: "Identity reviews", path: "/onboardings", icon: "onboardings", keywords: "kyc onboarding identity documents" },
   { group: "traders", screen: "progressions", label: "Funded reviews", path: "/progressions", icon: "progressions", keywords: "funded stage review passed" },
