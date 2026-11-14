@@ -12,7 +12,7 @@ export type IconKey = keyof typeof ICONS;
 /** The menu's sections (rule AC28: expandable groups), in menu order. */
 export const GROUPS = [
   { key: "traders", label: "Traders" },
-  { key: "money", label: "Money" },
+  { key: "finance", label: "Finance" },
   { key: "risk", label: "Risk" },
   { key: "team", label: "Team" },
   { key: "settings", label: "Settings" },
@@ -29,19 +29,21 @@ export interface Place {
   icon: IconKey;
   /** Other words staff may type for it. */
   keywords: string;
+  /** Kept in the top bar instead of the menu (still found by Ctrl+K). */
+  bar?: true;
 }
 
 /** The menu's places, in menu order within each section. */
 export const PLACES: readonly Place[] = [
   { group: null, screen: null, label: "My work", path: "/", icon: "work", keywords: "home to do todo dashboard duties training" },
-  { group: null, screen: null, label: "Notifications", path: "/notifications", icon: "notifications", keywords: "alerts messages inbox" },
+  { group: null, screen: null, label: "Notifications", path: "/notifications", icon: "notifications", keywords: "alerts messages inbox bell", bar: true },
   { group: "traders", screen: "traders", label: "Traders", path: "/traders", icon: "traders", keywords: "customers clients users cif accounts kyc segments" },
   { group: "traders", screen: "onboardings", label: "Identity reviews", path: "/onboardings", icon: "onboardings", keywords: "kyc onboarding identity documents" },
   { group: "traders", screen: "progressions", label: "Funded reviews", path: "/progressions", icon: "progressions", keywords: "funded stage review passed" },
   { group: "traders", screen: "cases", label: "Cases", path: "/cases", icon: "cases", keywords: "blocks investigations rule breaches" },
-  { group: "money", screen: "payouts", label: "Payouts", path: "/payouts", icon: "payouts", keywords: "withdrawals transactions money paid" },
-  { group: "money", screen: "transactions", label: "Transactions and emails", path: "/transactions", icon: "transactions", keywords: "transaction log purchases payouts money export csv email log reports" },
-  { group: "money", screen: "methods", label: "Payment methods", path: "/payment-methods", icon: "methods", keywords: "gateways deposits withdrawal methods charges" },
+  { group: "finance", screen: "payouts", label: "Payouts", path: "/payouts", icon: "payouts", keywords: "withdrawals transactions money paid" },
+  { group: "finance", screen: "transactions", label: "Transactions and emails", path: "/transactions", icon: "transactions", keywords: "transaction log purchases payouts money export csv email log reports" },
+  { group: "finance", screen: "methods", label: "Payment methods", path: "/payment-methods", icon: "methods", keywords: "gateways deposits withdrawal methods charges" },
   { group: "risk", screen: "news", label: "News desk", path: "/news", icon: "news", keywords: "calendar economic events impact" },
   { group: "risk", screen: "anomalies", label: "Anomaly report", path: "/anomalies", icon: "anomalies", keywords: "anomalies report unusual" },
   { group: "risk", screen: "audit", label: "Security log", path: "/audit", icon: "audit", keywords: "audit trail log entries" },
@@ -81,7 +83,7 @@ export const AREAS: readonly Area[] = [
   {
     key: "general",
     title: "General",
-    explains: "Site name, base currency (US dollars), the trading day reset at 17:00 New York and versions. Read only: set in the deployment.",
+    explains: "The firm's contact details shown on the website (editable, a second person approves), and the fixed basics: site name, base currency, the 17:00 New York reset and versions.",
     icon: "general",
     state: "open",
     path: "/general",
@@ -139,7 +141,7 @@ export const AREAS: readonly Area[] = [
     explains: "Checks run at the identity provider (photo ID and selfie). Edit the words traders see while a check is required, pending or declined, on the Website screen. KYC stays on: no funded account without it.",
     icon: "kyc",
     state: "open",
-    path: "/site",
+    path: "/site?part=kyc",
     screen: "site",
     rule: null,
     keywords: "kyc identity form fields documents",
@@ -150,7 +152,7 @@ export const AREAS: readonly Area[] = [
     explains: "Title, description and link preview image per public page, with a site wide fallback, on the Website screen (Search and link previews). The sitemap is generated.",
     icon: "seo",
     state: "open",
-    path: "/site",
+    path: "/site?part=seo",
     screen: "site",
     rule: null,
     keywords: "seo meta sitemap search engines",
@@ -194,7 +196,7 @@ export const AREAS: readonly Area[] = [
     explains: "Maintenance mode and closing registration, and the page shown for each with its own message and image. A second person approves.",
     icon: "maintenance",
     state: "open",
-    path: "/site",
+    path: "/site?part=maintenance",
     screen: "site",
     rule: null,
     keywords: "maintenance downtime registration closed",

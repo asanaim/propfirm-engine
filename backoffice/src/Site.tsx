@@ -1,6 +1,7 @@
-import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, FormControlLabel, Stack, Switch, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, FormControlLabel, Stack, Switch, Tab, Tabs, TextField, Typography } from "@mui/material";
 import { useState } from "react";
 import { Title } from "react-admin";
+import { useSearchParams } from "react-router-dom";
 import { ApiError } from "./api";
 import { useBackOffice } from "./context";
 import { useGet } from "./useGet";
@@ -38,6 +39,7 @@ const TITLES: Record<string, string> = {
   kyc: "Identity check texts (KYC)",
   stats: "Statistics strip (figures with evidence)",
   seo: "Search and link previews (SEO)",
+  contact: "Contact details",
   maintenance: "Maintenance page",
   registration_closed: "Registration closed page",
 };
@@ -52,7 +54,7 @@ function words(key: string): string {
   return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
-function SectionEditor({ name, shape, data, onDone }: { name: string; shape: Shape; data: SiteEditor; onDone: () => void }) {
+export function SectionEditor({ name, shape, data, onDone }: { name: string; shape: Shape; data: SiteEditor; onDone: () => void }) {
   const { api } = useBackOffice();
   const saved = data.sections[name];
   const blank = (keys: Record<string, number>) => Object.fromEntries(Object.keys(keys).map((k) => [k, ""]));
@@ -89,6 +91,8 @@ function SectionEditor({ name, shape, data, onDone }: { name: string; shape: Sha
       helperText={
         key === "path"
           ? "A public page: /, /shop, /tools, /tools/symbols, /tools/reset, /tools/simulator or /legal/<page>"
+          : key === "support_email"
+            ? "Optional: shown in the website's footer as the support address"
           : key === "robots"
             ? "index (shown in search) or noindex; empty: index"
             : shape.item_optional?.includes(key) && value === ""
@@ -209,31 +213,65 @@ function ModeEditor({ mode, onDone }: { mode: SiteMode; onDone: () => void }) {
   );
 }
 
+/** The parts of the Website screen, each on its own tab and link
+(/site?part=seo): content sections, search, identity texts, maintenance. */
+export const PARTS = [
+  { key: "content", label: "Content", sections: ["hero", "challenges", "how", "stats"] },
+  { key: "seo", label: "Search (SEO)", sections: ["seo"] },
+  { key: "kyc", label: "Identity texts", sections: ["kyc"] },
+  { key: "maintenance", label: "Maintenance", sections: ["maintenance", "registration_closed"] },
+] as const;
+export type PartKey = (typeof PARTS)[number]["key"];
+
+export function partOf(value: string | null): PartKey {
+  return PARTS.find((p) => p.key === value)?.key ?? "content";
+}
+
 /** The website's text (rules AC07, AC08): edit a section, see it filled,
-propose it; a second person approves. Figures are tokens, never typed. */
-export function SiteEditorPage() {
+propose it; a second person approves. Figures are tokens, never typed.
+One part at a time, chosen by tab or by link. */
+export function SiteEditorPage({ start }: { start?: PartKey }) {
   const { result, reload } = useGet<SiteEditor>("/admin/site");
+  const [params, setParams] = useSearchParams();
+  const part = partOf(params.get("part") ?? start ?? null);
+  const shown: readonly string[] = PARTS.find((p) => p.key === part)?.sections ?? [];
   return (
     <Stack spacing={2.5} sx={{ mt: 2, mb: 4 }}>
       <Title title="Website" />
+      <Tabs
+        value={part}
+        onChange={(_, value: PartKey) => {
+          setParams(value === "content" ? {} : { part: value });
+        }}
+        aria-label="Website parts"
+        variant="scrollable"
+      >
+        {PARTS.map((p) => (
+          <Tab key={p.key} value={p.key} label={p.label} />
+        ))}
+      </Tabs>
       {result.state === "loading" ? <p>Loading…</p> : null}
       {result.state === "error" ? <p role="alert">{result.message}</p> : null}
       {result.state === "ready" ? (
         <>
-          <ModeEditor key={JSON.stringify(result.data.mode)} mode={result.data.mode} onDone={reload} />
-          <Card>
-            <CardHeader slotProps={{ title: { component: "h2" } }} title="Figures" subheader="Write a figure as its token, for example {max_split}. It is filled from the products in force, so the site never disagrees with them. Typed amounts and percentages are refused." />
-            <CardContent sx={{ pt: 0 }}>
-              <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>
-                {Object.entries(result.data.tokens).map(([k, v]) => (
-                  <Chip key={k} label={`{${k}} = ${v === "" ? "none" : v}`} variant="outlined" />
-                ))}
-              </Stack>
-            </CardContent>
-          </Card>
-          {Object.entries(result.data.shapes).map(([name, shape]) => (
-            <SectionEditor key={`${name}:${JSON.stringify(result.data.sections[name] ?? null)}`} name={name} shape={shape} data={result.data} onDone={reload} />
-          ))}
+          {part === "maintenance" ? <ModeEditor key={JSON.stringify(result.data.mode)} mode={result.data.mode} onDone={reload} /> : null}
+          {part === "content" ? (
+            <Card>
+              <CardHeader slotProps={{ title: { component: "h2" } }} title="Figures" subheader="Write a figure as its token, for example {max_split}. It is filled from the products in force, so the site never disagrees with them. Typed amounts and percentages are refused." />
+              <CardContent sx={{ pt: 0 }}>
+                <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>
+                  {Object.entries(result.data.tokens).map(([k, v]) => (
+                    <Chip key={k} label={`{${k}} = ${v === "" ? "none" : v}`} variant="outlined" />
+                  ))}
+                </Stack>
+              </CardContent>
+            </Card>
+          ) : null}
+          {Object.entries(result.data.shapes)
+            .filter(([name]) => shown.includes(name))
+            .map(([name, shape]) => (
+              <SectionEditor key={`${name}:${JSON.stringify(result.data.sections[name] ?? null)}`} name={name} shape={shape} data={result.data} onDone={reload} />
+            ))}
         </>
       ) : null}
     </Stack>

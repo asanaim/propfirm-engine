@@ -17,10 +17,11 @@ export const OPEN: SiteStatus = { maintenance: false, registration_open: true, r
 /** The site status, and the text of the two closed pages as approved.
 While loading, or if the status cannot be read, the site counts as open:
 the engine refuses closed actions on its own. */
-export function useSiteStatus(): { status: SiteStatus; pages: Partial<Record<ClosedKind, SiteSection>> } {
+export function useSiteStatus(): { status: SiteStatus; pages: Partial<Record<ClosedKind, SiteSection>>; contact: Record<string, string> } {
   const api = useApi();
   const [status, setStatus] = useState<SiteStatus>(OPEN);
   const [pages, setPages] = useState<Partial<Record<ClosedKind, SiteSection>>>({});
+  const [contact, setContact] = useState<Record<string, string>>({});
   useEffect(() => {
     let live = true;
     api.get<SiteStatus>("/site/status").then(
@@ -29,9 +30,10 @@ export function useSiteStatus(): { status: SiteStatus; pages: Partial<Record<Clo
       },
       () => undefined,
     );
-    api.get<Partial<Record<ClosedKind, SiteSection>>>("/site").then(
+    api.get<Partial<Record<ClosedKind | "contact", SiteSection>>>("/site").then(
       (s) => {
         if (!live) return;
+        setContact(s.contact?.fields ?? {});
         const kept: Partial<Record<ClosedKind, SiteSection>> = {};
         if (s.maintenance !== undefined) kept.maintenance = s.maintenance;
         if (s.registration_closed !== undefined) kept.registration_closed = s.registration_closed;
@@ -43,7 +45,27 @@ export function useSiteStatus(): { status: SiteStatus; pages: Partial<Record<Clo
       live = false;
     };
   }, [api]);
-  return { status, pages };
+  return { status, pages, contact };
+}
+
+/** The firm's contact details in the footer (set under General in the back
+office); empty fields, and the whole line when none is set, are left out. */
+export function FooterContact({ contact }: { contact: Record<string, string> }) {
+  const name = contact.company_name ?? "";
+  const address = contact.address ?? "";
+  const email = contact.support_email ?? "";
+  if (name === "" && address === "" && email === "") return null;
+  return (
+    <p className="footer-contact">
+      {[name, address].filter((t) => t !== "").join(", ")}
+      {email !== "" ? (
+        <>
+          {name !== "" || address !== "" ? " · " : ""}
+          <a href={`mailto:${email}`}>{email}</a>
+        </>
+      ) : null}
+    </p>
+  );
 }
 
 const DEFAULTS: Record<ClosedKind, { title: string; message: string }> = {

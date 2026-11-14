@@ -27,7 +27,7 @@ describe("maintenance and registration in the website editor (rule AC17)", () =>
     render(
       <AdminContext dataProvider={testDataProvider()}>
         <BackOfficeContext.Provider value={{ api, manager: {} as UserManager }}>
-          <SiteEditorPage />
+          <SiteEditorPage start="maintenance" />
         </BackOfficeContext.Provider>
       </AdminContext>,
     );
@@ -40,5 +40,20 @@ describe("maintenance and registration in the website editor (rule AC17)", () =>
     await userEvent.type(screen.getAllByLabelText("Reason (kept with the record)")[0] as HTMLElement, "database upgrade");
     await userEvent.click(propose);
     expect(put).toHaveBeenCalledWith("/admin/site-mode", { maintenance: true, registration_open: true, reason: "database upgrade" });
+  });
+});
+
+describe("the website screen's parts", () => {
+  it("opens the part a link names, content by default", async () => {
+    const { partOf } = await import("./Site");
+    expect(partOf("seo")).toBe("seo");
+    expect(partOf("maintenance")).toBe("maintenance");
+    expect(partOf(null)).toBe("content");
+    expect(partOf("nonsense")).toBe("content");
+  });
+  it("links each settings card to its own part", async () => {
+    const { AREAS } = await import("./places");
+    const path = (key: string) => AREAS.find((a) => a.key === key)?.path;
+    expect([path("seo"), path("kyc"), path("maintenance"), path("website")]).toEqual(["/site?part=seo", "/site?part=kyc", "/site?part=maintenance", "/site"]);
   });
 });

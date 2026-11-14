@@ -44,6 +44,10 @@ class Shape:
     item_optional: frozenset[str] = frozenset()  # item fields that may be left empty
     # item fields whose value must match a pattern (a page path, a robots value)
     patterns: Mapping[str, re.Pattern[str]] = field(default_factory=dict)
+    # fields whose value must match a pattern (an email address)
+    field_patterns: Mapping[str, re.Pattern[str]] = field(default_factory=dict)
+    # fields of plain facts (a name, an address), not checked for typed figures
+    literal: frozenset[str] = frozenset()
 
 
 # a public page of the portal (review D10)
@@ -51,6 +55,7 @@ PUBLIC_PATH = re.compile(
     r"^/(shop|tools(/(symbols|reset|simulator))?|legal/[a-z0-9][a-z0-9-]{0,39})?$"
 )
 ROBOTS = re.compile(r"^(index|noindex)$")
+EMAIL = re.compile(r"^[^@\s]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
 
 SECTIONS: dict[str, Shape] = {
     "hero": Shape({"title_line_1": 80, "title_line_2": 80, "lead": 300, "button": 40}),
@@ -91,6 +96,14 @@ SECTIONS: dict[str, Shape] = {
         item_optional=frozenset({"title", "description", "robots"}),
         patterns={"path": PUBLIC_PATH, "robots": ROBOTS},
     ),
+    # rule AC05, General (14 Nov 2026): the firm's contact details, shown in
+    # the public site's footer; empty fields are not shown
+    "contact": Shape(
+        {"company_name": 120, "support_email": 120, "address": 300},
+        optional=frozenset({"company_name", "support_email", "address"}),
+        field_patterns={"support_email": EMAIL},
+        literal=frozenset({"company_name", "address"}),
+    ),
     "maintenance": Shape(
         {"title": 80, "message": 600, "image": 300},
         optional=frozenset({"image"}),
@@ -129,7 +142,16 @@ class SiteSection:
         for k, v in self.fields.items():
             if k in shape.images:
                 check_image(k, v, shape.fields[k])
-            elif not (k in shape.optional and v == ""):
+            elif k in shape.optional and v == "":
+                continue
+            elif k in shape.field_patterns:
+                if not (isinstance(v, str) and len(v) <= shape.fields[k]):
+                    raise PolicyError(f"{k}: at most {shape.fields[k]} characters")
+                if not shape.field_patterns[k].match(v):
+                    raise PolicyError(f"{k}: {v!r} is not a valid address")
+            elif k in shape.literal:
+                check_plain(k, v, shape.fields[k])
+            else:
                 texts.append((k, v, shape.fields[k]))
         if len(self.items) > shape.max_items:
             raise PolicyError(f"{self.section}: at most {shape.max_items} items")
@@ -204,6 +226,14 @@ def mode_json(m: SiteMode) -> dict[str, Any]:
 
 def mode_from_json(value: Mapping[str, Any]) -> SiteMode:
     return SiteMode(value["maintenance"], value["registration_open"])
+
+
+def check_plain(key: str, text: str, longest: int) -> None:
+    """A plain fact (a name, an address): length and no braces; digits allowed."""
+    if not isinstance(text, str) or not 1 <= len(text.strip()) <= longest:
+        raise PolicyError(f"{key}: 1 to {longest} characters")
+    if "{" in text or "}" in text:
+        raise PolicyError(f"{key}: no braces")
 
 
 def check_text(key: str, text: str, longest: int) -> None:

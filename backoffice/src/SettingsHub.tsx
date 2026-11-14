@@ -5,6 +5,7 @@ import { config } from "./config";
 import { ICONS, SIZE, STROKE } from "./icons";
 import { type Area, canOpen, filterAreas } from "./places";
 import { screensFor } from "./screens";
+import { SectionEditor, type SiteEditor } from "./Site";
 import { useGet } from "./useGet";
 
 function AreaCard({ area, screens }: { area: Area; screens: ReadonlySet<string> }) {
@@ -85,8 +86,25 @@ interface Basic {
 }
 
 /** The firm-wide basics behind the General card (rule AC05), read only. */
+/** The firm's contact details (rule AC05, General): editable, shown in the
+website's footer; a proposal a second person approves. Shown to logins
+that may edit the website. */
+function ContactEditor() {
+  const { result, reload } = useGet<SiteEditor>("/admin/site");
+  if (result.state !== "ready") return null;
+  const shape = result.data.shapes.contact;
+  if (shape === undefined) return null;
+  return (
+    <Box sx={{ mb: 3 }}>
+      <SectionEditor key={JSON.stringify(result.data.sections.contact ?? null)} name="contact" shape={shape} data={result.data} onDone={reload} />
+    </Box>
+  );
+}
+
 export function GeneralPage() {
   const { result } = useGet<Basic[]>("/admin/general");
+  const { permissions } = usePermissions<string[]>();
+  const screens = screensFor(permissions ?? []);
   const site: Basic = {
     name: "Site name",
     value: config.brand,
@@ -96,6 +114,10 @@ export function GeneralPage() {
   return (
     <Box sx={{ p: 2 }}>
       <Title title="General" />
+      {screens.has("site") ? <ContactEditor /> : null}
+      <Typography variant="h6" component="h2" sx={{ mb: 1 }}>
+        Fixed basics
+      </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         The basics every account, price and record depends on. They are set in the deployment, not here, so a slip in the console can never change them for running accounts.
       </Typography>

@@ -46,26 +46,6 @@ export function Menu() {
   );
 }
 
-const OPEN_KEY = "pipridge.menu.open";
-
-/** The sections the user opened or closed, kept in this browser only. */
-function storedOpen(): Partial<Record<GroupKey, boolean>> {
-  try {
-    const raw = window.localStorage.getItem(OPEN_KEY);
-    return raw ? (JSON.parse(raw) as Partial<Record<GroupKey, boolean>>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function keepOpen(state: Partial<Record<GroupKey, boolean>>): void {
-  try {
-    window.localStorage.setItem(OPEN_KEY, JSON.stringify(state));
-  } catch {
-    // storage may be off; the menu still works for this visit
-  }
-}
-
 /** Whether `pathname` is this place or a page below it. */
 export function isAt(pathname: string, path: string): boolean {
   return path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`);
@@ -81,19 +61,20 @@ function Item({ place }: { place: Place }) {
   );
 }
 
-/** The menu in sections (rule AC28): My work and Notifications at the top,
-then Traders, Money, Risk, Team and Settings, each opening and closing.
-The section of the open page opens by itself; with the sidebar folded to
-icons every item shows, since there is no room for section names. */
+/** The menu in sections (rule AC28): My work at the top, then Traders,
+Finance, Risk, Team and Settings. One section is open at a time: opening
+one closes the other (an accordion). The section of the open page opens by
+itself on each page change; with the sidebar folded to icons every item
+shows, since there is no room for section names. */
 export function MenuItems({ screens }: { screens: Set<string> }) {
   const { pathname } = useLocation();
   const [sidebarOpen] = useSidebarState();
-  const [open, setOpen] = useState<Partial<Record<GroupKey, boolean>>>(storedOpen);
-  const visible = PLACES.filter((p) => p.screen === null || screens.has(p.screen));
+  // the section chosen by click on this page; undefined: follow the page
+  const [chosen, setChosen] = useState<{ at: string; key: GroupKey | null } | undefined>(undefined);
+  const pick = chosen?.at === pathname ? chosen.key : undefined;
+  const visible = PLACES.filter((p) => p.bar !== true && (p.screen === null || screens.has(p.screen)));
   const toggle = (key: GroupKey, now: boolean) => {
-    const next = { ...open, [key]: !now };
-    setOpen(next);
-    keepOpen(next);
+    setChosen({ at: pathname, key: now ? null : key });
   };
   return (
     <RaMenu>
@@ -106,7 +87,7 @@ export function MenuItems({ screens }: { screens: Set<string> }) {
         const items = visible.filter((p) => p.group === g.key);
         if (items.length === 0) return null;
         const here = items.some((p) => isAt(pathname, p.path));
-        const expanded = !sidebarOpen || here || open[g.key] === true;
+        const expanded = !sidebarOpen || (pick === undefined ? here : pick === g.key);
         const id = `menu-group-${g.key}`;
         return (
           <div key={g.key} className="menu-group">

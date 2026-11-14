@@ -1168,3 +1168,21 @@ def test_no_statistics_is_allowed_and_figures_take_the_usual_forms() -> None:
     for value in ("$500M+", "140+", "98%", "4.8/5", "3.5M+", "24/7", "€2,000"):
         SiteSection("stats", {"heading": "In numbers"},
                     ({"label": "x", "value": value, "evidence": "on file"},))  # fmt: skip
+
+
+def test_the_contact_section_takes_an_address_with_digits_and_a_valid_email() -> None:
+    from propfirm.settings.site import SiteSection
+
+    contact = SiteSection(
+        "contact",
+        {
+            "company_name": "Pipridge Ltd",
+            "support_email": "help@pipridge.example",
+            "address": "House 12, Road 5, Dhaka 1219",  # digits are facts here, not figures
+        },
+    )
+    assert contact.fields["address"].startswith("House 12")
+    assert SiteSection("contact", {"company_name": "", "support_email": "", "address": ""})
+    for bad in ({"support_email": "not an address"}, {"company_name": "{max_split}"}):
+        with pytest.raises(PolicyError):
+            SiteSection("contact", {"company_name": "", "support_email": "", "address": "", **bad})
