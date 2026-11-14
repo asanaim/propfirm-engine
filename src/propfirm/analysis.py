@@ -32,6 +32,7 @@ class Trade:
     closed: int
     volume: int
     result_cents: int  # realized profit less its share of the commission
+    reason: str = "client"  # why it closed (CloseReason value)
 
 
 def _ratio(num: int, den: int) -> str | None:
@@ -85,6 +86,7 @@ def trades_from(events: Iterable[Mapping[str, Any]]) -> list[Trade]:
                 closed=int(e["ts"]),
                 volume=int(e["volume"]),
                 result_cents=int(e["pnl_cents"]) - share,
+                reason=str(e.get("reason", "client")),
             )
         )
     return out
@@ -165,3 +167,57 @@ def analyse(trades: Iterable[Trade], since: int = 0, until: int | None = None) -
         "symbols": symbols,
         "months": months,
     }
+
+
+@dataclass(frozen=True, slots=True)
+class ShortHold:
+    """Profit from trades the trader closed within `seconds` of opening,
+    against all profit, from `since` (ms UTC). Profit counts winning
+    trades only (results after commission); losses do not offset it."""
+
+    seconds: int
+    since: int
+    trades: int
+    short_trades: int
+    profit_cents: int
+    short_profit_cents: int
+
+    @property
+    def share_basis_points(self) -> int:
+        """The short share in hundredths of a percent, rounded down."""
+        if self.profit_cents <= 0:
+            return 0
+        return self.short_profit_cents * 10_000 // self.profit_cents
+
+    def over(self, percent: int) -> bool:
+        """Above `percent` of profit (0: never)."""
+        return percent > 0 and self.short_profit_cents * 100 > percent * self.profit_cents
+
+    def view(self) -> dict[str, int]:
+        return {
+            "seconds": self.seconds,
+            "since": self.since,
+            "trades": self.trades,
+            "short_trades": self.short_trades,
+            "profit_cents": self.profit_cents,
+            "short_profit_cents": self.short_profit_cents,
+            "share_basis_points": self.share_basis_points,
+        }
+
+
+def short_hold(trades: Iterable[Trade], seconds: int, since: int = 0) -> ShortHold:
+    """The short-hold measure of trades closed at or after `since`. Only
+    closes by the trader count as short (a stop loss or take profit can
+    close a fair trade in seconds); a partial close is its own trade."""
+    count = short = profit = short_profit = 0
+    for t in trades:
+        if t.closed < since:
+            continue
+        count += 1
+        quick = t.reason == "client" and t.closed - t.opened < seconds * 1000
+        short += quick
+        if t.result_cents > 0:
+            profit += t.result_cents
+            if quick:
+                short_profit += t.result_cents
+    return ShortHold(seconds, since, count, short, profit, short_profit)

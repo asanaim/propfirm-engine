@@ -241,3 +241,16 @@ too (template `stage_passed`), with the next step: the Stage 2 account
 after a short review, or the identity check and the trader agreement for
 a funded account. Written to the outbox in the same transaction as the
 progression record, so a pass is never missed or emailed twice.
+
+D-14.3, short holds (build plan step 1, line 8; section 1, 13 Nov 2026).
+Not an automatic ban. Per funded account and payout period (since the
+last payout, or since funding): the share of profit from trades the
+trader closed within 60 seconds of opening. A stop loss or take profit
+never counts as short; losses do not offset profit; a partial close is
+its own trade. Above 50 percent, a payout request raises one integrity
+case for the period (source `short_hold`) and is held while it is open;
+staff decide, a void needs two people. The measure is shown on the staff
+payout page. Settings `[payouts] short_hold_seconds = 60`,
+`short_hold_share_percent = 50` (0: off). If the trade history cannot be
+read the request is not held, since staff approve every payout anyway.
+The class C step of section 1 follows with the trader classes (step 5).

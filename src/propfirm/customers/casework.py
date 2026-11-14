@@ -73,6 +73,9 @@ class Casework:
         policy = (await self._policy.current()).cases
         return await self._store.alert_news_violations(policy.due, ts)
 
+    async def has_alert(self, acc: str, source: str, key: str) -> bool:
+        return await self._store.has_alert(acc, source, key)
+
     async def has_open_case(self, cif: str) -> bool:
         return await self._store.open_case(cif) is not None
 

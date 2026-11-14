@@ -12,6 +12,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
+from propfirm.analysis import ShortHold, short_hold, trades_from
 from propfirm.customers.casework import Casework, Submitter
 from propfirm.customers.notifications import wallet_notice
 from propfirm.customers.onboarding_store import OnboardingStore
@@ -34,6 +35,12 @@ log = logging.getLogger(__name__)
 NETWORK = "TRC20"  # USDT on TRON, the only payout method [CONFIRMED]
 SEND_RETRY_MS = 60_000  # a failed send is tried again after this
 DEBIT_RETRY_MS = 60_000  # an unanswered debit is published again after this
+
+
+class TradeHistory(Protocol):
+    async def account_events(
+        self, account_id: str, after_seq: int = 0, limit: int = 200
+    ) -> list[dict[str, Any]]: ...
 
 
 class LiveAccounts(Protocol):
@@ -61,6 +68,7 @@ class Payouts:
         identity: OnboardingStore | None = None,  # Tier 2 identity checks
         cases: Casework | None = None,
         notices: NoticeSource | None = None,  # notification templates (rule AC12)
+        history: TradeHistory | None = None,  # projected account events (short holds)
         wait_s: float = 5.0,
     ) -> None:
         self._store = store
@@ -72,6 +80,7 @@ class Payouts:
         self._identity = identity
         self._cases = cases
         self._notices = notices
+        self._history = history
         self._wait_s = wait_s
 
     @property
@@ -178,6 +187,46 @@ class Payouts:
         detail = {"mfa": mfa, "auth_time": auth_time}
         return await self._store.add_wallet(cif.cif, NETWORK, address, subject, ts, detail, notice)
 
+    async def short_hold(self, acc: str) -> ShortHold | None:
+        """The short-hold measure of the account's current payout period;
+        None without trade history."""
+        if self._history is None:
+            return None
+        record = await self._customers.account(acc)
+        if record is None:
+            raise PayoutRefused("unknown", f"no account {acc}")
+        policy = await self._policy.current()
+        since = await self._store.last_debited(acc) or record.created_at
+        events: list[dict[str, Any]] = []
+        after = 0
+        while True:
+            page = await self._history.account_events(acc, after, 1_000)
+            events += page
+            if len(page) < 1_000:
+                break
+            after = int(page[-1]["seq"])
+        return short_hold(trades_from(events), policy.payouts.short_hold_seconds, since)
+
+    async def _hold_short_holds(self, acc: str, cif: CifRecord, ts: int) -> None:
+        """Raise an integrity case, once per payout period, when the period's
+        profit comes mostly from trades closed within seconds; the open case
+        then holds the request for review (section 1, 13 Nov 2026)."""
+        if self._cases is None:
+            return
+        percent = (await self._policy.current()).payouts.short_hold_share_percent
+        try:
+            measure = await self.short_hold(acc) if percent > 0 else None
+        except Exception:  # history not readable: staff still approve every payout
+            log.exception("short-hold measure of %s unavailable", acc)
+            return
+        if measure is None or not measure.over(percent):
+            return
+        key = f"period:{measure.since}"
+        if await self._cases.has_alert(acc, "short_hold", key):
+            return
+        detail = {"key": key, "threshold_percent": percent, **measure.view()}
+        await self._cases.alert(cif.cif, acc, "short_hold", "integrity", "medium", detail, ts)
+
     async def request(
         self,
         acc: str,
@@ -189,6 +238,7 @@ class Payouts:
     ) -> PayoutRecord:
         await self._mfa(mfa, auth_time, ts)
         policy = await self._policy.current()
+        await self._hold_short_holds(acc, cif, ts)
         e = await self.eligibility(acc, ts)
         if not e.eligible:
             raise PayoutRefused("not_eligible", f"checks failing: {', '.join(_failing(e))}")

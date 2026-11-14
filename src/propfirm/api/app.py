@@ -2626,7 +2626,16 @@ def create_app(
         history = [
             {"kind": e.kind, "ts": e.ts, "detail": e.detail} for e in await store.history(po)
         ]
-        return {**payout_view(record), "wallet": wallet_view(wallet), "history": history}
+        try:
+            measure = await _payouts(deps).short_hold(record.acc)
+        except Exception:  # the history projection is not readable
+            measure = None
+        return {
+            **payout_view(record),
+            "wallet": wallet_view(wallet),
+            "history": history,
+            "short_hold": None if measure is None else measure.view(),
+        }
 
     async def payout_step(step: Callable[[], Awaitable[PayoutRecord]]) -> dict[str, Any]:
         try:

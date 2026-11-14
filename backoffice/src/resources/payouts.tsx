@@ -29,6 +29,7 @@ export function PayoutList() {
         <MoneyField source="trader_amount_cents" label="To the trader" />
         <TextField source="status" />
         <FunctionField label="Approvals" render={(r: RaRecord) => ((r.approvals as string[] | undefined) ?? []).length} />
+        <FunctionField label="Short holds this period" render={(r: RaRecord) => shortHoldText(r.short_hold as ShortHoldView | null | undefined)} />
         <TimeField source="requested_at" label="Requested" />
       </Datagrid>
     </List>
@@ -47,6 +48,24 @@ function PayoutActions() {
       <ActionButton label="Deny" color="error" path={`/staff/payouts/${po}/deny`} />
     </Stack>
   );
+}
+
+interface ShortHoldView {
+  seconds: number;
+  trades: number;
+  short_trades: number;
+  profit_cents: number;
+  short_profit_cents: number;
+  share_basis_points: number;
+}
+
+/** The period's short holds in words: "62.5% of profit (3 of 40 trades)
+closed by the trader within 60 s". */
+export function shortHoldText(v: ShortHoldView | null | undefined): string {
+  if (v === null || v === undefined) return "-";
+  if (v.profit_cents <= 0) return `No profit this period (${v.trades.toString()} trades)`;
+  const pct = `${Math.floor(v.share_basis_points / 100).toString()}.${(v.share_basis_points % 100).toString().padStart(2, "0")}%`;
+  return `${pct} of profit from ${v.short_trades.toString()} of ${v.trades.toString()} trades closed by the trader within ${v.seconds.toString()} s`;
 }
 
 export function PayoutShow() {

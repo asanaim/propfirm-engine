@@ -8,6 +8,7 @@ import tomllib
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from fractions import Fraction
 from typing import Any
 
@@ -28,7 +29,7 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader, Projector
-from propfirm.service.setup import development_setup, setup_from_policy
+from propfirm.service.setup import setup_from_policy
 from tests.auth_rig import FakeCustomers, bearer, verifier
 
 pytestmark = pytest.mark.integration
@@ -37,7 +38,13 @@ pytestmark = pytest.mark.integration
 @asynccontextmanager
 async def engine(config: ServiceConfig) -> AsyncIterator[asyncio.Task[Runner]]:
     stop = asyncio.Event()
-    task = asyncio.create_task(run(config, development_setup(), stop))
+    # the shipped setup without trading hours: these tests run on the real
+    # clock, and a weekend run would find forex closed
+    shipped = load_policy(DEFAULT_POLICY)
+    always = tuple(replace(i, hours=None) for i in shipped.trading.instruments)
+    trading = replace(shipped.trading, instruments=always)
+    setup = setup_from_policy(replace(shipped, trading=trading))
+    task = asyncio.create_task(run(config, setup, stop))
     try:
         yield task
     finally:

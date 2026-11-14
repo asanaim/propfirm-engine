@@ -126,6 +126,7 @@ async def platform(
     screening: bool = False,
     audit: bool = False,
     trading_hours: bool = False,
+    short_holds: bool = False,
 ) -> AsyncIterator[Platform]:
     """`funded`: funded orders wait for funded onboarding (sandbox identity
     check), as the API process runs it; otherwise they open at payment.
@@ -133,9 +134,13 @@ async def platform(
     off here unless a test is about it, so staff tests need not screen).
     `trading_hours`: the shipped trading hours; off here unless a test is
     about them, because these tests run on the real clock and a weekend
-    run would find forex closed."""
+    run would find forex closed.
+    `short_holds`: the shipped short-hold review of payouts (step 1, line 8);
+    off here unless a test is about it."""
     policy = policy or load_policy()
     policy = replace(policy, staff=replace(policy.staff, screening_required=screening))
+    if not short_holds:  # these tests' trades close within seconds; off unless tested
+        policy = replace(policy, payouts=replace(policy.payouts, short_hold_share_percent=0))
     if not trading_hours:
         always = tuple(replace(i, hours=None) for i in policy.trading.instruments)
         policy = replace(policy, trading=replace(policy.trading, instruments=always))
@@ -209,6 +214,7 @@ async def platform(
         payout_provider or SandboxPayouts(),
         identity=onboardings,
         cases=cases,
+        history=HistoryReader(pool, config.read_schema),
         wait_s=wait_s,
     )
     staff = Directory(

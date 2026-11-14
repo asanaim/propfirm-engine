@@ -88,6 +88,13 @@ class PayoutPolicy:
     # "pass_authorise": a T2 or above passes, then an admin authorises
     # [decided 31 Oct 2026]; "count": `approvals_required` employees (before)
     approval: str = "pass_authorise"
+    # Short holds (build plan step 1, line 8; section 1, 13 Nov 2026): when
+    # more than `short_hold_share_percent` of the period's profit comes from
+    # trades the trader closed within `short_hold_seconds` of opening, a
+    # payout request raises an integrity case and waits for review; staff
+    # decide, a void needs two people. 0 percent: off.
+    short_hold_seconds: int = 60
+    short_hold_share_percent: int = 0  # 50 in the shipped policy
 
 
 PAYOUT_APPROVALS = ("pass_authorise", "count")
@@ -631,8 +638,16 @@ def _payouts(t: _Table) -> PayoutPolicy:
         require_mfa=t.boolean("require_mfa"),
         step_up_minutes=t.integer("step_up_minutes"),
         approval=t.text("approval"),
+        short_hold_seconds=t.integer("short_hold_seconds", 1)
+        if t.has("short_hold_seconds")
+        else 60,
+        short_hold_share_percent=(
+            t.integer("short_hold_share_percent") if t.has("short_hold_share_percent") else 0
+        ),
     )
     t.done()
+    if policy.short_hold_share_percent > 100:
+        raise PolicyError(f"{t.name('short_hold_share_percent')} must be 0 to 100")
     if policy.approval not in PAYOUT_APPROVALS:
         raise PolicyError(f"{t.name('approval')} must be one of {PAYOUT_APPROVALS}")
     if policy.approval == "pass_authorise" and policy.approvals_required != 2:

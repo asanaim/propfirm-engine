@@ -71,6 +71,12 @@ step_up_minutes = 5            # 0: any login that used MFA
 # and The5ers (checked 30 Oct 2026: the wallet is given with the request;
 # FundedNext confirms the request by OTP). A wait of N hours can be set here.
 wallet_cooling_off_hours = 0
+# Short holds (section 1, 13 Nov 2026; not an automatic ban): more than this
+# share of the period's profit from trades the trader closed within this many
+# seconds of opening holds the payout request for review (an integrity case).
+# A stop loss or take profit does not count. 0 percent: off.
+short_hold_seconds = 60
+short_hold_share_percent = 50
 
 [scaling]                      # Lite, Classic and 1-Step funded accounts
 review_months = 4

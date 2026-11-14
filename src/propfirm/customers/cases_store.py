@@ -98,6 +98,18 @@ class CaseStore:
         async with self._pool.acquire() as conn, conn.transaction():
             return await self._raise(conn, cif, acc, source, kind, severity, detail, due_at, ts)
 
+    async def has_alert(self, acc: str, source: str, key: str) -> bool:
+        """Whether an alert from `source` with this `key` in its detail was
+        raised on the account (one alert per payout period, say)."""
+        found = await self._pool.fetchval(
+            f"SELECT 1 FROM {self._s}.alerts WHERE acc = $1 AND source = $2 "
+            f"AND detail->>'key' = $3 LIMIT 1",
+            acc,
+            source,
+            key,
+        )
+        return found is not None
+
     async def alert_news_violations(
         self, due: Callable[[str, int], int], ts: int, limit: int = 500
     ) -> list[str]:
