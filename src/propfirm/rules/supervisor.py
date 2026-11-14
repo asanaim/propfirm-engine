@@ -387,6 +387,11 @@ class RuleSupervisor:
         self._engine.correct_balance(account_id, amount_cents, correction, ts)
         if self._day is not None and price_ts < self._day:
             state.day_base += amount_cents
+        if amount_cents < 0 and state.rules.max_loss_kind.trails:
+            # a windfall taken back: the trailing floor's high-water mark it
+            # raised comes down with it, never below the starting balance
+            # (D-14.4 amended, 14 Nov 2026)
+            state.high_water = max(state.initial_balance, state.high_water + amount_cents)
         events.append(
             BalanceCorrected(
                 self._engine.now,

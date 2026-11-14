@@ -211,3 +211,18 @@ def test_rounding_is_half_to_even_to_the_cent() -> None:
     from propfirm.customers.corrections import scaled
 
     assert (scaled(5, 1, 2), scaled(15, 1, 10), scaled(-5, 1, 2), scaled(7, 1, 2)) == (2, 2, -2, 4)
+
+
+def test_taking_back_a_windfall_lowers_a_trailing_high_water_mark() -> None:
+    one_step = PRODUCTS["one-step"][0]  # 10% trailing at end of day
+    assert one_step.max_loss_kind.trails
+    r = RulesRig(one_step, USD_100K, T0)
+    r.price(110_000, T0)
+    state = r.sup._state("A")
+    state.high_water = USD_100K + 500_000  # raised by a bad print's profit
+    r.sup.correct_balance("A", -400_000, "COR00000001", T0 - 86_400_000, T0 + 1)
+    assert state.high_water == USD_100K + 100_000
+    r.sup.correct_balance("A", -900_000, "COR00000002", T0 - 86_400_000, T0 + 2)
+    assert state.high_water == USD_100K  # never below the start
+    r.sup.correct_balance("A", 50_000, "COR00000003", T0 - 86_400_000, T0 + 3)
+    assert state.high_water == USD_100K  # a loss given back leaves it

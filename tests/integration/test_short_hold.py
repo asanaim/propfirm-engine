@@ -58,5 +58,18 @@ def test_a_payout_from_quick_trades_is_held_for_review(
             assert again.status_code == 409
             # one alert for the period, however often the trader asks
             assert await p.cases.has_alert(acc, "short_hold", f"period:{measure.since}")
+            # D-14.5: class C from now on; staff can set it back with a reason
+            assert p.payouts is not None
+            found = await p.store.account_class(acc)
+            assert found is not None and found[0] == "C"
+            back = await p.call(
+                "PUT",
+                f"/staff/accounts/{acc}/class",
+                "staff-1",
+                {"class": "B", "reason": "reviewed: scalping within the rules"},
+                ("staff",),
+            )
+            assert back.status_code == 200, back.text
+            assert back.json()["class"] == "B"
 
     asyncio.run(scenario())

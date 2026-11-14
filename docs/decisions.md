@@ -286,3 +286,22 @@ is not reached while a confirmed case stands. Settings per product:
 the second above the first split). The contract (template v3) and the
 shop state the ladder from the same settings. The scaling rung applies
 once the scaling job (step 2, line 4) records steps.
+D-14.5, trader classes, first use (owner: "take the most profitable,
+sustainable decision", 14 Nov 2026). An account flagged for short holds
+(D-14.3) becomes class C from then on, recorded with its reason. A class
+C or D account has every payout reviewed: each payout period raises an
+integrity case (source `risk_class`) even when its short-hold share is
+below the threshold, so a repeat pattern cannot slip through a quiet
+period. Staff set the class back (case.work, with a reason; every change
+is kept). Lot caps and the daily classing of step 5 build on this record.
+Why: a review costs minutes; an unreviewed payout to a short-hold trader
+is paid from the reserve. Classing is not a breach, so a fair scalper loses
+nothing but time.
+
+D-14.4 amended (14 Nov 2026), gaps closed:
+- A negative correction (a windfall taken back) lowers a trailing loss
+  limit's high-water mark by the same amount, never below the starting
+  balance. A positive one (a loss given back) leaves it: the floor never
+  rises from a correction.
+- Price corrections show an account's fills with the price number each
+  used ("Find the price number"), so staff need not read the journal.

@@ -221,13 +221,28 @@ class Payouts:
         except Exception:  # history not readable: staff still approve every payout
             log.exception("short-hold measure of %s unavailable", acc)
             return
-        if measure is None or not measure.over(percent):
+        if measure is None:
             return
         key = f"period:{measure.since}"
-        if await self._cases.has_alert(acc, "short_hold", key):
+        if measure.over(percent):
+            # D-14.5: the account is class C from now on, and this period is reviewed
+            current = await self._customers.account_class(acc)
+            if current is None or current[0] not in ("C", "D"):
+                reason = f"short holds: {measure.share_basis_points / 100:.2f}% of profit"
+                await self._customers.set_account_class(acc, "C", reason, "system", ts)
+            if not await self._cases.has_alert(acc, "short_hold", key):
+                detail = {"key": key, "threshold_percent": percent, **measure.view()}
+                await self._cases.alert(
+                    cif.cif, acc, "short_hold", "integrity", "medium", detail, ts
+                )
             return
-        detail = {"key": key, "threshold_percent": percent, **measure.view()}
-        await self._cases.alert(cif.cif, acc, "short_hold", "integrity", "medium", detail, ts)
+        # a class C account has every payout reviewed, short holds or not
+        current = await self._customers.account_class(acc)
+        reviewed = current is not None and current[0] in ("C", "D")
+        if reviewed and not await self._cases.has_alert(acc, "risk_class", key):
+            assert current is not None
+            detail = {"key": key, "class": current[0], "reason": current[1], **measure.view()}
+            await self._cases.alert(cif.cif, acc, "risk_class", "integrity", "low", detail, ts)
 
     async def request(
         self,

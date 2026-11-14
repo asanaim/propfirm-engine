@@ -233,6 +233,16 @@ class LiveSource(Protocol):
     async def news(self) -> list[dict[str, Any]]: ...
 
 
+class ClassStore(Protocol):
+    async def account_class(self, acc: str) -> tuple[str, str, int] | None: ...
+
+    async def set_account_class(
+        self, acc: str, cls: str, reason: str, by: str, ts: int
+    ) -> None: ...
+
+    async def account(self, acc: str) -> AccountRecord | None: ...
+
+
 class LeaderboardStore(Protocol):
     async def leaderboard_entrants(self) -> list[tuple[AccountRecord, str, str]]: ...
 
@@ -335,6 +345,7 @@ class Deps:
     audit: AuditStore | None = None  # the security audit trail (7b); None: not recorded
     leaderboard: LeaderboardStore | None = None  # the public leaderboard and its opt-outs
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
+    classes: ClassStore | None = None  # trader classes (D-14.5)
     client_ip_header: str | None = None  # set by a trusted proxy (X-Forwarded-For), else None
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
@@ -423,6 +434,11 @@ class PublishedNewsBody(NewsReasonBody):
     event_id: EventId
     title: Title
     currency: Currency
+
+
+class ClassBody(_Body):
+    cls: Annotated[Literal["A", "B", "C", "D"], Field(alias="class")]
+    reason: Annotated[str, StringConstraints(min_length=3, max_length=500)]
 
 
 class CorrectionBody(_Body):
@@ -1710,6 +1726,20 @@ def create_app(
         status = {"unknown": 404, "no_fills": 404, "no_price": 404}.get(exc.code, 409)
         return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
 
+    @app.put("/staff/accounts/{acc}/class")
+    async def set_class(deps: D, me: CaseWorker, acc: Ident, body: ClassBody) -> dict[str, Any]:
+        """Set an account's trader class (D-14.5), with a reason; kept with
+        who set it. Class C or D: every payout of the account is reviewed."""
+        store = deps.classes
+        if store is None:
+            raise HTTPException(status_code=503, detail="classes not available")
+        if await store.account(acc) is None:
+            raise HTTPException(status_code=404, detail="unknown account")
+        await store.set_account_class(acc, body.cls, body.reason, me.subject, deps.clock())
+        found = await store.account_class(acc)
+        assert found is not None
+        return {"acc": acc, "class": found[0], "reason": found[1], "since": found[2]}
+
     @app.get("/staff/corrections")
     async def list_corrections(deps: D, me: CaseWorker) -> list[dict[str, Any]]:
         return await _corrections(deps).recent()
@@ -2710,11 +2740,15 @@ def create_app(
             measure = await _payouts(deps).short_hold(record.acc)
         except Exception:  # the history projection is not readable
             measure = None
+        found = None if deps.classes is None else await deps.classes.account_class(record.acc)
         return {
             **payout_view(record),
             "wallet": wallet_view(wallet),
             "history": history,
             "short_hold": None if measure is None else measure.view(),
+            "risk_class": None
+            if found is None
+            else {"class": found[0], "reason": found[1], "since": found[2]},
         }
 
     async def payout_step(step: Callable[[], Awaitable[PayoutRecord]]) -> dict[str, Any]:
