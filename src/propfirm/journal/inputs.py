@@ -294,6 +294,49 @@ class DebitPayout:
 
 
 @dataclass(frozen=True, slots=True)
+class CorrectBalance:
+    """Reverse a bad price's effect on an account (D-14.4): add the signed
+    `amount_cents` to its balance. `correction` is the COR id of the
+    decision, approved by two people; once per account. `price_ts`: when the
+    bad price was applied; within today's trading day the correction counts
+    in today's result (it undoes today's effect), before it it does not."""
+
+    account_id: str
+    amount_cents: int
+    correction: str
+    price_ts: int
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("account_id", self.account_id)
+        if isinstance(self.amount_cents, bool) or not isinstance(self.amount_cents, int):
+            raise TypeError("amount_cents must be an int")
+        if self.amount_cents == 0:
+            raise ValueError("amount_cents must not be 0")
+        require_text("correction", self.correction)
+        _ts(self.price_ts)
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
+class ReinstateAccount:
+    """Undo a breach a bad price caused (D-14.4), after its correction.
+    `price_ts` as in CorrectBalance: from an earlier trading day, today's
+    base is set afresh from the account."""
+
+    account_id: str
+    correction: str
+    price_ts: int
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("account_id", self.account_id)
+        require_text("correction", self.correction)
+        _ts(self.price_ts)
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
 class Checkpoint:
     """Record a digest of the whole engine state in the chain and store a
     snapshot of it, so start-up can resume from here (sent by the scheduler)."""
@@ -323,6 +366,8 @@ type Input = (
     | Malformed
     | PlaceTrailingEntry
     | SetTrailingStop
+    | CorrectBalance
+    | ReinstateAccount
 )
 
 INPUT_TYPES = (
@@ -344,6 +389,8 @@ INPUT_TYPES = (
     Malformed,
     PlaceTrailingEntry,
     SetTrailingStop,
+    CorrectBalance,
+    ReinstateAccount,
 )
 
 
@@ -365,6 +412,9 @@ class InputRejectReason(StrEnum):
     POSITIONS_OPEN = "positions_open"
     PAYOUT_EXCEEDS_PROFIT = "payout_exceeds_profit"
     PAYOUT_BREACHES_FLOOR = "payout_breaches_floor"  # a floor that does not restart
+    DUPLICATE_CORRECTION = "duplicate_correction"
+    ACCOUNT_NOT_BREACHED = "account_not_breached"
+    STILL_BREACHED = "still_breached"  # correct the balance first
 
 
 @dataclass(frozen=True, slots=True)
@@ -505,6 +555,24 @@ def apply(
             if refusal is not None:
                 return reject(item.account_id, InputRejectReason(refusal))
             return list(sup.debit_payout(item.account_id, item.amount_cents, item.payout, item.ts))
+        case CorrectBalance():
+            if not sup.has_account(item.account_id):
+                return reject(item.account_id, InputRejectReason.UNKNOWN_ACCOUNT)
+            refusal = sup.correction_refusal(item.account_id, item.correction)
+            if refusal is not None:
+                return reject(item.account_id, InputRejectReason(refusal))
+            return list(
+                sup.correct_balance(
+                    item.account_id, item.amount_cents, item.correction, item.price_ts, item.ts
+                )
+            )
+        case ReinstateAccount():
+            if not sup.has_account(item.account_id):
+                return reject(item.account_id, InputRejectReason.UNKNOWN_ACCOUNT)
+            refusal = sup.reinstatement_refusal(item.account_id, item.price_ts)
+            if refusal is not None:
+                return reject(item.account_id, InputRejectReason(refusal))
+            return list(sup.reinstate(item.account_id, item.correction, item.price_ts, item.ts))
         case Checkpoint():
             raise TypeError("Checkpoint is applied by the journal machine")
         case Malformed():

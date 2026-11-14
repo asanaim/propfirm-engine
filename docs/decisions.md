@@ -254,3 +254,23 @@ payout page. Settings `[payouts] short_hold_seconds = 60`,
 `short_hold_share_percent = 50` (0: off). If the trade history cannot be
 read the request is not held, since staff approve every payout anyway.
 The class C step of section 1 follows with the trader classes (step 5).
+
+D-14.4, bad-price corrections (build plan step 1, line 7; review D9, second
+half). One person flags an applied price (symbol and price number) with the
+price it should have been, and a reason; the system lists each account a
+fill at that price touched and the amount that reverses it; a second
+person approves (never the proposer). The engine then corrects each
+balance (CorrectBalance, signed, once per account and correction) and
+reinstates each account the bad price breached (ReinstateAccount: active
+and unlocked; only when above its floors once corrected). Positions the
+bad price closed stay closed. A correction for a price of today counts in
+today's result; for an earlier day it moves the day's base, and a
+reinstated account starts today from its current balance.
+Amount: a fill's result is scaled linearly to the good price, fills moving
+with the mid (spread kept); exact for US dollar quotes, conversion taken as
+unchanged for cross pairs; rounded half to even to the cent. Fills that
+cannot be scaled (closed at the open price; a position opened at the bad
+price still open) are listed for staff to handle by hand.
+Not covered: a trailing loss limit's high-water mark raised by a bad
+price is not lowered (a reinstated trailing account keeps it); flag such
+cases by hand until the trader classes and risk desk exist (step 5).

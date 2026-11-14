@@ -44,6 +44,7 @@ import {
   ArrowLeftRight,
   Server,
   StickyNote,
+  Undo2,
 } from "lucide-react";
 
 export const STROKE = 1.75;
@@ -100,4 +101,5 @@ export const ICONS = {
   security: LockKeyhole,
   offering: Boxes,
   system: Server,
+  corrections: Undo2,
 } satisfies Record<string, LucideIcon>;

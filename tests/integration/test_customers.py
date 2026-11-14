@@ -22,6 +22,7 @@ from propfirm.audit.store import migrate as migrate_audit
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.corrections import Corrections
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycProvider, SandboxKyc
@@ -240,6 +241,9 @@ async def platform(
         verifier=verifier(),
         customers=store,
         leaderboard=store,
+        corrections=Corrections(
+            pool, config.customer_schema, config.schema, config.read_schema, gateway, wait_s
+        ),
         checkout=checkout,
         policy=settings,
         settings=settings,
@@ -495,7 +499,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+            assert await migrate(conn, schema) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

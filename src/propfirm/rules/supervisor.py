@@ -45,8 +45,10 @@ from propfirm.market.types import PriceUpdate
 from propfirm.rules.clock import NEW_YORK_17, TradingClock
 from propfirm.rules.events import (
     AccountBreached,
+    AccountReinstated,
     AccountStatus,
     AccountVoided,
+    BalanceCorrected,
     BreachReason,
     DayStarted,
     NewsViolation,
@@ -55,7 +57,7 @@ from propfirm.rules.events import (
     StagePassed,
 )
 from propfirm.rules.products import MaxLossKind, RuleSet, TargetBasis, TieRule
-from propfirm.trading.engine import TradingEngine, payout_entry
+from propfirm.trading.engine import TradingEngine, correction_entry, payout_entry
 from propfirm.trading.events import (
     CloseReason,
     CommissionCharged,
@@ -361,6 +363,73 @@ class RuleSupervisor:
         )
         for other in self._active():
             events += self._check(other)
+        return events
+
+    def correction_refusal(self, account_id: str, correction: str) -> str | None:
+        """Why a balance correction cannot be applied, or None."""
+        if self._engine.has_entry(correction_entry(correction, account_id)):
+            return "duplicate_correction"
+        return None
+
+    def correct_balance(
+        self, account_id: str, amount_cents: int, correction: str, price_ts: int, ts: int
+    ) -> list[Event]:
+        """Reverse a bad price's effect on the balance (D-14.4), in any
+        status. A bad price of today: the correction counts in today's
+        result (it undoes it). Of an earlier day: the day's base moves with
+        it, so today's loss limit does not count it. An active account is
+        then checked as after any change."""
+        refusal = self.correction_refusal(account_id, correction)
+        if refusal is not None:
+            raise ValueError(refusal)
+        state = self._state(account_id)
+        events = self._roll(ts)
+        self._engine.correct_balance(account_id, amount_cents, correction, ts)
+        if self._day is not None and price_ts < self._day:
+            state.day_base += amount_cents
+        events.append(
+            BalanceCorrected(
+                self._engine.now,
+                account_id,
+                correction,
+                amount_cents,
+                self._engine.balance(account_id),
+                state.rules.rsv_id,
+            )
+        )
+        if state.status is AccountStatus.ACTIVE:
+            events += self._check(state)
+        return events
+
+    def reinstatement_refusal(self, account_id: str, price_ts: int | None = None) -> str | None:
+        """Why a breached account cannot be reinstated, or None: it must be
+        breached, and above its floors once corrected (the daily floor only
+        when the bad price was today's: an earlier day's base is replaced)."""
+        state = self._state(account_id)
+        if state.status is not AccountStatus.BREACHED:
+            return "account_not_breached"
+        equity = self._engine.equity(account_id)
+        today = price_ts is None or self._day is None or price_ts >= self._day
+        if (today and equity <= self._daily_floor(state)) or equity <= self._max_floor(state):
+            return "still_breached"
+        return None
+
+    def reinstate(self, account_id: str, correction: str, price_ts: int, ts: int) -> list[Event]:
+        """Undo a breach a bad price caused (D-14.4): active and unlocked
+        again; positions the breach closed stay closed."""
+        refusal = self.reinstatement_refusal(account_id, price_ts)
+        if refusal is not None:
+            raise ValueError(refusal)
+        state = self._state(account_id)
+        events = self._roll(ts)
+        events += self._engine.unlock_account(account_id, ts)
+        state.status = AccountStatus.ACTIVE
+        if self._day is not None and price_ts < self._day:  # breached on an earlier day
+            equity = self._engine.equity(account_id)
+            state.day_base = max(self._engine.balance(account_id), equity)
+        events.append(
+            AccountReinstated(self._engine.now, account_id, correction, state.rules.rsv_id)
+        )
         return events
 
     def has_account(self, account_id: str) -> bool:

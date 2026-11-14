@@ -80,6 +80,7 @@ from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
+from propfirm.customers.corrections import CorrectionRefused, Corrections
 from propfirm.customers.directory import (
     SEGMENTS,
     TX_STATUSES,
@@ -333,6 +334,7 @@ class Deps:
     oversight: Oversight | None = None  # sign-ins, dormant accounts, reviews, anomalies
     audit: AuditStore | None = None  # the security audit trail (7b); None: not recorded
     leaderboard: LeaderboardStore | None = None  # the public leaderboard and its opt-outs
+    corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     client_ip_header: str | None = None  # set by a trusted proxy (X-Forwarded-For), else None
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
@@ -421,6 +423,13 @@ class PublishedNewsBody(NewsReasonBody):
     event_id: EventId
     title: Title
     currency: Currency
+
+
+class CorrectionBody(_Body):
+    symbol: Annotated[str, StringConstraints(min_length=3, max_length=20)]
+    price_seq: Annotated[int, Field(ge=1)]
+    good_price: Annotated[int, Field(ge=1)]  # points, at the symbol's digits
+    reason: Annotated[str, StringConstraints(min_length=3, max_length=500)]
 
 
 class LeaderboardBody(_Body):
@@ -1273,6 +1282,7 @@ STATUSES = Literal[
 OnbId = Annotated[str, Path(pattern=r"^ONB[0-9]{8}$")]
 CasId = Annotated[str, Path(pattern=r"^CAS[0-9]{8}$")]
 PoId = Annotated[str, Path(pattern=r"^PO[0-9]{8}$")]
+CorId = Annotated[str, Path(pattern=r"^COR[0-9]{8}$")]
 PAYOUT_STATUS = Literal[
     "requested", "approved", "debited", "sent", "paid", "denied", "cancelled", "failed"
 ]
@@ -1685,6 +1695,71 @@ def create_app(
         except PayoutRefused as exc:
             raise _payout_refused(exc) from exc
         return wallet_view(wallet)
+
+    def _corrections(deps: Deps) -> Corrections:
+        if deps.corrections is None:
+            raise HTTPException(status_code=503, detail="corrections not available")
+        return deps.corrections
+
+    def _correction_refused(exc: CorrectionRefused) -> HTTPException:
+        status = {"unknown": 404, "no_fills": 404, "no_price": 404}.get(exc.code, 409)
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    @app.get("/staff/corrections")
+    async def list_corrections(deps: D, me: CaseWorker) -> list[dict[str, Any]]:
+        return await _corrections(deps).recent()
+
+    @app.get("/staff/corrections/preview")
+    async def preview_correction(
+        deps: D,
+        me: CaseWorker,
+        symbol: Annotated[str, Query(min_length=3, max_length=20)],
+        price_seq: Annotated[int, Query(ge=1)],
+        good_price: Annotated[int, Query(ge=1)],
+    ) -> dict[str, Any]:
+        """What a correction would do, before it is proposed."""
+        try:
+            update, items = await _corrections(deps).preview(symbol, price_seq, good_price)
+        except CorrectionRefused as exc:
+            raise _correction_refused(exc) from exc
+        return {
+            "bad_price": update.price,
+            "price_ts": update.receive_ts,
+            "items": [i.view() for i in items],
+        }
+
+    @app.post("/staff/corrections", status_code=201)
+    async def propose_correction(deps: D, me: CaseWorker, body: CorrectionBody) -> dict[str, Any]:
+        """Flag an applied price as bad (D-14.4); a second person approves."""
+        try:
+            return await _corrections(deps).propose(
+                body.symbol, body.price_seq, body.good_price, body.reason, me.subject, deps.clock()
+            )
+        except CorrectionRefused as exc:
+            raise _correction_refused(exc) from exc
+
+    @app.get("/staff/corrections/{cor}")
+    async def get_correction(deps: D, me: CaseWorker, cor: CorId) -> dict[str, Any]:
+        found = await _corrections(deps).get(cor)
+        if found is None:
+            raise HTTPException(status_code=404, detail="unknown correction")
+        return found
+
+    @app.post("/staff/corrections/{cor}/approve")
+    async def approve_correction(deps: D, me: CaseWorker, cor: CorId) -> dict[str, Any]:
+        """The second person: the balances are corrected and the accounts the
+        bad price breached reinstated."""
+        try:
+            return await _corrections(deps).approve(cor, me.subject, deps.clock())
+        except CorrectionRefused as exc:
+            raise _correction_refused(exc) from exc
+
+    @app.post("/staff/corrections/{cor}/reject")
+    async def reject_correction(deps: D, me: CaseWorker, cor: CorId) -> dict[str, Any]:
+        try:
+            return await _corrections(deps).reject(cor, me.subject, deps.clock())
+        except CorrectionRefused as exc:
+            raise _correction_refused(exc) from exc
 
     boards: dict[int, Leaderboard] = {}
 

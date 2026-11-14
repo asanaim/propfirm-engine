@@ -152,7 +152,12 @@ FIRM_TRADING_PNL = "firm:trading_pnl"
 FIRM_COMMISSION = "firm:commission"
 FIRM_SWAP = "firm:swap"
 _BREAK_RECHECK_MS = 24 * 3_600_000  # no long break ahead: look again a day later
+FIRM_CORRECTIONS = "firm:corrections"  # bad-price corrections (D-14.4)
 FIRM_PAYOUTS = "firm:payouts"  # paid out of trading accounts, owed to traders until sent
+
+
+def correction_entry(correction: str, account_id: str) -> str:
+    return f"correction:{correction}:{account_id}"
 
 
 def payout_entry(payout: str) -> str:
@@ -748,6 +753,36 @@ class TradingEngine:
                 reference=payout,
             )
         )
+
+    def correct_balance(self, account_id: str, amount_cents: int, correction: str, ts: int) -> None:
+        """Add a signed bad-price correction to the balance (ledger entry
+        `correction:<correction>:<account>`)."""
+        self._account(account_id)
+        self._advance(ts)
+        # a posting of +x raises the balance (see `debit_payout`, which credits it)
+        debit, credit = (
+            (balance_account(account_id), FIRM_CORRECTIONS)
+            if amount_cents > 0
+            else (FIRM_CORRECTIONS, balance_account(account_id))
+        )
+        self._ledger.post(
+            transfer(
+                correction_entry(correction, account_id),
+                self._now,
+                "correction",
+                debit=debit,
+                credit=credit,
+                amount=abs(amount_cents),
+                reference=correction,
+            )
+        )
+
+    def unlock_account(self, account_id: str, ts: int) -> list[EngineEvent]:
+        """Allow trading again (a reinstated account)."""
+        self._account(account_id)
+        events = self._advance(ts)
+        self._locked.discard(account_id)
+        return events
 
     def has_entry(self, entry_id: str) -> bool:
         return self._ledger.has(entry_id)
