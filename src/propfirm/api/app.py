@@ -136,7 +136,7 @@ from propfirm.policy import (
     rule_set_view,
     switch_value,
 )
-from propfirm.rules.addons import addons_of
+from propfirm.rules.addons import addons_of, is_trial
 from propfirm.rules.calendar import Calendar
 from propfirm.rules.clock import NEW_YORK_17
 from propfirm.rules.news import EventScope
@@ -961,6 +961,7 @@ def order_view(o: OrderRecord) -> dict[str, Any]:
         "discount_percent": percent_text(o.discount),
         "discount_code": o.discount_code,
         "addons": list(addons_of(o.rsv_id)),  # D-13.18
+        "trial": is_trial(o.rsv_id),  # D-13.17
         # what the add-ons cost: the price less the discounted list price
         "addon_cents": o.price_cents
         - (o.list_price_cents - discount_floor(o.list_price_cents, o.discount)),
@@ -1586,6 +1587,8 @@ def _refused(exc: CheckoutError) -> HTTPException:
         "unknown_product": 404,
         "unknown_order": 404,
         "unknown_payment": 404,
+        "trial_used": 409,
+        "trial_off": 404,
     }.get(exc.code, 422)
     return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
 
@@ -2149,6 +2152,36 @@ def create_app(
         except CheckoutError as exc:
             raise _refused(exc) from exc
         return {**order_view(order), "pay_url": pay_url}
+
+    @app.get("/trial")
+    async def trial_offer(deps: D) -> dict[str, Any]:
+        """The free trial on offer (D-13.17); public."""
+        policy = await _policy(deps)
+        t = policy.trial
+        return {
+            "on": t.on,
+            "product_id": t.product_id,
+            "size_cents": t.size_cents,
+            "days": t.days,
+            "stage": rule_set_view(policy.trial_rule_set()) if t.on else None,
+        }
+
+    @app.post("/me/trial", status_code=201)
+    async def start_trial(deps: D, me: Trader) -> dict[str, Any]:
+        """Open the trader's free trial: no payment, one per customer."""
+        cif = await _cif(deps, me)
+        if not (await _mode(deps)).selling:  # rule AC17
+            raise _closed("maintenance", "trials do not start during maintenance")
+        if deps.settings is not None and await deps.settings.pending_pages(me.subject):
+            raise HTTPException(  # rule AC10: accept the policies in force first
+                status_code=409,
+                detail={"code": "policies_pending", "message": "accept the updated policies"},
+            )
+        try:
+            order = await _checkout(deps).start_trial(cif, deps.clock())
+        except CheckoutError as exc:
+            raise _refused(exc) from exc
+        return order_view(order)
 
     @app.get("/orders/{ord_id}")
     async def get_order(deps: D, me: Trader, ord_id: Ident) -> dict[str, Any]:

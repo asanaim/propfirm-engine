@@ -30,6 +30,20 @@ ADDON_IDS = (SPLIT90, SWING, SWAPFREE)  # the order they take in an id
 _SUFFIX = re.compile(r"(?:-(?:" + "|".join(ADDON_IDS) + r"))+$")
 
 
+TRIAL = "trial"  # marks a free trial's rule set (D-13.17); not an add-on
+
+
+def trial_id(rsv_id: str) -> str:
+    """The free trial's rule set id for the stage `rsv_id`."""
+    return f"{rsv_id}-{TRIAL}"
+
+
+def is_trial(rsv_id: str) -> bool:
+    """Whether `rsv_id` is a free trial's rule set: it never progresses,
+    pays out, counts as an earlier account or gives a retake."""
+    return rsv_id.endswith(f"-{TRIAL}")
+
+
 def addons_of(rsv_id: str) -> tuple[str, ...]:
     """The add-ons a rule-set id carries, in id order; () for a base id."""
     found = _SUFFIX.search(rsv_id)

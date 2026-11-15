@@ -44,6 +44,7 @@ class CloseReason(StrEnum):
     VOID = "void"
     TRAILING_STOP = "trailing_stop"
     MARKET_BREAK = "market_break"  # made flat before a long market break
+    EXPIRY = "expiry"  # the account's time ran out (free trial)
 
 
 @dataclass(frozen=True, slots=True)

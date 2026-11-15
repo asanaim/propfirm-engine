@@ -16,6 +16,7 @@ class AccountStatus(StrEnum):
     PASSED = "passed"  # target met; read-only, awaiting review
     BREACHED = "breached"
     VOIDED = "voided"  # an integrity decision (a case confirmed by two employees)
+    EXPIRED = "expired"  # its time ran out (the free trial, D-13.17)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,18 @@ class AccountVoided:
     ts: int
     account_id: str
     case: str
+    equity_cents: int
+    rsv_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AccountExpired:
+    """The account's time ran out (the free trial's 14 days, D-13.17): its
+    positions close at the current prices (the close-out events follow) and
+    it is locked. Not a breach."""
+
+    ts: int
+    account_id: str
     equity_cents: int
     rsv_id: str
 
@@ -153,4 +166,5 @@ type RuleEvent = (
     | BalanceCorrected
     | AccountReinstated
     | AccountScaled
+    | AccountExpired
 )

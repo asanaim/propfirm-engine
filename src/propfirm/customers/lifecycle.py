@@ -26,7 +26,7 @@ from propfirm.customers.progression import next_stage
 from propfirm.customers.store import AccountRecord
 from propfirm.journal.inputs import Input, OpenAccount
 from propfirm.policy import Policy, PolicySource
-from propfirm.rules.addons import addons_of, with_addons
+from propfirm.rules.addons import addons_of, is_trial, with_addons
 from propfirm.rules.products import Stage
 from propfirm.service.gateway import Outcome
 from propfirm.settings.notices import Notices
@@ -40,6 +40,8 @@ class Submitter(Protocol):
 
 def plan_for(policy: Policy, account: AccountRecord) -> Plan:
     """The stage after the one `account` passed, from `policy`."""
+    if is_trial(account.rsv_id):
+        return Plan(None, None, "free_trial")  # D-13.17: never progresses
     try:
         product = policy.product(account.product_id)
     except KeyError:

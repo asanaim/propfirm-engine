@@ -672,3 +672,13 @@ products = ["lite", "one-step"]
 [addons.swapfree]
 price_percent = "10"
 products = ["lite", "classic", "one-step", "instant"]
+
+[trial]
+# Free trial (D-13.17, 13 Nov 2026): the product's first stage rules on one
+# size, for `days` days, one per customer, never funded, no payout, no
+# prize. It runs on its own rule set (lite-s1-v4-trial) so it never
+# progresses. Size: the smallest Lite (D-14.13).
+on = true
+product = "lite"
+size_cents = 1000000
+days = 14

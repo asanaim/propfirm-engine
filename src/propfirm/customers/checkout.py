@@ -47,7 +47,13 @@ from propfirm.access.gating import age_on, check_country
 from propfirm.customers.casework import Casework
 from propfirm.customers.pricing import DiscountKind, PricingError, price
 from propfirm.customers.providers import PaymentProvider, Screener
-from propfirm.customers.store import CifRecord, CustomerStore, OrderRecord, RetakeTakenError
+from propfirm.customers.store import (
+    CifRecord,
+    CustomerStore,
+    OrderRecord,
+    RetakeTakenError,
+    TrialTakenError,
+)
 from propfirm.journal.inputs import Input, OpenAccount
 from propfirm.policy import (
     AddonOffer,
@@ -57,7 +63,7 @@ from propfirm.policy import (
     instant_funding,
     stage_of,
 )
-from propfirm.rules.addons import ordered, with_addons
+from propfirm.rules.addons import is_trial, ordered, with_addons
 from propfirm.rules.products import Stage
 from propfirm.service.gateway import Outcome
 
@@ -245,6 +251,38 @@ class Checkout:
         stored = await self._store.set_provider_ref(order.ord, invoice.provider_ref, ts)
         return stored, invoice.pay_url
 
+    async def start_trial(self, cif: CifRecord, ts: int) -> OrderRecord:
+        """Open the customer's free trial (D-13.17): the trial product's
+        first stage rules on the trial size, no payment, one per customer."""
+        if cif.status != "registered":
+            raise CheckoutError("blocked", "this customer cannot start a trial")
+        policy = await self._policy.current()
+        trial = policy.trial
+        if not trial.on:
+            raise CheckoutError("trial_off", "there is no free trial")
+        rules = policy.trial_rule_set()
+        product = policy.product(trial.product_id)
+        try:
+            order = await self._store.create_order(
+                cif=cif.cif,
+                product_id=trial.product_id,
+                size_cents=trial.size_cents,
+                # recorded at the size's list price, all of it off, so
+                # reports show what was given away
+                list_price_cents=dict(product.prices_cents)[trial.size_cents],
+                discount_kind=DiscountKind.TRIAL.value,
+                discount=Fraction(1),
+                discount_code=None,
+                price_cents=0,
+                rsv_id=rules.rsv_id,
+                provider="trial",
+                ts=ts,
+            )
+        except TrialTakenError:
+            raise CheckoutError("trial_used", "the free trial was already used") from None
+        await self._store.mark_paid(order.ord, ts)  # nothing to pay
+        return await self.provision(order.ord, ts)
+
     @staticmethod
     def _addon_offers(
         policy: Policy, product: ProductPolicy, addons: tuple[str, ...]
@@ -300,7 +338,8 @@ class Checkout:
         for order in await self._store.orders_for(cif):
             opened = accounts.get(order.ord)
             if (
-                rate.get(order.product_id, 0) <= 0
+                is_trial(order.rsv_id)  # a trial gives no retake
+                or rate.get(order.product_id, 0) <= 0
                 or order.status != "provisioned"
                 or order.ord in used
                 or not opened

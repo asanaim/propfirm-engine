@@ -121,6 +121,22 @@ it("prices add-ons on the list price and sends them with the order", async () =>
   expect(percentOf(5_500, "12.5")).toBe(687);
 });
 
+it("starts the free trial", async () => {
+  const fetcher = fakeFetch([
+    ["GET", "/catalogue", 200, [LITE]],
+    ["GET", "/trial", 200, { on: true, product_id: "lite", size_cents: 1_000_000, days: 14 }],
+    ["GET", "/me", 200, ME],
+    ["GET", "/me/retakes", 200, []],
+    ["POST", "/me/trial", 201, { ord: "ORD00000004", acc: "ACC00000004", trial: true, price_cents: 0 }],
+  ]);
+  renderWith(<ShopPage />, fakeAuth(), fetcher);
+  expect(await screen.findByText(/stage 1 rules, 14 days\. Free, one per trader/)).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Start free trial" }));
+  expect(await screen.findByRole("button", { name: "Open your trial" })).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url, init]) => url === "/api/me/trial" && init?.method === "POST")).toBe(true);
+});
+
 it("offers the retake price after a breach", async () => {
   const offer = { of_ord: "ORD00000001", product_id: "lite", size_cents: 1_000_000, list_price_cents: 4_400, discount_percent: "10", price_cents: 3_960 };
   const fetcher = fakeFetch([

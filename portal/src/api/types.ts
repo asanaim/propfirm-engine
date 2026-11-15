@@ -263,7 +263,7 @@ export interface LiveTrailingOrder {
 export interface LiveAccount {
   account_id: string;
   rsv_id: string;
-  status: "active" | "breached" | "passed" | "voided";
+  status: "active" | "breached" | "passed" | "voided" | "expired";
   locked: boolean;
   balance_cents: number;
   equity_cents: number;
@@ -319,6 +319,14 @@ export interface Bar {
   low: number;
   close: number;
   updates: number;
+}
+
+/** The free trial on offer (D-13.17). */
+export interface TrialOffer {
+  on: boolean;
+  product_id: string;
+  size_cents: number;
+  days: number;
 }
 
 /** A breached account the trader may retake at the retake price. */

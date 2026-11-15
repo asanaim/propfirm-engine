@@ -667,7 +667,19 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX ON {s}.retakes (of_ord);
         """,
     ),
+    (
+        18,
+        """
+        -- free trial (D-13.17): one per customer; a failed one does not count
+        CREATE UNIQUE INDEX orders_one_trial ON {s}.orders (cif)
+            WHERE rsv_id LIKE '%-trial' AND status <> 'failed';
+        """,
+    ),
 )
+
+
+class TrialTakenError(Exception):
+    """The customer already has a free trial (D-13.17)."""
 
 
 class RetakeTakenError(Exception):
@@ -929,13 +941,25 @@ class CustomerStore:
     # --- orders and accounts --------------------------------------------------------
 
     async def prior_accounts(self, cif: str, product_id: str) -> int:
+        """Earlier paid accounts of this product; a free trial is not one."""
         count: int = await self._pool.fetchval(
             f"SELECT count(*) FROM {self._s}.orders WHERE cif = $1 AND product_id = $2 "
-            f"AND status IN ('paid', 'provisioned')",
+            f"AND status IN ('paid', 'provisioned') AND rsv_id NOT LIKE '%-trial'",
             cif,
             product_id,
         )
         return count
+
+    async def trials_opened(self, since: int, before: int) -> list[str]:
+        """Free trial accounts opened in [since, before) (ACC ids, oldest
+        first)."""
+        rows = await self._pool.fetch(
+            f"SELECT acc FROM {self._s}.accounts WHERE rsv_id LIKE '%-trial' "
+            f"AND created_at >= $1 AND created_at < $2 ORDER BY created_at, acc",
+            since,
+            before,
+        )
+        return [r["acc"] for r in rows]
 
     async def retakes(self, cif: str, hold_since: int) -> dict[str, str]:
         """The customer's live retake orders: ord -> the breached ord it uses
@@ -986,7 +1010,7 @@ class CustomerStore:
                     raise RetakeTakenError(retake_of)
             number = await conn.fetchval(f"SELECT nextval('{s}.ord_seq')")
             ord_id = f"ORD{number:08d}"
-            await conn.execute(
+            insert = conn.execute(
                 f"INSERT INTO {s}.orders (ord, cif, product_id, size_cents, list_price_cents, "
                 f"discount_kind, discount, discount_code, price_cents, rsv_id, status, provider, "
                 f"provider_ref, created_at) "
@@ -1005,6 +1029,12 @@ class CustomerStore:
                 placeholder_ref(ord_id),
                 ts,
             )
+            try:
+                await insert
+            except asyncpg.UniqueViolationError as exc:
+                if exc.constraint_name == "orders_one_trial":
+                    raise TrialTakenError(cif) from None
+                raise
             facts = {
                 "product_id": product_id,
                 "size_cents": size_cents,

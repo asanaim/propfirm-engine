@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApi, useMe } from "../api/ApiProvider";
-import type { PlacedOrder, Product, RetakeOffer, Stage } from "../api/types";
+import type { PlacedOrder, Product, RetakeOffer, Stage, TrialOffer } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Problem } from "../components/Problem";
 import { Button, Card, Loading, Notice } from "../components/ui";
@@ -164,10 +164,15 @@ export function ShopPage() {
   const [methods, setMethods] = useState<PayMethod[]>([]);
   const [method, setMethod] = useState<string | null>(null);
   const [retakes, setRetakes] = useState<RetakeOffer[]>([]);
+  const [trial, setTrial] = useState<TrialOffer | null>(null);
+  const [trialAcc, setTrialAcc] = useState<string | null>(null);
   const ready = me.status === "ready";
 
   useEffect(() => {
     api.get<Product[]>("/catalogue").then(setProducts, setError);
+    api.get<TrialOffer>("/trial").then(setTrial, () => {
+      setTrial(null); // no trial shown when the offer cannot be read
+    });
     api.get<PayMethod[]>("/payment-methods").then(
       (found) => {
         setMethods(found);
@@ -201,6 +206,27 @@ export function ShopPage() {
     try {
       const body = { product_id: product.id, size_cents: size, ...(addons.length > 0 ? { addons } : {}), ...(method === null ? {} : { method }) };
       setOrder(await api.post<PlacedOrder>("/orders", body));
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const startTrial = async () => {
+    if (auth.status !== "signed_in") {
+      await auth.signIn("/shop");
+      return;
+    }
+    if (me.status === "unregistered") {
+      navigate("/");
+      return;
+    }
+    setBusy("trial");
+    setError(null);
+    try {
+      const started = await api.post<PlacedOrder>("/me/trial");
+      setTrialAcc(started.acc);
     } catch (reason) {
       setError(reason);
     } finally {
@@ -258,6 +284,31 @@ export function ShopPage() {
           )}
         </Card>
       )}
+      {trial?.on === true ? (
+        <Card
+          title="Free trial"
+          actions={
+            trialAcc === null ? (
+              <Button busy={busy === "trial"} variant="secondary" onClick={() => void startTrial()}>
+                Start free trial
+              </Button>
+            ) : (
+              <Button
+                onClick={() => {
+                  navigate(`/accounts/${trialAcc}`);
+                }}
+              >
+                Open your trial
+              </Button>
+            )
+          }
+        >
+          <p>
+            {formatSize(trial.size_cents)} {(products ?? []).find((p) => p.id === trial.product_id)?.name ?? trial.product_id}, stage 1 rules, {trial.days} days. Free, one per
+            trader. Practice only: no payout and no next stage.
+          </p>
+        </Card>
+      ) : null}
       {retakes.map((r) => {
         const product = (products ?? []).find((p) => p.id === r.product_id);
         if (product === undefined) return null;

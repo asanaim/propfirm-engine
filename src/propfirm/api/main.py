@@ -73,6 +73,7 @@ from propfirm.customers.providers import (
 )
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore
+from propfirm.customers.trials import Trials
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.newsfeed.alerts import SourceAlerts, SourceStore
 from propfirm.newsfeed.collector import Collector, collect_forever
@@ -159,6 +160,7 @@ async def _lifecycle_forever(
     payouts: Payouts | None,
     notifications: Notifications | None,
     scaling: Scaling | None = None,
+    trials: Trials | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -185,6 +187,11 @@ async def _lifecycle_forever(
                 await scaling.run(now_ms())
             except Exception:
                 log.exception("scaling check failed")
+        if trials is not None:
+            try:  # ends free trials past their days, at most hourly (D-13.17)
+                await trials.expire_due(now_ms())
+            except Exception:
+                log.exception("trial expiry failed")
         if notifications is not None:
             try:
                 await notifications.advance(now_ms())  # security emails not sent yet
@@ -325,6 +332,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             else None
         )
         scaling = Scaling(pool, config.customer_schema, settings, live, gateway)
+        trials = Trials(customers, settings, live, gateway)
         payouts = None
         if config.sandbox and notifications is not None:
             payouts = Payouts(
@@ -368,7 +376,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         tasks.append(
             asyncio.create_task(
-                _lifecycle_forever(lifecycle, onboarding, cases, payouts, notifications, scaling)
+                _lifecycle_forever(
+                    lifecycle, onboarding, cases, payouts, notifications, scaling, trials
+                )
             )
         )
         app.state.deps = Deps(

@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from propfirm.market.guards import GuardConfig
 from propfirm.market.spread import MarketSpreadConfig
 from propfirm.market.symbols import LAUNCH_SYMBOLS, AssetClass
-from propfirm.rules.addons import ADDON_IDS, addons_of, derive
+from propfirm.rules.addons import ADDON_IDS, addons_of, derive, trial_id
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
 from propfirm.staff.records import SECTIONS_APPROVALS, Limits
 from propfirm.trading.hours import ALWAYS, TradingHours, day_minute, new_york_ms, week_minute
@@ -216,6 +216,18 @@ class AddonsPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class TrialPolicy:
+    """The free trial (D-13.17): the product's first stage rules on one
+    size, for `days` days, one per customer, never funded and never paid.
+    Off when the policy file has no [trial]."""
+
+    on: bool = False
+    product_id: str = "lite"
+    size_cents: int = 1_000_000
+    days: int = 14
+
+
+@dataclass(frozen=True, slots=True)
 class CataloguePolicy:
     """What is on sale, and the limits on buying it (review D4, owner
     decisions K2 of 12 Nov 2026). Products and sizes switched off are not
@@ -292,6 +304,7 @@ class Policy:
     staff: StaffPolicy = field(default_factory=StaffPolicy)
     catalogue: CataloguePolicy = field(default_factory=CataloguePolicy)
     addons: AddonsPolicy = field(default_factory=AddonsPolicy)
+    trial: TrialPolicy = field(default_factory=TrialPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -310,7 +323,14 @@ class Policy:
             for r in p.rule_sets:
                 out.append(r)
                 out.extend(self.with_addons(r, c) for c in combos)
+        if self.trial.on:
+            out.append(self.trial_rule_set())
         return tuple(out)
+
+    def trial_rule_set(self) -> RuleSet:
+        """The free trial's rule set: the trial product's first stage."""
+        first = self.product(self.trial.product_id).rule_sets[0]
+        return replace(first, rsv_id=trial_id(first.rsv_id))
 
     def with_addons(self, rules: RuleSet, addons: tuple[str, ...]) -> RuleSet:
         """`rules` with `addons`, by this policy's add-on numbers."""
@@ -368,7 +388,9 @@ def percent_text(share: Fraction | None) -> str | None:
     return f"{value.numerator}/{value.denominator}"
 
 
-_RSV_STAGE = re.compile(r"-(s1|s2|funded)-v[0-9]+(?:-a[0-9]+)?(?:-(?:split90|swing|swapfree))*$")
+_RSV_STAGE = re.compile(
+    r"-(s1|s2|funded)-v[0-9]+(?:-a[0-9]+)?(?:-(?:split90|swing|swapfree))*(?:-trial)?$"
+)
 
 
 def stage_of(rsv_id: str) -> Stage:
@@ -543,6 +565,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             staff=_staff(root.table("staff")),
             catalogue=_catalogue(root.table("catalogue")),
             addons=_addons(root.table("addons")) if root.has("addons") else AddonsPolicy(),
+            trial=_trial(root.table("trial")) if root.has("trial") else TrialPolicy(),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -554,6 +577,12 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
     if len(set(ids)) != len(ids):
         raise PolicyError("product ids must be unique")
     check_catalogue(policy, policy.catalogue.products_off, policy.catalogue.sizes_off)
+    trial = policy.trial
+    if trial.on and (
+        trial.product_id not in ids
+        or trial.size_cents not in dict(policy.product(trial.product_id).prices_cents)
+    ):
+        raise PolicyError("trial: product and size_cents must be one of the product's sizes")
     for offer in policy.addons.offers:
         if unknown := sorted(offer.products - set(ids)):
             raise PolicyError(f"addons.{offer.id}: unknown products {unknown}")
@@ -577,6 +606,17 @@ def _catalogue(t: _Table) -> CataloguePolicy:
     if len(set(off)) != len(off) or len(set(sizes)) != len(sizes):
         raise PolicyError("catalogue: a product or size is listed twice")
     return policy
+
+
+def _trial(t: _Table) -> TrialPolicy:
+    trial = TrialPolicy(
+        on=t.boolean("on"),
+        product_id=t.text("product"),
+        size_cents=t.integer("size_cents", 1),
+        days=t.integer("days", 1),
+    )
+    t.done()
+    return trial
 
 
 def _addons(t: _Table) -> AddonsPolicy:
