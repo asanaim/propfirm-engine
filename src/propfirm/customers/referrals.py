@@ -22,7 +22,7 @@ import asyncpg
 from propfirm.policy import PolicySource
 
 DAY_MS = 86_400_000
-_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I
+_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I  # pragma: allowlist secret
 
 
 class ReferralRefused(Exception):
