@@ -79,3 +79,14 @@ describe("income statement", () => {
     expect(LINES.cash.at(-1)?.[0]).toBe("net_cash");
   });
 });
+
+describe("liabilities", () => {
+  it("names the largest claim and the funded count", async () => {
+    const { tiles } = await import("./Liabilities");
+    const claim = { acc: "ACC1", cif: "CIF1", product_id: "instant", certain_cents: 0, open_cents: 0, expected_cents: 4_000, total_cents: 4_000 };
+    const t = tiles({ as_of: 0, certain_cents: 550, payouts_certain_cents: 0, commissions_cents: 550, open_cents: 0, expected_cents: 4_000, total_cents: 4_550, funded_accounts: 3, largest: claim, claims: [claim], unread: [] });
+    expect(t.map(([l, c]) => [l, c])).toEqual([["Certain", 550], ["Open", 0], ["Expected", 4_000], ["Total", 4_550]]);
+    expect(t[2]?.[2]).toBe("if all 3 funded accounts asked now");
+    expect(t[3]?.[2]).toBe("largest single claim $40.00 (ACC1)");
+  });
+});

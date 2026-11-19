@@ -54,6 +54,7 @@ from propfirm.customers.corrections import Corrections
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowScreening
+from propfirm.customers.liability import Liabilities
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
 from propfirm.customers.notifications import (
@@ -417,6 +418,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             codes=customers,
             referrals=referrals,
             books=books,
+            liabilities=(
+                None
+                if payouts is None
+                else Liabilities(pool, config.customer_schema, payouts, live)
+            ),
             classes=customers,
             scaling=scaling,
             corrections=Corrections(
