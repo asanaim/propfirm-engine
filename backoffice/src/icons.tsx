@@ -44,6 +44,7 @@ import {
   ArrowLeftRight,
   Server,
   StickyNote,
+  TicketPercent,
   TrendingUp,
   Undo2,
 } from "lucide-react";
@@ -104,4 +105,5 @@ export const ICONS = {
   system: Server,
   corrections: Undo2,
   scaling: TrendingUp,
+  coupons: TicketPercent,
 } satisfies Record<string, LucideIcon>;

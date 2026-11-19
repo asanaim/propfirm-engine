@@ -390,6 +390,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
             customers=customers,
             leaderboard=customers,
+            codes=customers,
             classes=customers,
             scaling=scaling,
             corrections=Corrections(

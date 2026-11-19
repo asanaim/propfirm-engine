@@ -211,7 +211,7 @@ class Checkout:
                 raise CheckoutError("screening", "this customer cannot buy")
         code_share: Fraction | None = None
         if code is not None:
-            code_share = await self._store.code_discount(code)
+            code_share = await self._store.code_discount(code, ts)
             if code_share is None:
                 raise CheckoutError("unknown_code", "this code is not valid")
         prior = await self._store.prior_accounts(cif.cif, product.id)

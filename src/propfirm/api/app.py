@@ -63,6 +63,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from fractions import Fraction
 from importlib import metadata
 from typing import Annotated, Any, Literal, Protocol, get_args
 
@@ -106,7 +107,9 @@ from propfirm.customers.store import (
     AccountRecord,
     AlreadyRegisteredError,
     CifRecord,
+    CodeTakenError,
     OrderRecord,
+    share_of,
 )
 from propfirm.journal.inputs import (
     CancelOrder,
@@ -132,6 +135,7 @@ from propfirm.policy import (
     check_catalogue,
     instant_funding,
     parse_countries,
+    parse_percent,
     percent_text,
     rule_set_view,
     switch_value,
@@ -247,6 +251,27 @@ class ClassStore(Protocol):
     async def account(self, acc: str) -> AccountRecord | None: ...
 
 
+class CodeStore(Protocol):
+    """Discount codes (D-14.14)."""
+
+    async def codes(self) -> list[dict[str, Any]]: ...
+
+    async def code_changes(self, code: str) -> list[dict[str, object]]: ...
+
+    async def create_code(
+        self,
+        code: str,
+        discount: Fraction,
+        expires_at: int | None,
+        max_uses: int | None,
+        by: str,
+        reason: str,
+        ts: int,
+    ) -> None: ...
+
+    async def switch_code(self, code: str, on: bool, by: str, reason: str, ts: int) -> bool: ...
+
+
 class LeaderboardStore(Protocol):
     async def leaderboard_entrants(self) -> list[tuple[AccountRecord, str, str]]: ...
 
@@ -348,6 +373,7 @@ class Deps:
     oversight: Oversight | None = None  # sign-ins, dormant accounts, reviews, anomalies
     audit: AuditStore | None = None  # the security audit trail (7b); None: not recorded
     leaderboard: LeaderboardStore | None = None  # the public leaderboard and its opt-outs
+    codes: CodeStore | None = None  # the coupons screen (D-14.14)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -475,6 +501,24 @@ class RegisterBody(_Body):
 PRODUCT_PATTERN = r"^[a-z][a-z0-9-]{0,30}$"
 Percent = Annotated[str, StringConstraints(pattern=r"^(0|[1-9][0-9]*)(\.[0-9]+)?$")]
 Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+CodeText = Annotated[str, StringConstraints(pattern=r"^[A-Z0-9-]{3,32}$")]
+
+
+class CodeBody(_Body):
+    """A new discount code (D-14.14)."""
+
+    code: CodeText
+    discount_percent: Percent  # at most the highest any product allows
+    expires_at: Annotated[int, Field(ge=0)] | None = None  # ms; none: no end
+    max_uses: Annotated[int, Field(ge=1, le=1_000_000)] | None = None
+    reason: Reason
+
+
+class CodeSwitchBody(_Body):
+    on: bool
+    reason: Reason
 
 
 class PurchaseBody(_Body):
@@ -1784,6 +1828,90 @@ def create_app(
     def _scaling_refused(exc: ScalingRefused) -> HTTPException:
         status = 404 if exc.code == "unknown" else 409
         return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    def _codes(deps: Deps) -> CodeStore:
+        if deps.codes is None:
+            raise HTTPException(status_code=503, detail="discount codes are not configured")
+        return deps.codes
+
+    def code_view(row: dict[str, Any], now: int) -> dict[str, Any]:
+        share = share_of(row["discount"])
+        expires = row["expires_at"]
+        used_up = row["max_uses"] is not None and row["uses"] >= row["max_uses"]
+        ended = expires is not None and expires <= now
+        return {
+            "code": row["code"],
+            "discount_percent": percent_text(share),
+            "on": row["active"],
+            "valid": bool(row["active"]) and not used_up and not ended,
+            "created_at": row["created_at"],
+            "created_by": row["created_by"],
+            "expires_at": expires,
+            "max_uses": row["max_uses"],
+            "uses": row["uses"],
+            "paid": row["paid"],
+            "given_cents": row["given_cents"],
+        }
+
+    @app.get("/staff/codes")
+    async def list_codes(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        """Discount codes with their uses and what they gave away (D-14.14)."""
+        now = deps.clock()
+        return [code_view(r, now) for r in await _codes(deps).codes()]
+
+    @app.post("/staff/codes", status_code=201)
+    async def create_code(deps: D, me: SettingsChanger, body: CodeBody) -> dict[str, Any]:
+        """A new code, on at once. Capped at the highest code discount any
+        product allows; a product with a lower cap refuses it at checkout."""
+        policy = await _policy(deps)
+        cap = max((p.code_discount_max for p in policy.products), default=Fraction(0))
+        share = parse_percent(body.discount_percent, "discount_percent")
+        assert share is not None
+        if not 0 < share <= cap:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "discount",
+                    "message": f"a code takes off more than 0 % and at most {percent_text(cap)} %",
+                },
+            )
+        now = deps.clock()
+        if body.expires_at is not None and body.expires_at <= now:
+            raise HTTPException(
+                status_code=422, detail={"code": "expires_at", "message": "the end has passed"}
+            )
+        try:
+            await _codes(deps).create_code(
+                body.code, share, body.expires_at, body.max_uses, me.subject, body.reason, now
+            )
+        except CodeTakenError:
+            raise HTTPException(
+                status_code=409, detail={"code": "code_taken", "message": "this code exists"}
+            ) from None
+        row = next(r for r in await _codes(deps).codes() if r["code"] == body.code)
+        return code_view(row, now)
+
+    @app.post("/staff/codes/{code}/switch")
+    async def switch_code(
+        deps: D,
+        me: SettingsChanger,
+        code: Annotated[str, Path(pattern=r"^[A-Z0-9-]{3,32}$")],
+        body: CodeSwitchBody,
+    ) -> dict[str, Any]:
+        now = deps.clock()
+        if not await _codes(deps).switch_code(code, body.on, me.subject, body.reason, now):
+            raise HTTPException(status_code=404, detail="unknown code")
+        row = next(r for r in await _codes(deps).codes() if r["code"] == code)
+        return {**code_view(row, now), "changes": await _codes(deps).code_changes(code)}
+
+    @app.get("/staff/codes/{code}")
+    async def get_code(
+        deps: D, me: SettingsReader, code: Annotated[str, Path(pattern=r"^[A-Z0-9-]{3,32}$")]
+    ) -> dict[str, Any]:
+        row = next((r for r in await _codes(deps).codes() if r["code"] == code), None)
+        if row is None:
+            raise HTTPException(status_code=404, detail="unknown code")
+        return {**code_view(row, deps.clock()), "changes": await _codes(deps).code_changes(code)}
 
     @app.get("/staff/scaling")
     async def list_scaling(deps: D, me: Approver) -> list[dict[str, Any]]:
