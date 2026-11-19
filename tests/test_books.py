@@ -13,15 +13,21 @@ from propfirm.customers.books import (
     PROCESSOR_FEES,
     account_name,
     account_type,
+    cents_text,
     discounts,
     expense_entry,
     fee_income,
     fee_refunds,
+    month_of,
+    month_start,
+    next_month,
     operating,
     order_entry,
     payout_debited_entry,
     payout_paid_entry,
     referral_entry,
+    statement_csv,
+    statement_rows,
 )
 
 
@@ -131,3 +137,106 @@ def test_account_types_and_names() -> None:
     assert account_name("expense:operating:market_data") == "Operating: market data"
     with pytest.raises(ValueError):
         account_type("cash")
+
+
+# --- income statement (D-14.17) ---------------------------------------------------------
+
+JAN = 1_767_225_600_000  # 2026-01-01T00:00:00Z
+FEB = 1_769_904_000_000  # 2026-02-01T00:00:00Z
+
+
+def row(ms: int, kind: str, account: str, amount: int, product: str | None) -> dict[str, object]:
+    return {
+        "occurred_at": ms,
+        "kind": kind,
+        "account": account,
+        "amount_cents": amount,
+        "product_id": product,
+    }
+
+
+POSTINGS = [
+    # January: a Lite order $109 less $10.90, Swing $16.35
+    row(JAN + 1, "order_paid", CASH, 11_445, "lite"),
+    row(JAN + 1, "order_paid", fee_income("lite"), -12_535, "lite"),
+    row(JAN + 1, "order_paid", discounts("lite"), 1_090, "lite"),
+    row(JAN + 2, "commission_accrued", COMMISSION_EXPENSE, 1_144, "lite"),
+    row(JAN + 2, "commission_accrued", COMMISSIONS_PAYABLE, -1_144, "lite"),
+    # a 1-Step order $95
+    row(JAN + 3, "order_paid", CASH, 9_500, "one-step"),
+    row(JAN + 3, "order_paid", fee_income("one-step"), -9_500, "one-step"),
+    # hosting, paid
+    row(JAN + 4, "operating_expense", "expense:operating:hosting", 2_999, None),
+    row(JAN + 4, "operating_expense", CASH, -2_999, None),
+    # a Lite payout debited in January, paid in February
+    row(JAN + 5, "payout_debited", PAYOUTS_PAYABLE, -85_500, "lite"),
+    row(JAN + 5, "payout_debited", PAYOUT_EXPENSE, 80_000, "lite"),
+    row(JAN + 5, "payout_debited", fee_refunds("lite"), 5_500, "lite"),
+    row(FEB + 1, "payout_paid", PAYOUTS_PAYABLE, 85_500, "lite"),
+    row(FEB + 1, "payout_paid", CASH, -85_500, "lite"),
+]
+
+
+def test_the_accrual_view_by_month_and_product() -> None:
+    rows = {
+        (r["month"], r["product"]): r
+        for r in statement_rows(POSTINGS, "accrual", ["2026-01", "2026-02"])
+    }
+    lite = rows[("2026-01", "lite")]
+    assert (lite["fees"], lite["discounts"], lite["fee_refunds"], lite["net_revenue"]) == (
+        12_535,
+        1_090,
+        5_500,
+        5_945,
+    )
+    assert (lite["payouts"], lite["commissions"], lite["contribution"]) == (
+        80_000,
+        1_144,
+        5_945 - 81_144,
+    )
+    total = rows[("2026-01", "all")]
+    assert (total["net_revenue"], total["operating"]) == (5_945 + 9_500, 2_999)
+    assert total["profit"] == 5_945 + 9_500 - 80_000 - 1_144 - 2_999
+    assert rows[("2026-01", "none")]["operating"] == 2_999
+    feb = rows[("2026-02", "all")]  # the payment of a payable is no cost
+    assert all(feb[n] == 0 for n in ("fees", "payouts", "profit"))
+
+
+def test_the_cash_view_follows_the_money() -> None:
+    rows = {
+        (r["month"], r["product"]): r
+        for r in statement_rows(POSTINGS, "cash", ["2026-01", "2026-02"])
+    }
+    jan, feb = rows[("2026-01", "all")], rows[("2026-02", "all")]
+    assert (jan["received"], jan["expenses_paid"], jan["payouts_paid"], jan["net_cash"]) == (
+        11_445 + 9_500,
+        2_999,
+        0,
+        11_445 + 9_500 - 2_999,
+    )
+    assert (feb["payouts_paid"], feb["net_cash"]) == (85_500, -85_500)
+    assert rows[("2026-02", "lite")]["payouts_paid"] == 85_500
+
+
+def test_months_outside_the_range_and_empty_months() -> None:
+    rows = statement_rows(POSTINGS, "accrual", ["2026-03"])
+    assert [(r["month"], r["product"], r["profit"]) for r in rows] == [("2026-03", "all", 0)]
+    with pytest.raises(ValueError, match="view"):
+        statement_rows([], "tax", ["2026-01"])
+
+
+def test_month_arithmetic_and_csv() -> None:
+    assert (month_of(JAN), month_of(FEB - 1), next_month("2026-12")) == (
+        "2026-01",
+        "2026-01",
+        "2027-01",
+    )
+    assert month_start("2026-02") == FEB
+    rows = statement_rows(POSTINGS, "cash", ["2026-02"])
+    text = statement_csv(rows, "cash")
+    assert text.splitlines() == [
+        "month,product,received,payouts_paid,commissions_paid,expenses_paid,net_cash",
+        "2026-02,all,0.00,855.00,0.00,0.00,-855.00",
+        "2026-02,lite,0.00,855.00,0.00,0.00,-855.00",
+    ]
+    assert (cents_text(5), cents_text(-12_345), cents_text(0)) == ("0.05", "-123.45", "0.00")

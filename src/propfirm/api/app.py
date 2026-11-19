@@ -77,7 +77,7 @@ from propfirm.audit.chain import AuditEvent
 from propfirm.audit.http import UNMATCHED, audited, clean, client_ip
 from propfirm.audit.http import target as audit_target
 from propfirm.audit.store import AuditStore
-from propfirm.customers.books import Books, ExpenseRefused
+from propfirm.customers.books import Books, ExpenseRefused, statement_csv
 from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
@@ -1889,6 +1889,45 @@ def create_app(
             ],
             "total_cents": sum(x.balance_cents for x in lines),
         }
+
+    async def _statement(deps: Deps, view: str, first: str, last: str) -> list[dict[str, Any]]:
+        if last < first:
+            raise HTTPException(status_code=422, detail="to is before from")
+        try:
+            return await _books(deps).statement(view, first, last)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/staff/books/income-statement")
+    async def income_statement(
+        deps: D,
+        me: SettingsReader,
+        first: Annotated[str, Query(alias="from", pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")],
+        last: Annotated[str, Query(alias="to", pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")],
+        view: Literal["accrual", "cash"] = "accrual",
+    ) -> dict[str, Any]:
+        """Income statement by UTC month and product (D-14.17), cents;
+        income and costs positive. Product `all` is every product together;
+        `none` holds costs of no product."""
+        rows = await _statement(deps, view, first, last)
+        return {"view": view, "from": first, "to": last, "rows": rows}
+
+    @app.get("/staff/books/income-statement.csv")
+    async def income_statement_csv(
+        deps: D,
+        me: SettingsReader,
+        first: Annotated[str, Query(alias="from", pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")],
+        last: Annotated[str, Query(alias="to", pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")],
+        view: Literal["accrual", "cash"] = "accrual",
+    ) -> Response:
+        rows = await _statement(deps, view, first, last)
+        return Response(
+            statement_csv(rows, view),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="income-{view}-{first}-{last}.csv"'
+            },
+        )
 
     @app.get("/staff/books/entries")
     async def book_entries(deps: D, me: SettingsReader) -> list[dict[str, Any]]:

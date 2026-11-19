@@ -505,3 +505,23 @@ D-14.16, operator ledger (build plan step 3, lines 1 and 2; section 1
   way until the payment adapters report them (step 4).
 - Not yet: the income statement, liability desk, reserve, reconciliation,
   refunds and chargebacks (step 3, lines 3 to 7).
+
+D-14.17, income statement (build plan step 3, line 3; details taken
+under D-14.7, 19 Nov 2026). Read from the operator ledger (D-14.16), by
+calendar month in UTC and by product, with every product together as
+"all". Months are UTC: the books are kept in UTC like every time in the
+engine, and a month in New York time would move each month's edge by
+hours with the clocks; the trading day's 17:00 New York reset is not an
+accounting period.
+- Accrual view, when earned or owed: fees (list price plus add-ons),
+  less discounts and fee refunds, is net revenue; less trader payouts
+  (when the engine debits them) and affiliate commissions (when
+  accrued), is contribution per product; less operating expenses (of no
+  product), is profit.
+- Cash view, when paid: received from orders, payouts paid, commissions
+  paid, expenses paid, net cash. Commissions are not paid out yet
+  (D-14.15), so that line stays 0 until they are.
+- The product of an entry comes from its source record (the order, or
+  the payout's order), so the ledger stores no product column.
+- CSV of every product in the range, amounts in dollars with two
+  decimals. Up to 120 months per request.

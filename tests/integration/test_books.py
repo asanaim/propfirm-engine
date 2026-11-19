@@ -7,6 +7,7 @@ from fractions import Fraction
 
 import pytest
 
+from propfirm.customers.books import month_of
 from tests.integration.test_customers import ADULT, LITE_10K, platform
 
 pytestmark = pytest.mark.integration
@@ -72,6 +73,48 @@ def test_the_books_follow_the_records(database_url: str, valkey_url: str, pg_sch
                 "operating_expense",
                 "order_paid",
             ]
+            # the income statement of this month, both views, and as CSV
+            month = month_of(p.clock())
+            q = f"?from={month}&to={month}"
+            accrual = (
+                await p.call("GET", f"/staff/books/income-statement{q}", "admin-1", None, ADMIN)
+            ).json()
+            rows = {r["product"]: r for r in accrual["rows"]}
+            assert (
+                rows["lite"]["fees"],
+                rows["lite"]["discounts"],
+                rows["lite"]["commissions"],
+            ) == (
+                10_900 + 1_635,
+                1_090,
+                1_144,
+            )
+            assert rows["all"]["profit"] == 12_535 - 1_090 - 1_144 - 2_999
+            cash = (
+                await p.call(
+                    "GET", f"/staff/books/income-statement{q}&view=cash", "admin-1", None, ADMIN
+                )
+            ).json()
+            total = next(r for r in cash["rows"] if r["product"] == "all")
+            assert (total["received"], total["expenses_paid"], total["net_cash"]) == (
+                11_445,
+                2_999,
+                8_446,
+            )
+            csv = await p.call(
+                "GET", f"/staff/books/income-statement.csv{q}", "admin-1", None, ADMIN
+            )
+            assert csv.headers["content-type"].startswith("text/csv")
+            assert csv.text.splitlines()[0].startswith("month,product,fees,discounts")
+            backwards = await p.call(
+                "GET",
+                "/staff/books/income-statement?from=2026-02&to=2026-01",
+                "admin-1",
+                None,
+                ADMIN,
+            )
+            assert backwards.status_code == 422
+
             trader = await p.call("GET", "/staff/books/trial-balance", "u1")
             assert trader.status_code == 403
 

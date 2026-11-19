@@ -23,10 +23,13 @@ twice posts once:
 Corrections are new entries, never edits.
 """
 
+import csv
+import io
 import json
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from fractions import Fraction
 from typing import Any
 
@@ -398,6 +401,28 @@ class Books:
             for r in rows
         ]
 
+    async def statement(self, view: str, first: str, last: str) -> list[dict[str, Any]]:
+        """The income statement from month `first` to `last` (YYYY-MM,
+        inclusive), accrual or cash view, by month and product."""
+        months = [first]
+        while months[-1] != last:
+            if len(months) > 120:
+                raise ValueError("at most 120 months")
+            months.append(next_month(months[-1]))
+        s = self._s
+        rows = await self._pool.fetch(
+            f"SELECT e.occurred_at, e.kind, p.account, p.amount_cents, "
+            f"coalesce(o.product_id, po.product_id) AS product_id "
+            f"FROM {s}.ops_postings p JOIN {s}.ops_entries e ON e.entry_id = p.entry_id "
+            f"LEFT JOIN {s}.orders o ON o.ord = e.reference "
+            f"LEFT JOIN (SELECT x.po, y.product_id FROM {s}.payouts x "
+            f"JOIN {s}.orders y ON y.ord = x.ord) po ON po.po = e.reference "
+            f"WHERE e.occurred_at >= $1 AND e.occurred_at < $2",
+            month_start(first),
+            month_start(next_month(last)),
+        )
+        return statement_rows([dict(r) for r in rows], view, months)
+
     async def entries(self, limit: int = 200) -> list[dict[str, Any]]:
         s = self._s
         rows = await self._pool.fetch(
@@ -417,3 +442,140 @@ class Books:
             ]
             out.append(row)
         return out
+
+
+# --- income statement (step 3, line 3) -------------------------------------------------
+
+ALL = "all"  # the column of every product together
+NONE = "none"  # costs of no product (operating expenses)
+
+ACCRUAL_LINES = (
+    "fees",
+    "discounts",
+    "fee_refunds",
+    "net_revenue",
+    "payouts",
+    "commissions",
+    "contribution",
+    "operating",
+    "profit",
+)
+CASH_LINES = ("received", "payouts_paid", "commissions_paid", "expenses_paid", "net_cash")
+
+
+def month_of(ms: int) -> str:
+    """The UTC calendar month of `ms`, as YYYY-MM."""
+    return datetime.fromtimestamp(ms / 1000, UTC).strftime("%Y-%m")
+
+
+def month_start(month: str) -> int:
+    """The first millisecond of a YYYY-MM month, UTC."""
+    year, number = (int(x) for x in month.split("-"))
+    return int(datetime(year, number, 1, tzinfo=UTC).timestamp() * 1000)
+
+
+def next_month(month: str) -> str:
+    year, number = (int(x) for x in month.split("-"))
+    return f"{year + number // 12:04d}-{number % 12 + 1:02d}"
+
+
+def accrual_line(account: str) -> str | None:
+    """The statement line an income or expense account adds to."""
+    if account.startswith("income:fees:"):
+        return "fees"
+    if account.startswith("income:discounts:"):
+        return "discounts"
+    if account.startswith("income:fee_refunds:"):
+        return "fee_refunds"
+    if account == PAYOUT_EXPENSE:
+        return "payouts"
+    if account == COMMISSION_EXPENSE:
+        return "commissions"
+    if account == PROCESSOR_FEES or account.startswith("expense:operating:"):
+        return "operating"
+    return None  # a balance sheet account
+
+
+CASH_LINE = {
+    "order_paid": "received",
+    "payout_paid": "payouts_paid",
+    "commission_paid": "commissions_paid",
+    "operating_expense": "expenses_paid",
+}
+
+
+def _totals(lines: dict[str, int]) -> dict[str, int]:
+    out = dict(lines)
+    out["net_revenue"] = out["fees"] - out["discounts"] - out["fee_refunds"]
+    out["contribution"] = out["net_revenue"] - out["payouts"] - out["commissions"]
+    out["profit"] = out["contribution"] - out["operating"]
+    return out
+
+
+def statement_rows(
+    postings: Iterable[dict[str, Any]], view: str, months: list[str]
+) -> list[dict[str, Any]]:
+    """Rows of (month, product, line amounts in cents) from posting rows
+    with occurred_at, kind, account, amount_cents and product_id (None for
+    no product). Income and costs are positive. Every month in `months`
+    gets an `all` row, even an empty one."""
+    if view not in ("accrual", "cash"):
+        raise ValueError("view is accrual or cash")
+    names = ACCRUAL_LINES if view == "accrual" else CASH_LINES
+    cells: dict[tuple[str, str], dict[str, int]] = {}
+
+    def cell(month: str, product: str) -> dict[str, int]:
+        return cells.setdefault((month, product), dict.fromkeys(names, 0))
+
+    for m in months:
+        cell(m, ALL)
+    for p in postings:
+        month = month_of(int(p["occurred_at"]))
+        if month not in months:
+            continue
+        product = p["product_id"] or NONE
+        amount = int(p["amount_cents"])
+        if view == "accrual":
+            line = accrual_line(str(p["account"]))
+            if line is None:
+                continue
+            value = -amount if line == "fees" else amount  # income credits are negative
+        else:
+            if p["account"] != CASH:
+                continue
+            line = CASH_LINE.get(str(p["kind"]))
+            if line is None:
+                continue
+            value = amount if line == "received" else -amount
+        for key in ((month, product), (month, ALL)):
+            cell(*key)[line] += value
+    rows = []
+    for (month, product), lines in sorted(cells.items()):
+        if view == "accrual":
+            lines = _totals(lines)
+        else:
+            lines["net_cash"] = (
+                lines["received"]
+                - lines["payouts_paid"]
+                - lines["commissions_paid"]
+                - lines["expenses_paid"]
+            )
+        rows.append({"month": month, "product": product, **lines})
+    return rows
+
+
+def statement_csv(rows: list[dict[str, Any]], view: str) -> str:
+    """The statement as CSV, amounts in dollars with two decimals."""
+    names = ACCRUAL_LINES if view == "accrual" else CASH_LINES
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(["month", "product", *names])
+    for r in rows:
+        writer.writerow([r["month"], r["product"], *(cents_text(r[n]) for n in names)])
+    return out.getvalue()
+
+
+def cents_text(cents: int) -> str:
+    sign = "-" if cents < 0 else ""
+    whole, part = divmod(abs(cents), 100)
+    return f"{sign}{whole}.{part:02d}"

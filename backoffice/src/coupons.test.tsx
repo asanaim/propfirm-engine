@@ -69,3 +69,13 @@ describe("books", () => {
     expect(shown({ account: "asset:cash", type: "asset", name: "Cash", balance_cents: 8_446 })).toBe(8_446);
   });
 });
+
+describe("income statement", () => {
+  it("uses UTC months and lists every line of each view", async () => {
+    const { LINES, utcMonth } = await import("./Books");
+    expect(utcMonth(Date.UTC(2026, 0, 31, 23, 59))).toBe("2026-01");
+    expect(utcMonth(Date.UTC(2026, 1, 1))).toBe("2026-02");
+    expect(LINES.accrual.map(([k]) => k)).toEqual(["fees", "discounts", "fee_refunds", "net_revenue", "payouts", "commissions", "contribution", "operating", "profit"]);
+    expect(LINES.cash.at(-1)?.[0]).toBe("net_cash");
+  });
+});

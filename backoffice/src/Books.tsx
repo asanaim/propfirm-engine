@@ -1,4 +1,4 @@
-import { Alert, Button, Card, CardContent, CardHeader, Chip, FormControlLabel, MenuItem, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, FormControlLabel, MenuItem, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { useState } from "react";
 import { Title } from "react-admin";
 import { ApiError } from "./api";
@@ -43,6 +43,127 @@ export function cents(text: string): number | null {
   return value > 0 ? value : null;
 }
 
+type Row = Record<string, number> & { month: string; product: string };
+
+export const LINES: Record<"accrual" | "cash", [string, string][]> = {
+  accrual: [
+    ["fees", "Fees"],
+    ["discounts", "Discounts"],
+    ["fee_refunds", "Fee refunds"],
+    ["net_revenue", "Net revenue"],
+    ["payouts", "Trader payouts"],
+    ["commissions", "Commissions"],
+    ["contribution", "Contribution"],
+    ["operating", "Operating expenses"],
+    ["profit", "Profit"],
+  ],
+  cash: [
+    ["received", "Received"],
+    ["payouts_paid", "Payouts paid"],
+    ["commissions_paid", "Commissions paid"],
+    ["expenses_paid", "Expenses paid"],
+    ["net_cash", "Net cash"],
+  ],
+};
+
+/** The month of `ms` as YYYY-MM, UTC (the statement's months). */
+export function utcMonth(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 7);
+}
+
+/** Income statement (D-14.17): lines down, months across, one product
+or all; accrual or cash view; CSV of every product. */
+function Statement() {
+  const { api } = useBackOffice();
+  const [range, setRange] = useState(() => {
+    const now = utcMonth(Date.now());
+    return { from: `${now.slice(0, 4)}-01`, to: now }; // this year to date
+  });
+  const [view, setView] = useState<"accrual" | "cash">("accrual");
+  const [product, setProduct] = useState("all");
+  const q = `?from=${range.from}&to=${range.to}&view=${view}`;
+  const { result } = useGet<{ rows: Row[] }>(`/staff/books/income-statement${q}`);
+  const [error, setError] = useState<string | null>(null);
+  const rows = result.state === "ready" ? result.data.rows : [];
+  const products = [...new Set(rows.map((r) => r.product))].sort((a, b) => (a === "all" ? -1 : b === "all" ? 1 : a.localeCompare(b)));
+  const shownRows = rows.filter((r) => r.product === product);
+  const save = async () => {
+    if (api.text === undefined) return;
+    setError(null);
+    try {
+      const csv = await api.text(`/staff/books/income-statement.csv${q}`);
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `income-${view}-${range.from}-${range.to}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "The export failed.");
+    }
+  };
+  return (
+    <Card>
+      <CardHeader title="Income statement" subheader="By calendar month (UTC). Accrual: when earned or owed. Cash: when paid." />
+      <CardContent>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mb: 2, alignItems: "center" }}>
+          <TextField label="From" type="month" size="small" value={range.from} onChange={(e) => { setRange({ ...range, from: e.target.value }); }} slotProps={{ inputLabel: { shrink: true } }} />
+          <TextField label="To" type="month" size="small" value={range.to} onChange={(e) => { setRange({ ...range, to: e.target.value }); }} slotProps={{ inputLabel: { shrink: true } }} />
+          <TextField select label="View" size="small" value={view} onChange={(e) => { setView(e.target.value as "accrual" | "cash"); }} sx={{ minWidth: 120 }}>
+            <MenuItem value="accrual">Accrual</MenuItem>
+            <MenuItem value="cash">Cash</MenuItem>
+          </TextField>
+          <TextField select label="Product" size="small" value={product} onChange={(e) => { setProduct(e.target.value); }} sx={{ minWidth: 140 }}>
+            {(products.length > 0 ? products : ["all"]).map((p) => (
+              <MenuItem key={p} value={p}>
+                {p === "all" ? "All products" : p === "none" ? "No product" : p}
+              </MenuItem>
+            ))}
+          </TextField>
+          {api.text !== undefined ? (
+            <Button variant="outlined" onClick={() => void save()}>
+              Export CSV
+            </Button>
+          ) : null}
+        </Stack>
+        {error !== null ? <Alert severity="error">{error}</Alert> : null}
+        {result.state === "error" ? <Alert severity="error">The statement could not be read.</Alert> : null}
+        {result.state === "ready" ? (
+          <Box sx={{ overflowX: "auto" }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell />
+                  {shownRows.map((r) => (
+                    <TableCell key={r.month} align="right">
+                      {r.month}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {LINES[view].map(([key, label]) => {
+                  const strong = key === "net_revenue" || key === "contribution" || key === "profit" || key === "net_cash";
+                  return (
+                    <TableRow key={key}>
+                      <TableCell sx={{ fontWeight: strong ? 600 : 400 }}>{label}</TableCell>
+                      {shownRows.map((r) => (
+                        <TableCell key={r.month} align="right" sx={{ fontVariantNumeric: "tabular-nums", fontWeight: strong ? 600 : 400 }}>
+                          {usd(r[key] ?? 0)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Box>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 /** The operator ledger (D-14.16): trial balance, and operating expenses
 proposed by one member of staff and approved by another. */
 export function BooksPage() {
@@ -72,6 +193,7 @@ export function BooksPage() {
     <Stack spacing={2.5} sx={{ mt: 2, mb: 4 }}>
       <Title title="Books" />
       {message ? <Alert severity={message.ok ? "success" : "error"}>{message.text}</Alert> : null}
+      <Statement />
       <Card>
         <CardHeader title="Trial balance" subheader="Posted from paid orders, payouts, commissions and approved expenses, once each." />
         <CardContent>
