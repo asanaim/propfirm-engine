@@ -46,6 +46,7 @@ from propfirm.api.auth import JwksKeys, TokenVerifier
 from propfirm.api.system import SystemProbe
 from propfirm.audit.store import AuditStore
 from propfirm.audit.store import migrate as migrate_audit
+from propfirm.customers.books import Books
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
@@ -163,6 +164,7 @@ async def _lifecycle_forever(
     scaling: Scaling | None = None,
     trials: Trials | None = None,
     referrals: Referrals | None = None,
+    books: Books | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -199,6 +201,11 @@ async def _lifecycle_forever(
                 await referrals.accrue(now_ms())
             except Exception:
                 log.exception("referral accrual failed")
+        if books is not None:
+            try:  # the operator ledger from the source records (D-14.16)
+                await books.sync(now_ms())
+            except Exception:
+                log.exception("operator ledger sync failed")
         if notifications is not None:
             try:
                 await notifications.advance(now_ms())  # security emails not sent yet
@@ -341,6 +348,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         scaling = Scaling(pool, config.customer_schema, settings, live, gateway)
         trials = Trials(customers, settings, live, gateway)
         referrals = Referrals(pool, config.customer_schema, settings)
+        books = Books(pool, config.customer_schema)
         payouts = None
         if config.sandbox and notifications is not None:
             payouts = Payouts(
@@ -385,7 +393,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(
                 _lifecycle_forever(
-                    lifecycle, onboarding, cases, payouts, notifications, scaling, trials, referrals
+                    lifecycle,
+                    onboarding,
+                    cases,
+                    payouts,
+                    notifications,
+                    scaling,
+                    trials,
+                    referrals,
+                    books,
                 )
             )
         )
@@ -400,6 +416,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             leaderboard=customers,
             codes=customers,
             referrals=referrals,
+            books=books,
             classes=customers,
             scaling=scaling,
             corrections=Corrections(

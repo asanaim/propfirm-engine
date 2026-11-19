@@ -730,6 +730,52 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX ON {s}.referral_entries (referrer_cif);
         """,
     ),
+    (
+        21,
+        """
+        -- operator ledger (build plan step 3, D-14.16): the firm's own books,
+        -- double entry in US cents, append-only; entries are made from the
+        -- source records (idempotent by entry id) or by approved proposal
+        CREATE TABLE {s}.ops_entries (
+            entry_id text PRIMARY KEY,
+            occurred_at bigint NOT NULL,
+            kind text NOT NULL,
+            reference text NOT NULL,
+            memo text NOT NULL DEFAULT '',
+            created_by text NOT NULL,
+            created_at bigint NOT NULL
+        );
+        CREATE INDEX ON {s}.ops_entries (occurred_at);
+        CREATE TABLE {s}.ops_postings (
+            entry_id text NOT NULL REFERENCES {s}.ops_entries (entry_id),
+            line integer NOT NULL,
+            account text NOT NULL,
+            amount_cents bigint NOT NULL CHECK (amount_cents <> 0),
+            PRIMARY KEY (entry_id, line)
+        );
+        CREATE INDEX ON {s}.ops_postings (account);
+        CREATE TRIGGER ops_entries_append_only BEFORE UPDATE OR DELETE ON {s}.ops_entries
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER ops_postings_append_only BEFORE UPDATE OR DELETE ON {s}.ops_postings
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE SEQUENCE {s}.exp_seq;
+        CREATE TABLE {s}.ops_expenses (
+            exp text PRIMARY KEY,
+            category text NOT NULL,
+            amount_cents bigint NOT NULL CHECK (amount_cents > 0),
+            memo text NOT NULL,
+            paid boolean NOT NULL,
+            incurred_at bigint NOT NULL,
+            proposed_by text NOT NULL,
+            proposed_at bigint NOT NULL,
+            status text NOT NULL CHECK (status IN ('proposed', 'approved', 'rejected')),
+            decided_by text,
+            decided_at bigint,
+            reason text,
+            CHECK (decided_by IS NULL OR decided_by <> proposed_by)
+        );
+        """,
+    ),
 )
 
 

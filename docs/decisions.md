@@ -479,3 +479,49 @@ D41 and M27; taken under D-14.7, 19 Nov 2026).
 - Not built: paying commission out (with the affiliate programme, after
   KYC or KYB, M27); self-referral detection by device or payment wallet
   (M17).
+
+D-14.16, operator ledger (build plan step 3, lines 1 and 2; section 1
+"bookkeeping" row approved 13 Nov; details taken under D-14.7, 19 Nov
+2026).
+- The firm's own books: double entry in US cents, append-only, in the
+  customer database beside the trader ledger. The engine's trader ledger
+  is unchanged and only the engine writes it.
+- Chart of accounts: cash; payouts payable, commissions payable, other
+  payables; owner's equity; fee income, discounts and fee refunds per
+  product (the last two as contra income); trader payouts, affiliate
+  commissions, processor fees and operating expenses by category
+  (hosting, market data, software, identity checks, legal, marketing,
+  staff, other).
+- Entries from the records, each with a fixed id so a sync posts once:
+  a paid order (cash in the price; income at list price plus add-ons;
+  the discount as contra income; a free trial posts nothing); a payout
+  as an expense when the engine debits it and as cash when it is paid
+  (so the accrual and cash views of step 3, line 3, both read the book);
+  a referral commission and its clawback. The sync runs at most once a
+  minute.
+- Operating expenses: one member of staff with the settings right
+  proposes, a different one approves; approval posts the entry at once,
+  against cash (paid) or payables (owed). Processor fees are entered this
+  way until the payment adapters report them (step 4).
+- Not yet: the income statement, liability desk, reserve, reconciliation,
+  refunds and chargebacks (step 3, lines 3 to 7).
+
+D-14.17, income statement (build plan step 3, line 3; details taken
+under D-14.7, 19 Nov 2026). Read from the operator ledger (D-14.16), by
+calendar month in UTC and by product, with every product together as
+"all". Months are UTC: the books are kept in UTC like every time in the
+engine, and a month in New York time would move each month's edge by
+hours with the clocks; the trading day's 17:00 New York reset is not an
+accounting period.
+- Accrual view, when earned or owed: fees (list price plus add-ons),
+  less discounts and fee refunds, is net revenue; less trader payouts
+  (when the engine debits them) and affiliate commissions (when
+  accrued), is contribution per product; less operating expenses (of no
+  product), is profit.
+- Cash view, when paid: received from orders, payouts paid, commissions
+  paid, expenses paid, net cash. Commissions are not paid out yet
+  (D-14.15), so that line stays 0 until they are.
+- The product of an entry comes from its source record (the order, or
+  the payout's order), so the ledger stores no product column.
+- CSV of every product in the range, amounts in dollars with two
+  decimals. Up to 120 months per request.

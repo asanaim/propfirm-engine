@@ -55,3 +55,27 @@ describe("referrals", () => {
     expect([...clawable([e("ORD1", "accrued"), e("ORD2", "accrued"), e("ORD1", "clawback")])]).toEqual(["ORD2"]);
   });
 });
+
+describe("books", () => {
+  it("reads typed dollars as cents and shows balances the normal way round", async () => {
+    const { cents, shown } = await import("./Books");
+    expect(cents("29.99")).toBe(2_999);
+    expect(cents("12.5")).toBe(1_250);
+    expect(cents("7")).toBe(700);
+    expect(cents("0")).toBeNull();
+    expect(cents("1.234")).toBeNull();
+    expect(cents("-3")).toBeNull();
+    expect(shown({ account: "income:fees:lite", type: "income", name: "Fees", balance_cents: -12_535 })).toBe(12_535);
+    expect(shown({ account: "asset:cash", type: "asset", name: "Cash", balance_cents: 8_446 })).toBe(8_446);
+  });
+});
+
+describe("income statement", () => {
+  it("uses UTC months and lists every line of each view", async () => {
+    const { LINES, utcMonth } = await import("./Books");
+    expect(utcMonth(Date.UTC(2026, 0, 31, 23, 59))).toBe("2026-01");
+    expect(utcMonth(Date.UTC(2026, 1, 1))).toBe("2026-02");
+    expect(LINES.accrual.map(([k]) => k)).toEqual(["fees", "discounts", "fee_refunds", "net_revenue", "payouts", "commissions", "contribution", "operating", "profit"]);
+    expect(LINES.cash.at(-1)?.[0]).toBe("net_cash");
+  });
+});
