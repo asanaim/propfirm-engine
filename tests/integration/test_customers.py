@@ -19,6 +19,7 @@ from propfirm.api.app import Deps, create_app
 from propfirm.api.system import SystemProbe
 from propfirm.audit.store import AuditStore
 from propfirm.audit.store import migrate as migrate_audit
+from propfirm.customers.books import Books
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
@@ -94,6 +95,7 @@ class Platform:
     audit: AuditStore | None = None
     scaling: Scaling | None = None  # scaling steps (D-14.8)
     referrals: Referrals | None = None  # the referral ledger (D-14.15)
+    books: Books | None = None  # the operator ledger (D-14.16)
 
     async def call(
         self,
@@ -212,6 +214,7 @@ async def platform(
     notifications = Notifications(NotificationStore(pool, config.customer_schema), mailer)
     scaling = Scaling(pool, config.customer_schema, settings, live, gateway, wait_s)
     referrals = Referrals(pool, config.customer_schema, settings)
+    books = Books(pool, config.customer_schema)
     payouts = Payouts(
         PayoutStore(pool, config.customer_schema),
         store,
@@ -250,6 +253,7 @@ async def platform(
         leaderboard=store,
         codes=store,
         referrals=referrals,
+        books=books,
         classes=store,
         scaling=scaling,
         corrections=Corrections(
@@ -329,6 +333,7 @@ async def platform(
             trail,
             scaling=scaling,
             referrals=referrals,
+            books=books,
         )
     finally:
         await stop_engine()
@@ -515,7 +520,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 21))
+            assert await migrate(conn, schema) == list(range(1, 22))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

@@ -34,6 +34,7 @@ const CorrectionsPage = lazyPage(() => import("./Corrections"), "CorrectionsPage
 const ScalingPage = lazyPage(() => import("./Scaling"), "ScalingPage");
 const CouponsPage = lazyPage(() => import("./Coupons"), "CouponsPage");
 const ReferralsPage = lazyPage(() => import("./Referrals"), "ReferralsPage");
+const BooksPage = lazyPage(() => import("./Books"), "BooksPage");
 const StaffProfilePage = lazyPage(() => import("./StaffProfile"), "StaffProfilePage");
 const CaseList = lazyPage(() => import("./resources/cases"), "CaseList");
 const CaseShow = lazyPage(() => import("./resources/cases"), "CaseShow");
@@ -98,6 +99,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
                 {screens.has("progressions") ? <Route path="/scaling" element={<ScalingPage />} /> : null}
                 {screens.has("settings") ? <Route path="/coupons" element={<CouponsPage />} /> : null}
                 {screens.has("settings") ? <Route path="/referrals" element={<ReferralsPage />} /> : null}
+                {screens.has("settings") ? <Route path="/books" element={<BooksPage />} /> : null}
                 <Route path="/profile" element={<StaffProfilePage />} />
                 {screens.has("policies") ? <Route path="/policies" element={<PolicyPages />} /> : null}
                 {screens.has("site") ? <Route path="/site" element={<SiteEditorPage />} /> : null}

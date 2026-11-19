@@ -77,6 +77,7 @@ from propfirm.audit.chain import AuditEvent
 from propfirm.audit.http import UNMATCHED, audited, clean, client_ip
 from propfirm.audit.http import target as audit_target
 from propfirm.audit.store import AuditStore
+from propfirm.customers.books import Books, ExpenseRefused
 from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
@@ -376,6 +377,7 @@ class Deps:
     leaderboard: LeaderboardStore | None = None  # the public leaderboard and its opt-outs
     codes: CodeStore | None = None  # the coupons screen (D-14.14)
     referrals: Referrals | None = None  # the referral ledger (D-14.15)
+    books: Books | None = None  # the operator ledger (D-14.16)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -500,6 +502,31 @@ class RegisterBody(_Body):
     residence_country: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
     # a referrer's code (D-14.15); a refused one does not stop registration
     ref: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9]{8}$")] | None = None
+
+
+class ExpenseBody(_Body):
+    """An operating expense to post (D-14.16); a second member of staff approves."""
+
+    category: Literal[
+        "hosting",
+        "market_data",
+        "software",
+        "identity_checks",
+        "processor_fees",
+        "legal",
+        "marketing",
+        "staff",
+        "other",
+    ]
+    amount_cents: Annotated[int, Field(ge=1, le=10**12)]
+    memo: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    paid: bool  # paid now (cash) or owed (payables)
+    incurred_at: Annotated[int, Field(ge=0)]
+
+
+class ExpenseDecision(_Body):
+    approve: bool
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
 class ClawbackBody(_Body):
@@ -1836,6 +1863,71 @@ def create_app(
     def _scaling_refused(exc: ScalingRefused) -> HTTPException:
         status = 404 if exc.code == "unknown" else 409
         return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    def _books(deps: Deps) -> Books:
+        if deps.books is None:
+            raise HTTPException(status_code=503, detail="the books are not configured")
+        return deps.books
+
+    @app.get("/staff/books/trial-balance")
+    async def trial_balance(
+        deps: D, me: SettingsReader, until: Annotated[int | None, Query(ge=0)] = None
+    ) -> dict[str, Any]:
+        """Every account's balance (debit positive) up to `until` (ms); the
+        balances sum to zero."""
+        lines = await _books(deps).trial_balance(until)
+        return {
+            "until": until,
+            "lines": [
+                {
+                    "account": x.account,
+                    "type": x.type,
+                    "name": x.name,
+                    "balance_cents": x.balance_cents,
+                }
+                for x in lines
+            ],
+            "total_cents": sum(x.balance_cents for x in lines),
+        }
+
+    @app.get("/staff/books/entries")
+    async def book_entries(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        return await _books(deps).entries()
+
+    @app.get("/staff/books/expenses")
+    async def book_expenses(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        return await _books(deps).expenses()
+
+    @app.post("/staff/books/expenses", status_code=201)
+    async def propose_expense(deps: D, me: SettingsChanger, body: ExpenseBody) -> dict[str, Any]:
+        """Propose an operating expense; it is posted when a second member
+        of staff approves it."""
+        return await _books(deps).propose_expense(
+            body.category,
+            body.amount_cents,
+            body.memo,
+            body.paid,
+            body.incurred_at,
+            me.subject,
+            deps.clock(),
+        )
+
+    @app.post("/staff/books/expenses/{exp}/decision")
+    async def decide_expense(
+        deps: D,
+        me: SettingsChanger,
+        exp: Annotated[str, Path(pattern=r"^EXP[0-9]{8}$")],
+        body: ExpenseDecision,
+    ) -> dict[str, Any]:
+        try:
+            return await _books(deps).decide_expense(
+                exp, body.approve, me.subject, body.reason, deps.clock()
+            )
+        except ExpenseRefused as exc:
+            status = {"unknown": 404, "same_person": 403}.get(exc.code, 409)
+            raise HTTPException(
+                status_code=status, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
 
     def _referrals(deps: Deps) -> Referrals:
         if deps.referrals is None:
