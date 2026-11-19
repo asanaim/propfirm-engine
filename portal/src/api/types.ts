@@ -321,6 +321,18 @@ export interface Bar {
   updates: number;
 }
 
+/** The trader's referral code and what it earned (D-14.15). */
+export interface Referrals {
+  on: boolean;
+  code: string | null;
+  commission_percent: string;
+  holdback_days: number;
+  referred: number;
+  accrued_cents: number;
+  available_cents: number;
+  entries: { ord: string; kind: "accrued" | "clawback"; amount_cents: number; available_at: number; ts: number }[];
+}
+
 /** The free trial on offer (D-13.17). */
 export interface TrialOffer {
   on: boolean;

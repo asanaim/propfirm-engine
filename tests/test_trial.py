@@ -3,6 +3,7 @@ one per customer, never progressing; the engine ends it with ExpireAccount."""
 
 import asyncio
 from dataclasses import replace
+from fractions import Fraction
 from typing import Any
 
 import pytest
@@ -159,3 +160,25 @@ def test_the_job_ends_active_trials_past_their_days_hourly() -> None:
         assert len(store.asked) == 1
 
     asyncio.run(go())
+
+
+def test_the_shipped_referral_settings() -> None:
+    """D-14.15: 10 % of the first paid account, 30 days held, BD and IN refused (C8)."""
+    r = POLICY.referrals
+    assert (r.on, r.commission, r.holdback_days, r.refused_countries) == (
+        True,
+        Fraction(1, 10),
+        30,
+        frozenset({"BD", "IN"}),
+    )
+
+    def bad(data: dict[str, Any]) -> None:
+        data["referrals"]["commission_percent"] = "100"
+
+    with pytest.raises(PolicyError, match="referrals"):
+        parse_policy(edited(bad))
+
+    def gone(data: dict[str, Any]) -> None:
+        del data["referrals"]
+
+    assert parse_policy(edited(gone)).referrals.on is False

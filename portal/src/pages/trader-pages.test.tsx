@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { Me, Payout } from "../api/types";
+import { captureRef, clearRef, storedRef } from "../lib/referral";
 import { fakeAuth, fakeFetch, renderWith } from "../test-utils";
 import { BillingPage, CertificatesPage, certificates, gainText, identityState, InvoicePage, LeaderboardPage, ProfilePage } from "./TraderPages";
 
@@ -102,5 +103,30 @@ describe("the split ladder in the shop", () => {
     const { ladderText } = await import("./ShopPage");
     expect(ladderText({ split_after_payouts: 3, split_percent_after_payouts: "85" })).toBe("85 % after 3 paid payouts, more with scaling");
     expect(ladderText({ split_after_payouts: null, split_percent_after_payouts: null })).toBeNull();
+  });
+});
+
+describe("referrals (D-14.15)", () => {
+  it("shows the link and what it earned", async () => {
+    const referrals = { on: true, code: "ABCD2345", commission_percent: "10", holdback_days: 30, referred: 2, accrued_cents: 1_100, available_cents: 550, entries: [] };
+    const fetcher = fakeFetch([
+      ["GET", "/me", 200, ME],
+      ["GET", "/me/referrals", 200, referrals],
+    ]);
+    renderWith(<ProfilePage />, fakeAuth(), fetcher);
+    expect(await screen.findByText(`${window.location.origin}/?ref=ABCD2345`)).toBeInTheDocument();
+    expect(screen.getByText(/earn 10 % of what they pay for their first account, available 30 days/)).toBeInTheDocument();
+    expect(screen.getByText("$11.00")).toBeInTheDocument();
+    expect(screen.getByText("$5.50")).toBeInTheDocument();
+  });
+
+  it("keeps a code from a link and drops a malformed one", () => {
+    clearRef();
+    captureRef("?ref=bad");
+    expect(storedRef()).toBeNull();
+    captureRef("?x=1&ref=abcd2345");
+    expect(storedRef()).toBe("ABCD2345");
+    clearRef();
+    expect(storedRef()).toBeNull();
   });
 });

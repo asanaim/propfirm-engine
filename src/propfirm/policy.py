@@ -216,6 +216,20 @@ class AddonsPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class ReferralsPolicy:
+    """Referrals (D-14.15): a trader's code, entered by a new customer at
+    registration, earns `commission` of what that customer pays for their
+    first paid account, available after `holdback_days`. Nobody resident
+    in `refused_countries` refers or is referred (C8). Off when the policy
+    file has no [referrals]."""
+
+    on: bool = False
+    commission: Fraction = Fraction(1, 10)
+    holdback_days: int = 30
+    refused_countries: frozenset[str] = frozenset({"BD", "IN"})
+
+
+@dataclass(frozen=True, slots=True)
 class TrialPolicy:
     """The free trial (D-13.17): the product's first stage rules on one
     size, for `days` days, one per customer, never funded and never paid.
@@ -305,6 +319,7 @@ class Policy:
     catalogue: CataloguePolicy = field(default_factory=CataloguePolicy)
     addons: AddonsPolicy = field(default_factory=AddonsPolicy)
     trial: TrialPolicy = field(default_factory=TrialPolicy)
+    referrals: ReferralsPolicy = field(default_factory=ReferralsPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -566,6 +581,9 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             catalogue=_catalogue(root.table("catalogue")),
             addons=_addons(root.table("addons")) if root.has("addons") else AddonsPolicy(),
             trial=_trial(root.table("trial")) if root.has("trial") else TrialPolicy(),
+            referrals=(
+                _referrals(root.table("referrals")) if root.has("referrals") else ReferralsPolicy()
+            ),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -605,6 +623,21 @@ def _catalogue(t: _Table) -> CataloguePolicy:
     t.done()
     if len(set(off)) != len(off) or len(set(sizes)) != len(sizes):
         raise PolicyError("catalogue: a product or size is listed twice")
+    return policy
+
+
+def _referrals(t: _Table) -> ReferralsPolicy:
+    policy = ReferralsPolicy(
+        on=t.boolean("on"),
+        commission=t.required_percent("commission_percent"),
+        holdback_days=t.integer("holdback_days", 0),
+        refused_countries=parse_countries(
+            t.texts("refused_countries"), t.name("refused_countries")
+        ),
+    )
+    t.done()
+    if not 0 < policy.commission < 1:
+        raise PolicyError("referrals: commission_percent between 0 and 100")
     return policy
 
 

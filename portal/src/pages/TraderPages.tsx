@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApi, useMe } from "../api/ApiProvider";
-import type { LeaderboardRow, Me, Order, Payout } from "../api/types";
+import type { LeaderboardRow, Me, Order, Payout, Referrals } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, Card, Loading, Notice } from "../components/ui";
 import { formatCents, formatDate, formatSize } from "../lib/money";
@@ -128,6 +128,54 @@ function LeaderboardSwitch() {
   );
 }
 
+/** The trader's referral link and what it has earned (D-14.15). */
+export function ReferralsCard() {
+  const api = useApi();
+  const [r, setR] = useState<Referrals | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    api.get<Referrals>("/me/referrals").then(setR, () => {
+      setR(null); // not shown when it cannot be read
+    });
+  }, [api]);
+  if (r === null || !r.on || r.code === null) return null;
+  const link = `${window.location.origin}/?ref=${r.code}`;
+  return (
+    <Card title="Refer a trader">
+      <p>
+        Share your link. When a new trader signs up with it, you earn {r.commission_percent} % of what they pay for their first
+        account, available {r.holdback_days} days after they pay.
+      </p>
+      <p className="referral-link">
+        <code>{link}</code>{" "}
+        <Button
+          variant="secondary"
+          onClick={() => {
+            void navigator.clipboard.writeText(link).then(
+              () => {
+                setCopied(true);
+              },
+              () => {
+                setCopied(false);
+              },
+            );
+          }}
+        >
+          {copied ? "Copied" : "Copy link"}
+        </Button>
+      </p>
+      <dl className="facts">
+        <dt>Traders referred</dt>
+        <dd>{r.referred}</dd>
+        <dt>Earned</dt>
+        <dd>{formatCents(r.accrued_cents)}</dd>
+        <dt>Available</dt>
+        <dd>{formatCents(r.available_cents)}</dd>
+      </dl>
+    </Card>
+  );
+}
+
 export function ProfilePage() {
   const me = useMe();
   return (
@@ -164,6 +212,7 @@ export function ProfilePage() {
             </Link>
           </Card>
           <LeaderboardSwitch />
+          <ReferralsCard />
           <Card title="Billing and certificates">
             <p>
               <Link href="/billing">Billing</Link>: your orders and invoices. <Link href="/certificates">Certificates</Link>: one

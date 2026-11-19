@@ -47,3 +47,11 @@ describe("coupons", () => {
     expect(post).toHaveBeenCalledWith("/staff/codes/LAUNCH10/switch", { on: false, reason: "paused" });
   });
 });
+
+describe("referrals", () => {
+  it("offers a clawback only on commission not yet taken back", async () => {
+    const { clawable } = await import("./Referrals");
+    const e = (ord: string, kind: "accrued" | "clawback") => ({ id: 1, referrer_cif: "C1", referred_cif: "C2", ord, kind, amount_cents: kind === "accrued" ? 550 : -550, available_at: 0, by_login: null, reason: null, ts: 0 });
+    expect([...clawable([e("ORD1", "accrued"), e("ORD2", "accrued"), e("ORD1", "clawback")])]).toEqual(["ORD2"]);
+  });
+});

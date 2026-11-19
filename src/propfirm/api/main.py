@@ -71,6 +71,7 @@ from propfirm.customers.providers import (
     SandboxScreener,
     Screener,
 )
+from propfirm.customers.referrals import Referrals
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore
 from propfirm.customers.trials import Trials
@@ -161,6 +162,7 @@ async def _lifecycle_forever(
     notifications: Notifications | None,
     scaling: Scaling | None = None,
     trials: Trials | None = None,
+    referrals: Referrals | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -192,6 +194,11 @@ async def _lifecycle_forever(
                 await trials.expire_due(now_ms())
             except Exception:
                 log.exception("trial expiry failed")
+        if referrals is not None:
+            try:  # commission on referred customers' first paid accounts (D-14.15)
+                await referrals.accrue(now_ms())
+            except Exception:
+                log.exception("referral accrual failed")
         if notifications is not None:
             try:
                 await notifications.advance(now_ms())  # security emails not sent yet
@@ -333,6 +340,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         scaling = Scaling(pool, config.customer_schema, settings, live, gateway)
         trials = Trials(customers, settings, live, gateway)
+        referrals = Referrals(pool, config.customer_schema, settings)
         payouts = None
         if config.sandbox and notifications is not None:
             payouts = Payouts(
@@ -377,7 +385,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(
                 _lifecycle_forever(
-                    lifecycle, onboarding, cases, payouts, notifications, scaling, trials
+                    lifecycle, onboarding, cases, payouts, notifications, scaling, trials, referrals
                 )
             )
         )
@@ -391,6 +399,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             customers=customers,
             leaderboard=customers,
             codes=customers,
+            referrals=referrals,
             classes=customers,
             scaling=scaling,
             corrections=Corrections(

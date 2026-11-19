@@ -45,6 +45,7 @@ import {
   Server,
   StickyNote,
   TicketPercent,
+  UserPlus,
   TrendingUp,
   Undo2,
 } from "lucide-react";
@@ -106,4 +107,5 @@ export const ICONS = {
   corrections: Undo2,
   scaling: TrendingUp,
   coupons: TicketPercent,
+  referrals: UserPlus,
 } satisfies Record<string, LucideIcon>;

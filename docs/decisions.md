@@ -459,3 +459,23 @@ product allows (10 %); checkout still applies each product's own cap
 not two: a code cannot exceed the cap the owners set, so the exposure is
 bounded by policy. Accepted: two orders placed at the same instant can
 both take a code's last use.
+
+D-14.15, referral ledger (build plan step 2; the commission model was open,
+D41 and M27; taken under D-14.7, 19 Nov 2026).
+- Every trader has a referral link (`/?ref=CODE`, 8 letters and digits).
+  A new customer's code is taken once, at registration, and never
+  changes; a refused code does not stop the registration.
+- Commission: 10 % of what the referred customer paid for their first
+  paid account (after any discount, with add-ons), rounded down; none on
+  a free trial and none on repeat accounts (CONFIRMED). One accrual per
+  referred customer, available 30 days after payment (holdback: refunds
+  and fraud checks). Why: a share of a first purchase costs nothing
+  unless a sale happened, and a first purchase is what a referral brings.
+- Refused (C8): referrers and referred customers resident in Bangladesh
+  or India; a trader's own code; a code of a blocked customer.
+- The ledger is append-only; a clawback (refund, self-referral, fraud) is
+  a new negative entry linked to the order, with who and why. Staff:
+  Finance > Referrals.
+- Not built: paying commission out (with the affiliate programme, after
+  KYC or KYB, M27); self-referral detection by device or payment wallet
+  (M17).
