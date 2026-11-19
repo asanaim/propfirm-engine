@@ -27,6 +27,7 @@ from propfirm.customers.corrections import Corrections
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycProvider, SandboxKyc
+from propfirm.customers.liability import Liabilities
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
 from propfirm.customers.notifications import Notifications, NotificationStore, SandboxMailer
@@ -254,6 +255,7 @@ async def platform(
         codes=store,
         referrals=referrals,
         books=books,
+        liabilities=Liabilities(pool, config.customer_schema, payouts, live),
         classes=store,
         scaling=scaling,
         corrections=Corrections(

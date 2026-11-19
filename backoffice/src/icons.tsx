@@ -46,6 +46,7 @@ import {
   StickyNote,
   TicketPercent,
   BookOpenCheck,
+  Scale,
   UserPlus,
   TrendingUp,
   Undo2,
@@ -109,5 +110,6 @@ export const ICONS = {
   scaling: TrendingUp,
   coupons: TicketPercent,
   books: BookOpenCheck,
+  liabilities: Scale,
   referrals: UserPlus,
 } satisfies Record<string, LucideIcon>;

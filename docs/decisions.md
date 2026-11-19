@@ -525,3 +525,22 @@ accounting period.
   the payout's order), so the ledger stores no product column.
 - CSV of every product in the range, amounts in dollars with two
   decimals. Up to 120 months per request.
+
+D-14.18, liability desk (build plan step 3, line 4; details taken under
+D-14.7, 19 Nov 2026). What the firm owes or may owe traders, read on
+demand, nothing stored:
+- Certain: payouts approved, taken from the account or sent and not yet
+  paid; plus commissions payable from the operator ledger.
+- Open: payouts requested and not yet decided.
+- Expected: for each active funded account, what it would receive if it
+  asked now, by the payout rules' own amount (share, fee refund,
+  maximum), with the eligibility checks (days, wallet, identity)
+  ignored, because a claim not yet due is still a claim; less any payout
+  of the account already counted above and still in its balance, so no
+  claim is counted twice.
+- The largest single claim and the 20 largest, by account. An account
+  whose claim cannot be read is listed, not silently left out.
+- Who: the settings view right (admins, owners), as the books. Payout
+  staff do not see the firm's totals.
+- Reading every funded account on each request is acceptable at launch;
+  a cached figure comes with the reserve (line 5) if it grows slow.

@@ -95,6 +95,7 @@ from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
 from propfirm.customers.leaderboard import TTL_MS as LEADERBOARD_TTL_MS
 from propfirm.customers.leaderboard import Leaderboard
+from propfirm.customers.liability import Claim, Liabilities
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
 from propfirm.customers.onboarding_store import OnboardingRecord, OnboardingStateError
@@ -378,6 +379,7 @@ class Deps:
     codes: CodeStore | None = None  # the coupons screen (D-14.14)
     referrals: Referrals | None = None  # the referral ledger (D-14.15)
     books: Books | None = None  # the operator ledger (D-14.16)
+    liabilities: Liabilities | None = None  # the liability desk (D-14.18)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -1868,6 +1870,38 @@ def create_app(
         if deps.books is None:
             raise HTTPException(status_code=503, detail="the books are not configured")
         return deps.books
+
+    def claim_view(c: Claim) -> dict[str, Any]:
+        return {
+            "acc": c.acc,
+            "cif": c.cif,
+            "product_id": c.product_id,
+            "certain_cents": c.certain_cents,
+            "open_cents": c.open_cents,
+            "expected_cents": c.expected_cents,
+            "total_cents": c.total_cents,
+        }
+
+    @app.get("/staff/liabilities")
+    async def liability_desk(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """What the firm owes or may owe traders (D-14.18): certain, open
+        and expected, the largest single claim and the largest claims."""
+        if deps.liabilities is None:
+            raise HTTPException(status_code=503, detail="the liability desk is not configured")
+        d = await deps.liabilities.desk(deps.clock())
+        return {
+            "as_of": d.as_of,
+            "certain_cents": d.certain_cents,
+            "payouts_certain_cents": d.payouts_certain_cents,
+            "commissions_cents": d.commissions_cents,
+            "open_cents": d.open_cents,
+            "expected_cents": d.expected_cents,
+            "total_cents": d.total_cents,
+            "funded_accounts": d.funded_accounts,
+            "largest": None if d.largest is None else claim_view(d.largest),
+            "claims": [claim_view(c) for c in d.claims],
+            "unread": list(d.unread),
+        }
 
     @app.get("/staff/books/trial-balance")
     async def trial_balance(
