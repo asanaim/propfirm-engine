@@ -43,6 +43,7 @@ class Referrals:
         self._pool = pool
         self._s = schema
         self._policy = policy
+        self._last = -1
 
     # --- codes and attribution -------------------------------------------------------------
 
@@ -118,10 +119,14 @@ class Referrals:
 
     # --- the ledger ------------------------------------------------------------------------
 
-    async def accrue(self, now: int) -> int:
+    async def accrue(self, now: int, every_ms: int = 60_000) -> int:
         """Accrue commission on each referred customer's first paid account
         (provisioned, not a free trial) not yet in the ledger; return how
-        many entries were made. Idempotent: one accrual per order."""
+        many entries were made. Idempotent: one accrual per order. Runs at
+        most once per `every_ms` (the lifecycle loop ticks every second)."""
+        if self._last >= 0 and now - self._last < every_ms:
+            return 0
+        self._last = now
         policy = (await self._policy.current()).referrals
         if not policy.on:
             return 0
@@ -130,6 +135,8 @@ class Referrals:
             f"SELECT DISTINCT ON (o.cif) o.ord, o.cif, o.price_cents, o.paid_at, r.referrer_cif "
             f"FROM {s}.orders o JOIN {s}.referrals r ON r.cif = o.cif "
             f"WHERE o.status IN ('paid', 'provisioned') AND o.rsv_id NOT LIKE '%-trial' "
+            f"AND NOT EXISTS (SELECT 1 FROM {s}.referral_entries e "
+            f"WHERE e.referred_cif = o.cif AND e.kind = 'accrued') "
             f"ORDER BY o.cif, o.created_at, o.ord"
         )
         made = 0

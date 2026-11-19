@@ -51,13 +51,14 @@ def test_a_referral_earns_once_on_the_first_paid_account(
 
             # a free trial earns nothing; the first paid account does, once
             await p.call("POST", "/me/trial", "new")
-            assert await p.referrals.accrue(p.clock()) == 0
+            assert await p.referrals.accrue(p.clock(), every_ms=0) == 0
             first = (await p.call("POST", "/orders", "new", LITE_10K)).json()
             await p.call("POST", first["pay_url"], "new")
             second = (await p.call("POST", "/orders", "new", LITE_10K)).json()
             await p.call("POST", second["pay_url"], "new")
-            assert await p.referrals.accrue(p.clock()) == 1
-            assert await p.referrals.accrue(p.clock()) == 0  # idempotent; repeat accounts earn none
+            assert await p.referrals.accrue(p.clock()) == 0  # within the minute: not run
+            assert await p.referrals.accrue(p.clock(), every_ms=0) == 1
+            assert await p.referrals.accrue(p.clock(), every_ms=0) == 0  # once; repeats earn none
 
             mine = (await p.call("GET", "/me/referrals", "ref")).json()
             assert (mine["referred"], mine["accrued_cents"], mine["available_cents"]) == (1, 550, 0)
