@@ -695,6 +695,41 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX ON {s}.orders (discount_code) WHERE discount_code IS NOT NULL;
         """,
     ),
+    (
+        20,
+        """
+        -- referral ledger (D-14.15): each trader's code, who referred whom
+        -- (once, at registration), and an append-only ledger of commission
+        -- (one accrual per referred customer; a clawback is a new entry)
+        CREATE TABLE {s}.referral_codes (
+            cif text PRIMARY KEY REFERENCES {s}.cif (cif),
+            code text NOT NULL UNIQUE CHECK (code ~ '^[A-Z0-9]{{8}}$'),
+            created_at bigint NOT NULL
+        );
+        CREATE TABLE {s}.referrals (
+            cif text PRIMARY KEY REFERENCES {s}.cif (cif),
+            referrer_cif text NOT NULL REFERENCES {s}.cif (cif) CHECK (referrer_cif <> cif),
+            code text NOT NULL,
+            created_at bigint NOT NULL
+        );
+        CREATE INDEX ON {s}.referrals (referrer_cif);
+        CREATE TABLE {s}.referral_entries (
+            id bigserial PRIMARY KEY,
+            referrer_cif text NOT NULL REFERENCES {s}.cif (cif),
+            referred_cif text NOT NULL REFERENCES {s}.cif (cif),
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            kind text NOT NULL CHECK (kind IN ('accrued', 'clawback')),
+            amount_cents bigint NOT NULL,
+            available_at bigint NOT NULL,
+            by_login text,
+            reason text,
+            ts bigint NOT NULL,
+            CHECK ((kind = 'accrued') = (amount_cents > 0))
+        );
+        CREATE UNIQUE INDEX referral_one_entry ON {s}.referral_entries (ord, kind);
+        CREATE INDEX ON {s}.referral_entries (referrer_cif);
+        """,
+    ),
 )
 
 

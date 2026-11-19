@@ -682,3 +682,15 @@ on = true
 product = "lite"
 size_cents = 1000000
 days = 14
+
+[referrals]
+# Referral ledger (D-14.15, 19 Nov 2026; the commission model was open,
+# D41, and is taken under the owner's standing rule D-14.7). A trader's
+# code, entered by a new customer at registration, earns this share of
+# what that customer pays for their first paid account (none on repeat
+# accounts, CONFIRMED; none on a free trial). It becomes available after
+# the holdback; paying it out comes with the affiliate programme.
+on = true
+commission_percent = "10"
+holdback_days = 30
+refused_countries = ["BD", "IN"]  # C8: no referrals by or of residents

@@ -4,6 +4,7 @@ import type { Customer, Registration } from "../api/types";
 import { Problem } from "../components/Problem";
 import { Button, Card } from "../components/ui";
 import { countries } from "../lib/countries";
+import { clearRef, storedRef } from "../lib/referral";
 
 /** The customer record (CIF): name as on the identity document, date of
 birth and country of residence. */
@@ -19,7 +20,10 @@ export function RegisterForm({ onDone }: { onDone: (customer: Customer) => void 
     setBusy(true);
     setError(null);
     try {
-      onDone(await api.post<Customer>("/me", { ...form, full_name: form.full_name.trim() }));
+      const ref = storedRef();
+      const customer = await api.post<Customer>("/me", { ...form, full_name: form.full_name.trim(), ...(ref === null ? {} : { ref }) });
+      clearRef();
+      onDone(customer);
     } catch (reason) {
       setError(reason);
     } finally {

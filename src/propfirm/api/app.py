@@ -102,6 +102,7 @@ from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
 from propfirm.customers.payouts import Eligibility, eligibility_json
 from propfirm.customers.pricing import discount_floor, price
+from propfirm.customers.referrals import ReferralRefused, Referrals
 from propfirm.customers.scaling import Scaling, ScalingRefused
 from propfirm.customers.store import (
     AccountRecord,
@@ -374,6 +375,7 @@ class Deps:
     audit: AuditStore | None = None  # the security audit trail (7b); None: not recorded
     leaderboard: LeaderboardStore | None = None  # the public leaderboard and its opt-outs
     codes: CodeStore | None = None  # the coupons screen (D-14.14)
+    referrals: Referrals | None = None  # the referral ledger (D-14.15)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -496,6 +498,12 @@ class RegisterBody(_Body):
     full_name: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     date_of_birth: Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
     residence_country: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
+    # a referrer's code (D-14.15); a refused one does not stop registration
+    ref: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9]{8}$")] | None = None
+
+
+class ClawbackBody(_Body):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
 PRODUCT_PATTERN = r"^[a-z][a-z0-9-]{0,30}$"
@@ -1829,6 +1837,58 @@ def create_app(
         status = 404 if exc.code == "unknown" else 409
         return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
 
+    def _referrals(deps: Deps) -> Referrals:
+        if deps.referrals is None:
+            raise HTTPException(status_code=503, detail="referrals are not configured")
+        return deps.referrals
+
+    @app.get("/me/referrals")
+    async def my_referrals(deps: D, me: Trader) -> dict[str, Any]:
+        """The trader's referral code, what it has earned and the ledger
+        (D-14.15)."""
+        cif = await _cif(deps, me)
+        referrals = _referrals(deps)
+        policy = (await _policy(deps)).referrals
+        now = deps.clock()
+        refused = cif.residence_country in policy.refused_countries
+        code = None if refused or not policy.on else await referrals.code_for(cif.cif, now)
+        b = await referrals.balance(cif.cif, now)
+        return {
+            "on": policy.on and not refused,
+            "code": code,
+            "commission_percent": percent_text(policy.commission),
+            "holdback_days": policy.holdback_days,
+            "referred": b.referred,
+            "accrued_cents": b.accrued_cents,
+            "available_cents": b.available_cents,
+            "entries": [
+                {k: e[k] for k in ("ord", "kind", "amount_cents", "available_at", "ts")}
+                for e in await referrals.entries(cif.cif)
+            ],
+        }
+
+    @app.get("/staff/referrals")
+    async def staff_referrals(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        """The referral ledger, newest first."""
+        return await _referrals(deps).entries()
+
+    @app.post("/staff/referrals/{ord_id}/clawback")
+    async def claw_back(
+        deps: D,
+        me: CaseWorker,
+        ord_id: Annotated[str, Path(pattern=r"^ORD[0-9]{8}$")],
+        body: ClawbackBody,
+    ) -> dict[str, Any]:
+        """Take back the commission on an order (refund, self-referral):
+        a new negative entry, kept with who and why."""
+        try:
+            return await _referrals(deps).claw_back(ord_id, me.subject, body.reason, deps.clock())
+        except ReferralRefused as exc:
+            status = 404 if exc.code == "unknown" else 409
+            raise HTTPException(
+                status_code=status, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
+
     def _codes(deps: Deps) -> CodeStore:
         if deps.codes is None:
             raise HTTPException(status_code=503, detail="discount codes are not configured")
@@ -2260,7 +2320,14 @@ def create_app(
             raise HTTPException(status_code=409, detail="already registered") from exc
         except CheckoutError as exc:
             raise _refused(exc) from exc
-        return cif_view(cif)
+        view = cif_view(cif)
+        if body.ref is not None and deps.referrals is not None:
+            try:
+                await deps.referrals.attribute(cif.cif, body.ref, deps.clock())
+                view["referral"] = {"accepted": True, "code": None}
+            except ReferralRefused as exc:
+                view["referral"] = {"accepted": False, "code": exc.code}
+        return view
 
     @app.post("/orders", status_code=201)
     async def purchase(deps: D, me: Trader, body: PurchaseBody) -> dict[str, Any]:

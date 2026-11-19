@@ -38,6 +38,7 @@ from propfirm.customers.providers import (
     SandboxPayouts,
     SandboxScreener,
 )
+from propfirm.customers.referrals import Referrals
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.journal.stream import InputStreamWriter
@@ -92,6 +93,7 @@ class Platform:
     oversight: Oversight | None = None
     audit: AuditStore | None = None
     scaling: Scaling | None = None  # scaling steps (D-14.8)
+    referrals: Referrals | None = None  # the referral ledger (D-14.15)
 
     async def call(
         self,
@@ -209,6 +211,7 @@ async def platform(
     mailer = SandboxMailer()
     notifications = Notifications(NotificationStore(pool, config.customer_schema), mailer)
     scaling = Scaling(pool, config.customer_schema, settings, live, gateway, wait_s)
+    referrals = Referrals(pool, config.customer_schema, settings)
     payouts = Payouts(
         PayoutStore(pool, config.customer_schema),
         store,
@@ -246,6 +249,7 @@ async def platform(
         customers=store,
         leaderboard=store,
         codes=store,
+        referrals=referrals,
         classes=store,
         scaling=scaling,
         corrections=Corrections(
@@ -324,6 +328,7 @@ async def platform(
             oversight,
             trail,
             scaling=scaling,
+            referrals=referrals,
         )
     finally:
         await stop_engine()
@@ -510,7 +515,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 20))
+            assert await migrate(conn, schema) == list(range(1, 21))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
