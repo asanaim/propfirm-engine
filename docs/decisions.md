@@ -445,3 +445,17 @@ under D-14.7, 15 Nov 2026).
   opening (looking back 30 days further); the engine closes the positions
   at the current prices and locks the account, status `expired` ("Trial
   ended"). Not a breach, so no email (D-14.1).
+
+D-14.14, coupons screen (build plan step 2; D-13.17; details taken under
+D-14.7, 19 Nov 2026). Finance > Coupons lists every discount code with
+its state (valid, off, ended, used up), uses, paid uses and the discount
+given on paid orders. Staff who may change settings (admins, owners)
+create a code and switch it on or off, each with a reason; every change is
+kept (who, when, why). A code may have an end date and a use limit; a use
+is an order with the code that has not failed, so an unpaid order holds
+its use until it fails. A code is capped at the highest code discount any
+product allows (10 %); checkout still applies each product's own cap
+(none on Instant or Lite 10K) and the first-account rule. One approver,
+not two: a code cannot exceed the cap the owners set, so the exposure is
+bounded by policy. Accepted: two orders placed at the same instant can
+both take a code's last use.

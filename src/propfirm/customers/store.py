@@ -675,7 +675,31 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             WHERE rsv_id LIKE '%-trial' AND status <> 'failed';
         """,
     ),
+    (
+        19,
+        """
+        -- coupons screen (D-14.14): an end and a use limit per code, and
+        -- every change kept (who, when, why)
+        ALTER TABLE {s}.discount_codes
+            ADD COLUMN expires_at bigint,
+            ADD COLUMN max_uses integer CHECK (max_uses > 0),
+            ADD COLUMN created_by text;
+        CREATE TABLE {s}.discount_code_changes (
+            id bigserial PRIMARY KEY,
+            code text NOT NULL REFERENCES {s}.discount_codes (code),
+            change text NOT NULL CHECK (change IN ('created', 'on', 'off')),
+            by_login text NOT NULL,
+            reason text NOT NULL,
+            ts bigint NOT NULL
+        );
+        CREATE INDEX ON {s}.orders (discount_code) WHERE discount_code IS NOT NULL;
+        """,
+    ),
 )
+
+
+class CodeTakenError(Exception):
+    """A discount code with this name exists already."""
 
 
 class TrialTakenError(Exception):
@@ -745,6 +769,11 @@ def _check(name: str) -> str:
 async def migrate(conn: Conn, schema: str) -> list[int]:
     """Apply the customer migrations not yet applied; return their numbers."""
     return await _migrate(conn, schema, _MIGRATIONS, _LOCK_CLASS)
+
+
+def share_of(text: str) -> Fraction:
+    """A stored share (\"1/10\") as a Fraction."""
+    return _share(text)
 
 
 def _share(text: str) -> Fraction:
@@ -932,11 +961,108 @@ class CustomerStore:
             ts,
         )
 
-    async def code_discount(self, code: str) -> Fraction | None:
+    async def code_discount(self, code: str, now: int | None = None) -> Fraction | None:
+        """The share `code` takes off, or None: unknown, switched off, past
+        its end (at `now`), or used up. A use is an order with the code that
+        has not failed."""
+        s = self._s
         text = await self._pool.fetchval(
-            f"SELECT discount FROM {self._s}.discount_codes WHERE code = $1 AND active", code
+            f"SELECT c.discount FROM {s}.discount_codes c WHERE c.code = $1 AND c.active "
+            f"AND ($2::bigint IS NULL OR c.expires_at IS NULL OR c.expires_at > $2) "
+            f"AND (c.max_uses IS NULL OR c.max_uses > (SELECT count(*) FROM {s}.orders o "
+            f"WHERE o.discount_code = c.code AND o.status <> 'failed'))",
+            code,
+            now,
         )
         return None if text is None else _share(text)
+
+    async def create_code(
+        self,
+        code: str,
+        discount: Fraction,
+        expires_at: int | None,
+        max_uses: int | None,
+        by: str,
+        reason: str,
+        ts: int,
+    ) -> None:
+        """A new code, on; CodeTakenError if the code exists."""
+        s = self._s
+        async with self._pool.acquire() as conn, conn.transaction():
+            try:
+                await conn.execute(
+                    f"INSERT INTO {s}.discount_codes (code, discount, active, created_at, "
+                    f"expires_at, max_uses, created_by) VALUES ($1, $2, true, $3, $4, $5, $6)",
+                    code,
+                    str(discount),
+                    ts,
+                    expires_at,
+                    max_uses,
+                    by,
+                )
+            except asyncpg.UniqueViolationError:
+                raise CodeTakenError(code) from None
+            await conn.execute(
+                f"INSERT INTO {s}.discount_code_changes (code, change, by_login, reason, ts) "
+                f"VALUES ($1, 'created', $2, $3, $4)",
+                code,
+                by,
+                reason,
+                ts,
+            )
+
+    async def switch_code(self, code: str, on: bool, by: str, reason: str, ts: int) -> bool:
+        """Switch `code` on or off; False if there is no such code."""
+        s = self._s
+        async with self._pool.acquire() as conn, conn.transaction():
+            found = await conn.fetchval(
+                f"UPDATE {s}.discount_codes SET active = $2 WHERE code = $1 RETURNING code",
+                code,
+                on,
+            )
+            if found is None:
+                return False
+            await conn.execute(
+                f"INSERT INTO {s}.discount_code_changes (code, change, by_login, reason, ts) "
+                f"VALUES ($1, $2, $3, $4, $5)",
+                code,
+                "on" if on else "off",
+                by,
+                reason,
+                ts,
+            )
+            return True
+
+    async def codes(self) -> list[dict[str, Any]]:
+        """Every code, newest first, with its uses (orders not failed), paid
+        uses, and the discount given on paid orders in cents (each order's
+        list price times the share, rounded down, as checkout priced it)."""
+        s = self._s
+        rows = await self._pool.fetch(
+            f"SELECT c.code, c.discount, c.active, c.created_at, c.expires_at, c.max_uses, "
+            f"c.created_by, count(o.ord) FILTER (WHERE o.status <> 'failed') AS uses, "
+            f"count(o.ord) FILTER (WHERE o.status IN ('paid', 'provisioned')) AS paid "
+            f"FROM {s}.discount_codes c LEFT JOIN {s}.orders o ON o.discount_code = c.code "
+            f"GROUP BY c.code ORDER BY c.created_at DESC, c.code"
+        )
+        paid = await self._pool.fetch(
+            f"SELECT discount_code, list_price_cents, discount FROM {s}.orders "
+            f"WHERE discount_code IS NOT NULL AND status IN ('paid', 'provisioned')"
+        )
+        given: dict[str, int] = {}
+        for r in paid:
+            share = _share(r["discount"])
+            off = r["list_price_cents"] * share.numerator // share.denominator
+            given[r["discount_code"]] = given.get(r["discount_code"], 0) + off
+        return [{**dict(r), "given_cents": given.get(r["code"], 0)} for r in rows]
+
+    async def code_changes(self, code: str) -> list[dict[str, object]]:
+        rows = await self._pool.fetch(
+            f"SELECT change, by_login, reason, ts FROM {self._s}.discount_code_changes "
+            f"WHERE code = $1 ORDER BY id",
+            code,
+        )
+        return [dict(r) for r in rows]
 
     # --- orders and accounts --------------------------------------------------------
 

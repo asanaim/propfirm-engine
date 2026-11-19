@@ -43,6 +43,7 @@ export const PLACES: readonly Place[] = [
   { group: "traders", screen: "progressions", label: "Funded reviews", path: "/progressions", icon: "progressions", keywords: "funded stage review passed" },
   { group: "traders", screen: "cases", label: "Cases", path: "/cases", icon: "cases", keywords: "blocks investigations rule breaches" },
   { group: "finance", screen: "progressions", label: "Scaling", path: "/scaling", icon: "scaling", keywords: "scale allocation step grow account size" },
+  { group: "finance", screen: "settings", label: "Coupons", path: "/coupons", icon: "coupons", keywords: "discount code coupon promo voucher" },
   { group: "finance", screen: "payouts", label: "Payouts", path: "/payouts", icon: "payouts", keywords: "withdrawals transactions money paid" },
   { group: "finance", screen: "transactions", label: "Transactions and emails", path: "/transactions", icon: "transactions", keywords: "transaction log purchases payouts money export csv email log reports" },
   { group: "finance", screen: "methods", label: "Payment methods", path: "/payment-methods", icon: "methods", keywords: "gateways deposits withdrawal methods charges" },
