@@ -21,6 +21,7 @@ const STATUS: Record<LiveAccount["status"], string> = {
   passed: "Passed",
   breached: "Breached",
   voided: "Closed",
+  expired: "Trial ended",
 };
 
 function clamp(x: number): number {
@@ -226,7 +227,7 @@ type Check = "done" | "open" | "failed";
 
 /** What is left to pass this stage, item by item. */
 export function objectives(account: LiveAccount): { label: string; detail: string; state: Check }[] {
-  const failed = account.status === "breached" || account.status === "voided";
+  const failed = account.status === "breached" || account.status === "voided" || account.status === "expired";
   const out: { label: string; detail: string; state: Check }[] = [];
   const target = account.target_balance_cents;
   if (target !== null) {

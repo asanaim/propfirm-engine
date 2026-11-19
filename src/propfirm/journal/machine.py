@@ -51,6 +51,7 @@ from propfirm.journal.inputs import (
     ClosePosition,
     CorrectBalance,
     DebitPayout,
+    ExpireAccount,
     Input,
     InputRejected,
     InputRejectReason,
@@ -84,6 +85,7 @@ from propfirm.market.symbols import AssetClass, SymbolSpec
 from propfirm.market.types import PriceUpdate
 from propfirm.rules.events import (
     AccountBreached,
+    AccountExpired,
     AccountReinstated,
     AccountScaled,
     AccountStatus,
@@ -295,6 +297,9 @@ CODEC = Codec(
         # scaling steps (14 Nov 2026)
         ScaleAccount,
         AccountScaled,
+        # free trial (15 Nov 2026)
+        ExpireAccount,
+        AccountExpired,
     )
 )
 

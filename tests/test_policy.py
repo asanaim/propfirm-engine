@@ -284,6 +284,7 @@ def test_a_new_rule_set_version_is_published() -> None:
         "lite-s1-v4-split90-swapfree",
         "lite-s1-v4-swing-swapfree",
         "lite-s1-v4-split90-swing-swapfree",
+        "lite-s1-v4-trial",  # the free trial runs on Lite stage 1 (D-13.17)
     ]
 
 

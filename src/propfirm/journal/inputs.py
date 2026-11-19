@@ -262,6 +262,19 @@ class UpdateTrading:
 
 
 @dataclass(frozen=True, slots=True)
+class ExpireAccount:
+    """End an active account whose time ran out (the free trial, D-13.17):
+    positions close, the account is locked. Not a breach."""
+
+    account_id: str
+    ts: int
+
+    def __post_init__(self) -> None:
+        require_text("account_id", self.account_id)
+        require_int("ts", self.ts, minimum=0)
+
+
+@dataclass(frozen=True, slots=True)
 class VoidAccount:
     """Void an active account on an integrity decision (`case`, a CAS id,
     confirmed by two employees): positions close, the account is locked."""
@@ -389,6 +402,7 @@ type Input = (
     | CorrectBalance
     | ReinstateAccount
     | ScaleAccount
+    | ExpireAccount
 )
 
 INPUT_TYPES = (
@@ -413,6 +427,7 @@ INPUT_TYPES = (
     CorrectBalance,
     ReinstateAccount,
     ScaleAccount,
+    ExpireAccount,
 )
 
 
@@ -603,6 +618,12 @@ def apply(
             if refusal is not None:
                 return reject(item.account_id, InputRejectReason(refusal))
             return list(sup.scale(item.account_id, item.add_cents, item.scaling, item.ts))
+        case ExpireAccount():
+            if not sup.has_account(item.account_id):
+                return reject(item.account_id, InputRejectReason.UNKNOWN_ACCOUNT)
+            if sup.status(item.account_id) is not AccountStatus.ACTIVE:
+                return reject(item.account_id, InputRejectReason.ACCOUNT_NOT_ACTIVE)
+            return list(sup.expire_account(item.account_id, item.ts))
         case Checkpoint():
             raise TypeError("Checkpoint is applied by the journal machine")
         case Malformed():

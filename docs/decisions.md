@@ -420,3 +420,28 @@ D-14.7, 15 Nov 2026).
   v3 is left as issued.
 - Not built: the free trial, coupons screen and referral ledger (later
   lines of step 2).
+
+D-14.13, free trial built (build plan step 2; D-13.17, K2; details taken
+under D-14.7, 15 Nov 2026).
+- What: Lite stage 1 rules on Lite 10K, 14 days, free, one per customer;
+  practice only: it never progresses, is never funded, pays nothing and
+  ranks nowhere (the leaderboard ranks funded accounts only). Product,
+  size, days and the switch are policy settings (`[trial]`).
+- Size: 10K, the smallest Lite. Accounts are simulated, so a larger size
+  costs the firm nothing, but the trial is meant to sell the 10K first
+  purchase, and a 10K trial matches it exactly.
+- Rules: its own rule set, the stage's id with `-trial`
+  (`lite-s1-v3-trial`), published with the stage, so a trial can never
+  be mistaken for a paid account and every outcome names it.
+- One per customer: enforced by the database (a unique index on the
+  customer's trial orders, a failed one excepted), so two requests at once
+  cannot open two. No sanctions screening for a trial: no money moves;
+  screening stays at the first paid purchase.
+- Recorded as an order at the size's list price with a 100 % `trial`
+  discount, price 0, so reports show what was given away.
+- Not a first account: a welcome code and the "first account" rules still
+  apply to the first paid purchase; a breached trial gives no retake.
+- End: an hourly job sends `ExpireAccount` once 14 days have passed since
+  opening (looking back 30 days further); the engine closes the positions
+  at the current prices and locks the account, status `expired` ("Trial
+  ended"). Not a breach, so no email (D-14.1).

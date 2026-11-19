@@ -39,6 +39,7 @@ class DiscountKind(StrEnum):
     CODE = "code"
     REPEAT = "repeat"
     RETAKE = "retake"
+    TRIAL = "trial"  # the free trial: the list price, all of it off (D-13.17)
 
 
 @dataclass(frozen=True, slots=True)

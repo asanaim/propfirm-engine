@@ -45,6 +45,7 @@ from propfirm.market.types import PriceUpdate
 from propfirm.rules.clock import NEW_YORK_17, TradingClock
 from propfirm.rules.events import (
     AccountBreached,
+    AccountExpired,
     AccountReinstated,
     AccountScaled,
     AccountStatus,
@@ -322,6 +323,26 @@ class RuleSupervisor:
         events += closed
         events += self._engine.lock_account(account_id, now)
         state.status = AccountStatus.VOIDED
+        for other in self._active():
+            events += self._check(other)
+        return events
+
+    def expire_account(self, account_id: str, ts: int) -> list[Event]:
+        """The account's time ran out (free trial): close its positions at
+        the current prices and lock it (status expired). Only an active
+        account."""
+        state = self._state(account_id)
+        if state.status is not AccountStatus.ACTIVE:
+            raise ValueError(f"{account_id} is {state.status.value}")
+        events = self._roll(ts)
+        now = self._engine.now
+        equity = self._engine.equity(account_id)
+        events.append(AccountExpired(now, account_id, equity, state.rules.rsv_id))
+        closed = self._engine.close_all(account_id, now, CloseReason.EXPIRY)
+        self._record(closed)
+        events += closed
+        events += self._engine.lock_account(account_id, now)
+        state.status = AccountStatus.EXPIRED
         for other in self._active():
             events += self._check(other)
         return events
