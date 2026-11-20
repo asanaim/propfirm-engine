@@ -755,3 +755,19 @@ owner's instruction of 20 Nov 2026: "take the most suitable decision").
   processor's fees and rolling reserve cost more than crypto at launch
   volumes); crypto through NOWPayments once the operator opens the
   account (owner action, C6); bank transfer stays off.
+
+D-14.26, payout networks as gates (owner, 20 Nov 2026: "create some more
+gates for next addition", on the flag that payouts could only go to USDT
+on TRC-20).
+- Built, each with its own address check: TRC20 (Base58Check), ERC20,
+  BEP20 and POLYGON (0x and 40 hex digits; a mixed-case address must
+  carry its EIP-55 checksum, computed with Keccak-256 written here and
+  checked against published vectors). All USDT.
+- The gate is a policy switch, `[payouts] networks`, changed by a
+  settings proposal: only TRC20 is open, as the functional outline
+  confirms. Open a network only once finance can send on it.
+- A trader picks the network with the address; the wallet keeps it, the
+  payout order carries it, and the transfer page shows it. A network
+  closed later takes no new wallets; wallets on it are still paid.
+- Another network (Solana, a second coin) is code: its address check and
+  its name in `customers.networks`, then the switch.

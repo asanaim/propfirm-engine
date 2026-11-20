@@ -4,13 +4,14 @@ at request time; the manual rail waits for the transfer to be recorded;
 the books carry what was sent and the charge kept."""
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
 from propfirm.service.feeder import now_ms
 from tests.integration.test_cases import funded_instant
-from tests.integration.test_customers import eventually, platform
+from tests.integration.test_customers import ADULT, eventually, platform
 from tests.integration.test_payouts import DAY, USDT, _payable, instant_without_consistency
 from tests.integration.test_progression import STAFF
 from tests.integration.test_settings import OWNERS, two_owners
@@ -129,5 +130,42 @@ def test_withdrawal_methods_and_manual_payouts(
             }
             tb = (await p.call("GET", "/staff/books/trial-balance", "admin-1", None, ADMIN)).json()
             assert tb["total_cents"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_a_network_opened_by_the_policy_takes_wallets(
+    database_url: str, valkey_url: str, pg_schema: str
+) -> None:
+    """D-14.26: a closed network refuses new wallets; opened, its addresses
+    are checked as its own; the wallet keeps its network."""
+    evm = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+
+    async def scenario() -> None:
+        base = instant_without_consistency()
+        async with platform(database_url, valkey_url, pg_schema, base, funded=True) as p:
+            await p.call("POST", "/me", body=ADULT)
+            assert [n["code"] for n in (await p.call("GET", "/payout-networks")).json()] == [
+                "TRC20"
+            ]
+            closed = await p.call("POST", "/me/wallet", body={"address": evm, "network": "BEP20"})
+            assert (closed.status_code, closed.json()["detail"]["code"]) == (422, "invalid")
+        opened = replace(base, payouts=replace(base.payouts, networks=("TRC20", "BEP20")))
+        async with platform(database_url, valkey_url, pg_schema, opened, funded=True) as p:
+            await p.call("POST", "/me", body=ADULT)
+            listed = (await p.call("GET", "/payout-networks")).json()
+            assert [n["code"] for n in listed] == ["TRC20", "BEP20"]
+            typo = evm[:-1] + "D"  # the checksum catches a wrong case
+            bad = await p.call("POST", "/me/wallet", body={"address": typo, "network": "BEP20"})
+            assert "0x and 40 characters" in bad.json()["detail"]["message"]
+            tron_on_bsc = await p.call(
+                "POST", "/me/wallet", body={"address": USDT, "network": "BEP20"}
+            )
+            assert tron_on_bsc.status_code == 422
+            made = await p.call("POST", "/me/wallet", body={"address": evm, "network": "BEP20"})
+            assert made.status_code == 201, made.text
+            assert (made.json()["network"], made.json()["address"]) == ("BEP20", evm)
+            mine = (await p.call("GET", "/me/wallet")).json()
+            assert (mine["network"], mine["address"]) == ("BEP20", evm)
 
     asyncio.run(scenario())

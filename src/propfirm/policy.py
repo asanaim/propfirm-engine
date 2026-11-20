@@ -96,9 +96,14 @@ class PayoutPolicy:
     # decide, a void needs two people. 0 percent: off.
     short_hold_seconds: int = 60
     short_hold_share_percent: int = 0  # 50 in the shipped policy
+    # D-14.26: the payout networks traders may add a wallet on; the gate for
+    # each further network (customers.networks lists what is built)
+    networks: tuple[str, ...] = ("TRC20",)
 
 
 PAYOUT_APPROVALS = ("pass_authorise", "count")
+# the payout networks built, each with its address check in customers.networks
+PAYOUT_NETWORKS = ("TRC20", "ERC20", "BEP20", "POLYGON")
 
 
 @dataclass(frozen=True, slots=True)
@@ -882,8 +887,14 @@ def _payouts(t: _Table) -> PayoutPolicy:
         short_hold_share_percent=(
             t.integer("short_hold_share_percent") if t.has("short_hold_share_percent") else 0
         ),
+        networks=t.texts("networks") if t.has("networks") else ("TRC20",),
     )
     t.done()
+    built = PAYOUT_NETWORKS
+    if not policy.networks or len(set(policy.networks)) != len(policy.networks):
+        raise PolicyError(f"{t.name('networks')}: one or more networks, each once")
+    if unknown := [n for n in policy.networks if n not in built]:
+        raise PolicyError(f"{t.name('networks')}: not built {unknown}; built: {list(built)}")
     if policy.short_hold_share_percent > 100:
         raise PolicyError(f"{t.name('short_hold_share_percent')} must be 0 to 100")
     if policy.approval not in PAYOUT_APPROVALS:

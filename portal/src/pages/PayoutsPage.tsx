@@ -82,8 +82,32 @@ export function PayoutsPage() {
   );
 }
 
+/** A network a payout wallet may be on now (D-14.26). */
+export interface PayoutNetwork {
+  code: string;
+  name: string;
+  currency: string;
+  hint: string;
+}
+
+const TRON: PayoutNetwork = { code: "TRC20", name: "USDT on TRON (TRC-20)", currency: "USDT", hint: "starts with T, 34 characters" };
+const NETWORK_NAMES: Record<string, string> = {
+  TRC20: "USDT on TRON (TRC-20)",
+  ERC20: "USDT on Ethereum (ERC-20)",
+  BEP20: "USDT on BNB Smart Chain (BEP-20)",
+  POLYGON: "USDT on Polygon",
+};
+
+/** The shape of an address on a network; the server checks it fully
+(Base58Check on TRON, the EIP-55 checksum on the others). */
+export function looksLike(network: string, address: string): boolean {
+  return network === "TRC20" ? looksLikeTron(address) : /^0x[0-9a-fA-F]{40}$/.test(address);
+}
+
 function WalletCard({ onSaved }: { onSaved: () => void }) {
   const api = useApi();
+  const [networks, setNetworks] = useState<PayoutNetwork[]>([]);
+  const [chosenNetwork, setChosenNetwork] = useState<string | null>(null);
   const [wallet, setWallet] = useState<Wallet | null | undefined>(undefined);
   const [error, setError] = useState<unknown>(null);
   const [address, setAddress] = useState("");
@@ -91,6 +115,12 @@ function WalletCard({ onSaved }: { onSaved: () => void }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let alive = true;
+    api.get<PayoutNetwork[]>("/payout-networks").then(
+      (found) => {
+        if (alive) setNetworks(found);
+      },
+      () => undefined, // TRON alone, as before
+    );
     api.get<Wallet>("/me/wallet").then(
       (found) => {
         if (alive) setWallet(found);
@@ -106,12 +136,14 @@ function WalletCard({ onSaved }: { onSaved: () => void }) {
     };
   }, [api]);
   const trimmed = address.trim();
+  const network = networks.find((n) => n.code === chosenNetwork) ?? networks[0] ?? TRON;
+  const looksRight = looksLike(network.code, trimmed);
   const submit = async (event: SyntheticEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      setWallet(await api.post<Wallet>("/me/wallet", { address: trimmed }));
+      setWallet(await api.post<Wallet>("/me/wallet", { address: trimmed, network: network.code }));
       onSaved(); // the payout checks include the wallet
       setEditing(false);
       setAddress("");
@@ -124,28 +156,46 @@ function WalletCard({ onSaved }: { onSaved: () => void }) {
   if (wallet === undefined) return error !== null ? <Problem error={error} /> : <Loading label="Loading your wallet" />;
   const form = (
     <form className="form" onSubmit={(e) => void submit(e)}>
+      {networks.length > 1 && (
+        <label className="field">
+          <span>Network</span>
+          <select
+            value={network.code}
+            onChange={(e) => {
+              setChosenNetwork(e.target.value);
+            }}
+          >
+            {networks.map((n) => (
+              <option key={n.code} value={n.code}>
+                {n.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="field">
-        <span>USDT wallet address (TRON, TRC-20)</span>
+        <span>Wallet address ({network.name})</span>
         <input
           type="text"
           value={address}
           spellCheck={false}
           autoComplete="off"
-          maxLength={34}
+          maxLength={42}
           onChange={(e) => {
             setAddress(e.target.value);
           }}
-          aria-invalid={trimmed !== "" && !looksLikeTron(trimmed)}
+          aria-invalid={trimmed !== "" && !looksRight}
         />
       </label>
-      {trimmed !== "" && !looksLikeTron(trimmed) && (
-        <p className="muted">A TRON address starts with T and has 34 characters.</p>
+      {trimmed !== "" && !looksRight && <p className="muted">An address on this network: {network.hint}.</p>}
+      {networks.length > 1 && (
+        <p className="muted">Choose the network your wallet receives on: money sent on another network is lost.</p>
       )}
       <p className="muted">
         Changing the wallet needs your authenticator code. We email you every change; payouts go only to this wallet.
       </p>
       {error !== null && <Problem error={error} />}
-      <Button type="submit" busy={busy} disabled={!looksLikeTron(trimmed)}>
+      <Button type="submit" busy={busy} disabled={!looksRight}>
         Save wallet
       </Button>
     </form>
@@ -165,7 +215,7 @@ function WalletCard({ onSaved }: { onSaved: () => void }) {
               <code>{wallet.address}</code>
             </dd>
             <dt>Network</dt>
-            <dd>USDT on TRON (TRC-20)</dd>
+            <dd>{NETWORK_NAMES[wallet.network] ?? wallet.network}</dd>
             <dt>Added</dt>
             <dd>{formatDate(wallet.added_at)}</dd>
           </dl>

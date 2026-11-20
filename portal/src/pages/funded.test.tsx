@@ -204,17 +204,17 @@ it("adds a payout wallet and asks for the second factor when needed", async () =
   const user = userEvent.setup();
   const save = await screen.findByRole("button", { name: "Save wallet" });
   expect(save).toBeDisabled();
-  await user.type(screen.getByLabelText("USDT wallet address (TRON, TRC-20)"), ADDRESS);
+  await user.type(screen.getByLabelText("Wallet address (USDT on TRON (TRC-20))"), ADDRESS);
   await user.click(save);
   await user.click(await screen.findByRole("button", { name: "Confirm it is you" }));
   expect(auth.stepUp).toHaveBeenCalled();
-  expect(bodyOf(fetcher, "/me/wallet")).toEqual({ address: ADDRESS });
+  expect(bodyOf(fetcher, "/me/wallet")).toEqual({ address: ADDRESS, network: "TRC20" });
 });
 
 it("shows what is payable and requests the payout", async () => {
   const fetcher = fakeFetch([
     ["GET", "/me", 200, ME],
-    ["GET", "/me/wallet", 200, { wal: "WAL00000001", network: "tron", address: ADDRESS, added_at: 0 }],
+    ["GET", "/me/wallet", 200, { wal: "WAL00000001", network: "TRC20", address: ADDRESS, added_at: 0 }],
     ["GET", "/accounts/ACC00000003/payout", 200, ELIGIBLE],
     ["GET", "/accounts/ACC00000003/payouts", 200, []],
     ["POST", "/accounts/ACC00000003/payouts", 201, PAYOUT],
@@ -235,7 +235,7 @@ it("shows what is payable and requests the payout", async () => {
 it("lets the trader cancel a payout still being approved", async () => {
   const fetcher = fakeFetch([
     ["GET", "/me", 200, ME],
-    ["GET", "/me/wallet", 200, { wal: "WAL00000001", network: "tron", address: ADDRESS, added_at: 0 }],
+    ["GET", "/me/wallet", 200, { wal: "WAL00000001", network: "TRC20", address: ADDRESS, added_at: 0 }],
     ["GET", "/accounts/ACC00000003/payout", 200, { ...ELIGIBLE, eligible: false }],
     ["GET", "/accounts/ACC00000003/payouts", 200, [PAYOUT]],
     ["POST", "/me/payouts/PO00000001/cancel", 200, { ...PAYOUT, status: "cancelled" }],
@@ -258,11 +258,11 @@ it("checks the payout again once the wallet is saved", async () => {
     ["GET", "/me/wallet", 404, { detail: "no payout wallet" }],
     ["GET", "/accounts/ACC00000003/payout", 200, { ...ELIGIBLE, eligible: false }],
     ["GET", "/accounts/ACC00000003/payouts", 200, []],
-    ["POST", "/me/wallet", 201, { wal: "WAL00000001", network: "tron", address: ADDRESS, added_at: 0 }],
+    ["POST", "/me/wallet", 201, { wal: "WAL00000001", network: "TRC20", address: ADDRESS, added_at: 0 }],
   ]);
   renderWith(<PayoutsPage />, fakeAuth(), fetcher);
   const user = userEvent.setup();
-  await user.type(await screen.findByLabelText("USDT wallet address (TRON, TRC-20)"), ADDRESS);
+  await user.type(await screen.findByLabelText("Wallet address (USDT on TRON (TRC-20))"), ADDRESS);
   await user.click(screen.getByRole("button", { name: "Save wallet" }));
   expect(await screen.findByText("USDT on TRON (TRC-20)")).toBeInTheDocument();
   const reads = () => fetcher.mock.calls.filter(([url]) => url === "/api/accounts/ACC00000003/payout").length;
