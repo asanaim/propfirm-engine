@@ -81,6 +81,7 @@ from propfirm.customers.referrals import Referrals
 from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore
+from propfirm.customers.transfers import NoPayoutRail, Transfers, WithdrawalRails
 from propfirm.customers.trials import Trials
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.newsfeed.alerts import SourceAlerts, SourceStore
@@ -380,19 +381,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         referrals = Referrals(pool, config.customer_schema, settings)
         books = Books(pool, config.customer_schema, settings)
         payouts = None
-        if config.sandbox and notifications is not None:
+        withdrawals = WithdrawalRails(
+            settings, pool, config.customer_schema, sandbox=config.sandbox
+        )
+        if notifications is not None:
             payouts = Payouts(
                 payout_store,
                 customers,
                 live,
                 settings,
                 gateway,
-                SandboxPayouts(),
+                SandboxPayouts() if config.sandbox else NoPayoutRail(),
                 identity=onboardings,
                 cases=cases,
                 notices=settings,
                 history=HistoryReader(pool, config.read_schema),
                 scaling=scaling,
+                withdrawals=withdrawals,
             )
         liabilities = (
             None if payouts is None else Liabilities(pool, config.customer_schema, payouts, live)
@@ -468,6 +473,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             evaluations=evaluations,
             reserve=reserve,
             rails=rails,
+            transfers=Transfers(pool, config.customer_schema),
             receipts=None
             if checkout is None
             else Receipts(pool, config.customer_schema, checkout, rails),

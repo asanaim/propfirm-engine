@@ -211,6 +211,10 @@ export interface Payout {
   paid_at: number | null;
   provider_ref: string | null;
   failure: string | null;
+  /** D-14.25: the withdrawal method, its charge, and what reaches the trader */
+  method_id?: string | null;
+  charge_cents?: number;
+  net_cents?: number;
 }
 
 export interface Registration {

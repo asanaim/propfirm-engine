@@ -47,8 +47,8 @@ NODE_TEXT = (
     '"updated_at":"2026-11-20T09:41:13.153Z"}'
 )
 NODE_SIG = (
-    "0f6784b4ba497fdfa3c93a65d9f441e7a738252fb871ed40a0a1b121beb22e4d"
-    "f1ecb19cd0ec059fa6cabfc946dbeb82b1c33a93bc580685c0898dcc599c1e79"
+    "0f6784b4ba497fdfa3c93a65d9f441e7a738252fb871ed40a0a1b121beb22e4d"  # pragma: allowlist secret
+    "f1ecb19cd0ec059fa6cabfc946dbeb82b1c33a93bc580685c0898dcc599c1e79"  # pragma: allowlist secret
 )
 SECRET = "test-ipn-secret"  # pragma: allowlist secret
 

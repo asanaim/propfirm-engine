@@ -921,6 +921,28 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             WHERE status IN ('recorded', 'confirmed');
         """,
     ),
+    (
+        26,
+        """
+        -- payout rails and withdrawal methods (D-14.25): the method a payout
+        -- was asked for, its charge taken at request time, the currency
+        -- sent; and transfers sent by hand, recorded with their transaction
+        ALTER TABLE {s}.payouts ADD COLUMN method_id text;
+        ALTER TABLE {s}.payouts ADD COLUMN charge_cents bigint NOT NULL DEFAULT 0
+            CHECK (charge_cents >= 0);
+        ALTER TABLE {s}.payouts ADD COLUMN currency text NOT NULL DEFAULT 'USDT';
+        ALTER TABLE {s}.payouts ADD CONSTRAINT payouts_charge_below_amount
+            CHECK (charge_cents < trader_amount_cents);
+        CREATE TABLE {s}.payout_transfers (
+            po text PRIMARY KEY REFERENCES {s}.payouts (po),
+            tx_ref text NOT NULL,
+            recorded_by text NOT NULL,
+            recorded_at bigint NOT NULL
+        );
+        CREATE TRIGGER payout_transfers_append_only BEFORE UPDATE OR DELETE
+            ON {s}.payout_transfers FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

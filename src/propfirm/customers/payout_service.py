@@ -25,8 +25,9 @@ from propfirm.customers.payouts import (
     eligibility,
     eligibility_json,
 )
-from propfirm.customers.providers import PayoutProvider
+from propfirm.customers.providers import PayoutOrder, PayoutProvider
 from propfirm.customers.store import CifRecord, CustomerStore
+from propfirm.customers.transfers import WithdrawalRails, WithdrawalUnavailable
 from propfirm.journal.inputs import DebitPayout
 from propfirm.policy import PolicySource, parse_percent
 from propfirm.rules.addons import addons_of
@@ -75,6 +76,7 @@ class Payouts:
         notices: NoticeSource | None = None,  # notification templates (rule AC12)
         history: TradeHistory | None = None,  # projected account events (short holds)
         scaling: StepCount | None = None,  # scaling steps taken (the split ladder)
+        withdrawals: WithdrawalRails | None = None,  # withdrawal methods (D-14.25)
         wait_s: float = 5.0,
     ) -> None:
         self._store = store
@@ -88,6 +90,7 @@ class Payouts:
         self._notices = notices
         self._history = history
         self._scaling = scaling
+        self._withdrawals = withdrawals
         self._wait_s = wait_s
 
     @property
@@ -260,6 +263,7 @@ class Payouts:
         mfa: bool,
         ts: int,
         auth_time: int | None = None,
+        method: str | None = None,
     ) -> PayoutRecord:
         await self._mfa(mfa, auth_time, ts)
         policy = await self._policy.current()
@@ -269,6 +273,7 @@ class Payouts:
             raise PayoutRefused("not_eligible", f"checks failing: {', '.join(_failing(e))}")
         if e.debit_cents <= 0:
             raise PayoutRefused("not_eligible", "no profit to pay out")
+        method_id, charge = await self._method(method, e.trader_amount_cents)
         record = await self._customers.account(acc)
         wallet = await self._store.wallet(cif.cif)
         live = await self._live.account(acc)
@@ -286,6 +291,7 @@ class Payouts:
             "rsv_id": live["rules"]["rsv_id"],
             "trading_during_payout": policy.payouts.trading_during_payout,
             "eligibility": eligibility_json(e),
+            **({"method": method_id, "charge_cents": charge} if method_id else {}),
         }
         return await self._store.request(
             acc,
@@ -296,7 +302,45 @@ class Payouts:
             e.debit_cents,
             ts,
             detail,
+            method_id=method_id,
+            charge_cents=charge,
         )
+
+    async def methods(self) -> list[Any]:
+        """The withdrawal methods a trader may choose now (none: the default)."""
+        return [] if self._withdrawals is None else await self._withdrawals.enabled()
+
+    async def _method(self, method: str | None, amount_cents: int) -> tuple[str | None, int]:
+        """The method a payout goes through and its charge, at request time
+        (rule AC13): once any withdrawal method is on, one must be chosen,
+        the amount must be inside its limits, and its charge is taken from
+        the amount. With none on, the platform's default rail, no charge."""
+        enabled = await self.methods()
+        if not enabled:
+            if method is not None:
+                raise PayoutRefused("unknown_method", "no withdrawal method is offered")
+            if self._provider.name == "none":
+                raise PayoutRefused("method_unavailable", "no withdrawal method is offered yet")
+            return None, 0
+        chosen = next((m for m in enabled if m.method_id == method), None)
+        if chosen is None:
+            names = ", ".join(m.method_id for m in enabled)
+            raise PayoutRefused("choose_method", f"choose a withdrawal method: {names}")
+        assert self._withdrawals is not None
+        try:
+            await self._withdrawals.for_method(chosen.method_id)
+        except WithdrawalUnavailable as exc:
+            raise PayoutRefused("method_unavailable", str(exc)) from exc
+        if not chosen.allows(amount_cents):
+            raise PayoutRefused(
+                "outside_limits",
+                f"{chosen.name} takes {chosen.min_cents} to "
+                f"{chosen.max_cents or 'any'} cents; this payout is {amount_cents}",
+            )
+        charge = chosen.charge_cents(amount_cents)
+        if charge >= amount_cents:
+            raise PayoutRefused("charge_too_high", "the method's charge takes the whole payout")
+        return chosen.method_id, charge
 
     async def cancel(self, po: str, cif: CifRecord, subject: str, ts: int) -> PayoutRecord:
         payout = await self._store.payout(po)
@@ -421,20 +465,32 @@ class Payouts:
             return
         wallet = await self._store.wallet_by_id(payout.wal)
         assert wallet is not None
+        order = PayoutOrder(
+            payout.po,
+            payout.method_id,
+            {"network": wallet.network, "address": wallet.address},
+            payout.net_cents,  # the trader's amount less the method's charge
+            payout.currency,
+        )
         try:
-            ref = await self._provider.send(
-                payout.po, wallet.network, wallet.address, payout.trader_amount_cents
-            )
+            provider = await self._rail(payout)
+            ref = await provider.send(order)
         except Exception as exc:
             log.warning("payout %s: sending failed: %s", payout.po, exc)
-            error = {"error": type(exc).__name__, "provider": self._provider.name}
+            error = {"error": type(exc).__name__, "method": payout.method_id}
             await self._store.append(payout.po, "send_failed", ts, error, when=("debited",))
             return
-        detail = {"ref": ref, "provider": self._provider.name}
+        detail = {"ref": ref, "provider": provider.name, "amount_cents": order.amount_cents}
         await self._store.append(payout.po, "sent", ts, detail, when=("debited",))
+
+    async def _rail(self, payout: PayoutRecord) -> PayoutProvider:
+        """The rail of the payout's method; the default without one."""
+        if payout.method_id is None or self._withdrawals is None:
+            return self._provider
+        return await self._withdrawals.for_method(payout.method_id)
 
     async def _confirm(self, payout: PayoutRecord, ts: int) -> None:
         assert payout.provider_ref is not None
-        found = await self._provider.status(payout.provider_ref)
+        found = await (await self._rail(payout)).status(payout.provider_ref)
         if found.status == "paid":
             await self._store.append(payout.po, "paid", ts, found.detail, when=("sent",))

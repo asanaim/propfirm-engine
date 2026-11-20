@@ -49,6 +49,7 @@ import {
   Landmark,
   ListChecks,
   Scale,
+  Send,
   UserPlus,
   TrendingUp,
   ReceiptText,
@@ -117,5 +118,6 @@ export const ICONS = {
   reconciliation: ListChecks,
   disputes: ReceiptText,
   receipts: Landmark,
+  transfers: Send,
   referrals: UserPlus,
 } satisfies Record<string, LucideIcon>;
