@@ -52,7 +52,8 @@ def test_the_books_follow_the_records(database_url: str, valkey_url: str, pg_sch
             again = await p.call("POST", url, "admin-2", {"approve": True, "reason": "ok"}, ADMIN)
             assert again.status_code == 409
 
-            assert await p.books.sync(p.clock(), every_ms=0) == 2  # the order, the commission
+            # the order, the commission, the reserve sweep (D-14.20)
+            assert await p.books.sync(p.clock(), every_ms=0) == 3
             assert await p.books.sync(p.clock(), every_ms=0) == 0  # once
 
             tb = (await p.call("GET", "/staff/books/trial-balance", "admin-1", None, ADMIN)).json()
@@ -60,7 +61,8 @@ def test_the_books_follow_the_records(database_url: str, valkey_url: str, pg_sch
             lines = {x["account"]: x["balance_cents"] for x in tb["lines"]}
             # Lite 25K $109 less 10 % plus Swing 15 %: $114.45 in; expense $29.99 out
             assert lines == {
-                "asset:cash": 11_445 - 2_999,
+                "asset:cash": 11_445 - 2_999 - 8_241,
+                "asset:reserve": 8_241,  # 72 % of $114.45, rounded up
                 "income:fees:lite": -(10_900 + 1_635),
                 "income:discounts:lite": 1_090,
                 "expense:affiliate_commissions": 1_144,  # 10 % of $114.45, rounded down
@@ -72,6 +74,7 @@ def test_the_books_follow_the_records(database_url: str, valkey_url: str, pg_sch
                 "commission_accrued",
                 "operating_expense",
                 "order_paid",
+                "reserve_sweep",
             ]
             # the income statement of this month, both views, and as CSV
             month = month_of(p.clock())

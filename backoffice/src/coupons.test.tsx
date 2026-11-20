@@ -89,4 +89,30 @@ describe("liabilities", () => {
     expect(t[2]?.[2]).toBe("if all 3 funded accounts asked now");
     expect(t[3]?.[2]).toBe("largest single claim $40.00 (ACC1)");
   });
+
+  it("lists the parts of the reserve requirement with their weights", async () => {
+    const { requirement, STATES } = await import("./Liabilities");
+    const parts = requirement({
+      reserve_cents: 1_000,
+      certain_cents: 100,
+      open_profit_cents: 40,
+      expected_cents: 60,
+      evaluations: 2,
+      largest_customer_cents: 50,
+      required_cents: 260,
+      k: "3.84",
+      state: "normal",
+      releasable_cents: 662,
+      thresholds: { amber_below: "1.30", red_below: "1.10", breach_below: "1.00", release_above: "1.30" },
+      weights: { open: "0.50", expected: "1.50" },
+    });
+    expect(parts.map(([l, c]) => [l, c])).toEqual([
+      ["Owed on closed profit", 100],
+      ["Open profit x 0.50", 40],
+      ["Evaluations x 1.50", 60],
+      ["Largest customer", 50],
+    ]);
+    expect(parts[2]?.[2]).toBe("expected payouts of 2 active evaluations");
+    expect(Object.keys(STATES)).toEqual(["normal", "amber", "red", "breach"]);
+  });
 });

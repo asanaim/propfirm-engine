@@ -544,3 +544,35 @@ demand, nothing stored:
   staff do not see the firm's totals.
 - Reading every funded account on each request is acceptable at launch;
   a cached figure comes with the reserve (line 5) if it grows slow.
+
+D-14.20, payout reserve and coverage K (build plan step 3, line 5; D-13.7
+built; details taken under D-14.7, 20 Nov 2026; formula from strategic
+review v3, D3).
+- Sweep: at each paid sale the product's share of the price (Lite 72%,
+  1 Step 66%, Instant 27%; `[reserve]` in the policy file) moves from
+  cash to the reserve account in the operator ledger, rounded up to the
+  cent. A free trial sweeps nothing. The share is read when the books
+  sync (at most a minute after the sale) and the amount is recorded in
+  the entry. Classic is off sale and has no share; it needs one before
+  it opens (the policy check refuses a product on sale without one).
+- Draw: a paid payout is drawn from the reserve in full. A reserve drawn
+  below zero is shown as a shortfall owed to it, not hidden.
+- Requirement R* = owed on closed profit (the liability desk's certain,
+  open and expected tiers) + 0.5 x the traders' share of open profit +
+  1.5 x expected payouts on active evaluations (price x sweep / 1.25) +
+  the most one customer could claim now. K = reserve / R*. The weights
+  and thresholds are policy values.
+- States: normal at K >= 1.3, amber from 1.1, red from 1.0, breach below.
+  K is shown rounded down to two decimals; R* is rounded up to the cent.
+- Shown on the liability desk to the settings view right, with what
+  could return to operating cash above 1.3 x R*.
+- Simplifications, each on the safe side or flagged: one customer stands
+  in for an identity cluster until clusters exist (step 5); no cohort
+  decay is applied to evaluations, which overstates the requirement; the
+  reserve is a ledger account, and moving the money to a separate bank
+  account is an operating task.
+- Not yet: the automatic response of each state (amber: no promotion
+  below list, scaling frozen, Instant capped; red: new funded accounts
+  queue, owners alerted, repricing proposal; breach: published delay),
+  owners' capital top-ups, and the monthly release of the surplus. They
+  follow as their own pull request.

@@ -19,6 +19,11 @@ twice posts once:
   payable) or clawed back (the reverse).
 - `expense:<EXP>`: an operating expense, proposed by one member of staff
   and approved by another; against cash if paid, else against payables.
+- `reserve-sweep:<ORD>`: with the reserve on (D-14.20), the product's
+  sweep share of a paid order's price, rounded up to the cent, moves from
+  cash to the payout reserve.
+- `reserve-draw:<PO>`: a paid payout is drawn from the reserve back to
+  cash, in full. A reserve drawn below zero is a shortfall owed to it.
 
 Corrections are new entries, never edits.
 """
@@ -37,12 +42,14 @@ import asyncpg
 
 from propfirm.ledger import Entry, Posting
 from propfirm.pgschema import Conn
+from propfirm.policy import PolicySource
 
 # --- chart of accounts ------------------------------------------------------------------
 
 ASSET, LIABILITY, EQUITY, INCOME, EXPENSE = "asset", "liability", "equity", "income", "expense"
 
 CASH = "asset:cash"
+RESERVE = "asset:reserve"
 PAYOUTS_PAYABLE = "liability:payouts_payable"
 COMMISSIONS_PAYABLE = "liability:commissions_payable"
 PAYABLES = "liability:payables"
@@ -67,6 +74,7 @@ EXPENSE_CATEGORIES = (
 
 FIXED: dict[str, tuple[str, str]] = {
     CASH: (ASSET, "Cash"),
+    RESERVE: (ASSET, "Payout reserve"),
     PAYOUTS_PAYABLE: (LIABILITY, "Payouts payable"),
     COMMISSIONS_PAYABLE: (LIABILITY, "Commissions payable"),
     PAYABLES: (LIABILITY, "Other payables"),
@@ -135,6 +143,38 @@ def order_entry(row: dict[str, Any]) -> Entry | None:
         postings.append(Posting(discounts(product), off))
     return Entry(
         f"order:{row['ord']}", int(row["paid_at"]), "order_paid", tuple(postings), row["ord"]
+    )
+
+
+def sweep_cents(price_cents: int, share: Fraction) -> int:
+    """The reserve's part of a price: `share` of it, rounded up to the
+    cent, so the reserve is never short by a rounding."""
+    return -(-price_cents * share.numerator // share.denominator)
+
+
+def sweep_entry(row: dict[str, Any], share: Fraction) -> Entry | None:
+    """The reserve sweep of a paid order; None when nothing is swept."""
+    amount = sweep_cents(int(row["price_cents"]), share)
+    if amount <= 0:
+        return None
+    return Entry(
+        f"reserve-sweep:{row['ord']}",
+        int(row["paid_at"]),
+        "reserve_sweep",
+        (Posting(RESERVE, amount), Posting(CASH, -amount)),
+        row["ord"],
+    )
+
+
+def draw_entry(row: dict[str, Any]) -> Entry:
+    """A paid payout drawn from the reserve back to cash."""
+    amount = int(row["trader_amount_cents"])
+    return Entry(
+        f"reserve-draw:{row['po']}",
+        int(row["paid_at"]),
+        "reserve_draw",
+        (Posting(CASH, amount), Posting(RESERVE, -amount)),
+        row["po"],
     )
 
 
@@ -210,9 +250,10 @@ class Line:
 
 
 class Books:
-    def __init__(self, pool: asyncpg.Pool, schema: str) -> None:
+    def __init__(self, pool: asyncpg.Pool, schema: str, policy: PolicySource | None = None) -> None:
         self._pool = pool
         self._s = schema
+        self._policy = policy  # None: no reserve
         self._last = -1
 
     async def post(self, conn: Conn, entry: Entry, by: str, now: int, memo: str = "") -> bool:
@@ -307,7 +348,49 @@ class Books:
                 entries.append(payout_paid_entry(row))
         entries += [referral_entry(dict(r)) for r in referrals]
         entries += [expense_entry(dict(r)) for r in expenses]
+        entries += await self._reserve_entries()
         return await self._post_all(entries, now)
+
+    async def _reserve_entries(self) -> list[Entry]:
+        """Sweeps of paid orders and draws of paid payouts not yet in the
+        book, with the reserve on. An order of a product with no share
+        (off sale when the share was set) is not swept."""
+        if self._policy is None:
+            return []
+        reserve = (await self._policy.current()).reserve
+        if not reserve.on:
+            return []
+        s = self._s
+        orders = await self._pool.fetch(
+            f"SELECT o.ord, o.product_id, o.price_cents, o.paid_at FROM {s}.orders o "
+            f"WHERE o.status IN ('paid', 'provisioned') AND o.paid_at IS NOT NULL "
+            f"AND o.price_cents > 0 AND NOT EXISTS (SELECT 1 FROM {s}.ops_entries e "
+            f"WHERE e.entry_id = 'reserve-sweep:' || o.ord) ORDER BY o.paid_at, o.ord"
+        )
+        paid = await self._pool.fetch(
+            f"SELECT p.po, p.trader_amount_cents, p.paid_at FROM {s}.payouts p "
+            f"WHERE p.status = 'paid' AND p.paid_at IS NOT NULL "
+            f"AND NOT EXISTS (SELECT 1 FROM {s}.ops_entries e "
+            f"WHERE e.entry_id = 'reserve-draw:' || p.po) ORDER BY p.paid_at, p.po"
+        )
+        out: list[Entry] = []
+        for r in orders:
+            share = reserve.sweep.get(str(r["product_id"]))
+            if share is not None and (e := sweep_entry(dict(r), share)) is not None:
+                out.append(e)
+        out += [draw_entry(dict(r)) for r in paid if int(r["trader_amount_cents"]) > 0]
+        return out
+
+    async def reserve_cents(self) -> int:
+        """The reserve's balance now (debit positive; below zero a
+        shortfall owed to it)."""
+        s = self._s
+        return int(
+            await self._pool.fetchval(
+                f"SELECT coalesce(sum(amount_cents), 0) FROM {s}.ops_postings WHERE account = $1",
+                RESERVE,
+            )
+        )
 
     # --- expenses, two people ---------------------------------------------------------
 

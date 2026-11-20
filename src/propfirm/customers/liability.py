@@ -10,11 +10,16 @@ or may owe traders, in three tiers, and the largest single claim.
   balance. Eligibility checks (days, wallet, identity) are ignored: a
   claim not yet due is still a claim.
 
+Beside them, contingent (D-14.20): the trader's share of profit still in
+open positions, s x [(E - I - V)+ - (B - I - V)+]+, rounded up to the
+cent; zero when payouts are measured on equity (it is in `expected`).
+
 Read on demand; nothing is stored. Amounts in cents.
 """
 
 import logging
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Any, Protocol
 
 import asyncpg
@@ -44,10 +49,21 @@ class Claim:
     certain_cents: int
     open_cents: int
     expected_cents: int
+    open_profit_cents: int = 0  # contingent, not in the total
 
     @property
     def total_cents(self) -> int:
         return self.certain_cents + self.open_cents + self.expected_cents
+
+
+def open_profit_cents(
+    equity: int, balance: int, baseline: int, violations: int, split_percent: str
+) -> int:
+    """The trader's share of profit in open positions above what the
+    closed balance already earns; rounded up, so never understated."""
+    extra = max(0, max(0, equity - baseline - violations) - max(0, balance - baseline - violations))
+    share = Fraction(split_percent) / 100
+    return -(-extra * share.numerator // share.denominator)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +78,8 @@ class Desk:
     largest: Claim | None
     claims: tuple[Claim, ...]  # largest first
     unread: tuple[str, ...]  # funded accounts whose expected claim could not be read
+    open_profit_cents: int = 0  # contingent: profit in open positions
+    largest_customer_cents: int = 0  # the most one customer could claim now
 
     @property
     def total_cents(self) -> int:
@@ -109,6 +127,7 @@ class Liabilities:
             if r["status"] in IN_BALANCE:
                 in_balance[acc] = in_balance.get(acc, 0) + amount
         expected: dict[str, int] = {}
+        floating: dict[str, int] = {}
         unread: list[str] = []
         active = 0
         for r in funded:
@@ -127,6 +146,16 @@ class Liabilities:
             amount = max(0, e.trader_amount_cents - in_balance.get(acc, 0))
             if amount:
                 expected[acc] = amount
+            if e.basis == "closed_balance":
+                extra = open_profit_cents(
+                    int(view.get("equity_cents", 0)),
+                    int(view.get("balance_cents", 0)),
+                    e.baseline_cents,
+                    e.violations_cents,
+                    e.split_percent,
+                )
+                if extra:
+                    floating[acc] = extra
         claims = sorted(
             (
                 Claim(
@@ -136,12 +165,16 @@ class Liabilities:
                     certain.get(acc, 0),
                     opened.get(acc, 0),
                     expected.get(acc, 0),
+                    floating.get(acc, 0),
                 )
-                for acc in set(certain) | set(opened) | set(expected)
+                for acc in set(certain) | set(opened) | set(expected) | set(floating)
             ),
             key=lambda c: (-c.total_cents, c.acc),
         )
         payouts_certain = sum(certain.values())
+        by_customer: dict[str, int] = {}
+        for c in claims:
+            by_customer[c.cif] = by_customer.get(c.cif, 0) + c.total_cents
         return Desk(
             as_of=now,
             certain_cents=payouts_certain + int(commissions),
@@ -153,4 +186,6 @@ class Liabilities:
             largest=claims[0] if claims else None,
             claims=tuple(claims[:top]),
             unread=tuple(unread),
+            open_profit_cents=sum(floating.values()),
+            largest_customer_cents=max(by_customer.values(), default=0),
         )
