@@ -724,3 +724,34 @@ at expansion).
 - Not built: the card adapter (no processor chosen; cards come at
   expansion); payout rails without a fixed network and withdrawal
   limits and charges (step 4, lines 4 and 5).
+
+D-14.25, payout rails and withdrawal methods (build plan step 4, lines 4
+and 5; with the open points of D-14.24 settled by the universal rule,
+owner's instruction of 20 Nov 2026: "take the most suitable decision").
+- Payout interface: a payout order carries the withdrawal method, a
+  destination as the method needs it (for USDT a network and an
+  address), the amount that reaches the trader and the currency. No
+  network is fixed by the interface; the only destination stored today
+  is a USDT TRC-20 wallet, as the functional outline confirms. Another
+  network needs its own wallet type first.
+- Withdrawal methods at request time (rule AC13): once any is on, a
+  payout must name one; the trader's amount must be inside its limits;
+  its charge (fixed plus percent, rounded up to the cent) is taken from
+  the amount and recorded on the payout. With none on: the sandbox in
+  development; in production the request is refused until an owner
+  attaches one.
+- Rails at launch: `manual`. After two approvals and the engine's debit,
+  finance sends the net amount from the firm's wallet or the
+  NOWPayments dashboard and records the transaction; the payout is paid
+  at the next round. Automatic NOWPayments payouts are not built: their
+  payout call needs a second-factor code per batch (a person's act) and
+  an API key able to move funds, which a server should not hold at
+  launch volumes. Revisit when payouts exceed what one person sends in
+  a day.
+- Books: cash out is what was sent; the charge, kept by the firm, lowers
+  the payout cost; the reserve is drawn by what was sent.
+- Settled points of D-14.24: no card processor at launch (the outline's
+  choice; Stripe-class processors refuse prop firms, and a high-risk
+  processor's fees and rolling reserve cost more than crypto at launch
+  volumes); crypto through NOWPayments once the operator opens the
+  account (owner action, C6); bank transfer stays off.

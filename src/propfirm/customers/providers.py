@@ -41,15 +41,29 @@ class PayoutStatus:
     detail: dict[str, Any]  # the provider's evidence (e.g. the transaction hash)
 
 
-class PayoutProvider(Protocol):
-    """Sends USDT (TRC-20) to a trader's wallet (NOWPayments payouts, C6).
+@dataclass(frozen=True, slots=True)
+class PayoutOrder:
+    """One payout to send (D-14.25): no network is fixed by the interface.
+    `method`: the withdrawal method (None: the platform's default rail);
+    `destination`: where it goes, as the method needs it (for USDT a
+    `network` and an `address`); `amount_cents`: what reaches the trader,
+    after the method's charge; `currency`: what is sent."""
 
-    `send` must be idempotent on `payout` (the PO id): a repeated call after
-    a crash returns the same reference and sends nothing more."""
+    payout: str
+    method: str | None
+    destination: dict[str, str]
+    amount_cents: int
+    currency: str
+
+
+class PayoutProvider(Protocol):
+    """Sends a payout. `send` must be idempotent on `order.payout` (the PO
+    id): a repeated call after a crash returns the same reference and sends
+    nothing more."""
 
     name: str
 
-    async def send(self, payout: str, network: str, address: str, amount_cents: int) -> str: ...
+    async def send(self, order: PayoutOrder) -> str: ...
 
     async def status(self, ref: str) -> PayoutStatus: ...
 
@@ -76,8 +90,8 @@ class SandboxPayouts:
 
     name = "sandbox"
 
-    async def send(self, payout: str, network: str, address: str, amount_cents: int) -> str:
-        return f"sandbox-{payout}"
+    async def send(self, order: PayoutOrder) -> str:
+        return f"sandbox-{order.payout}"
 
     async def status(self, ref: str) -> PayoutStatus:
         return PayoutStatus("paid", {"tx": f"sandbox-tx-{ref}"})

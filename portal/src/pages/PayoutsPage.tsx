@@ -1,6 +1,7 @@
 import { useEffect, useState, type SyntheticEvent } from "react";
 import { useApi, useMe } from "../api/ApiProvider";
 import { payoutDelayText, useSiteStatus } from "../components/SiteStatus";
+import type { PayMethod } from "./ShopPage";
 import { ApiError } from "../api/client";
 import type { AccountRecord, Eligibility, Payout, PayoutStatus, Wallet } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
@@ -186,8 +187,28 @@ function WalletCard({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+/** A withdrawal method's charge on an amount, as the server takes it: the
+fixed charge plus the percent, rounded up to a whole cent (D-14.25). */
+export function methodCharge(amountCents: number, fixedCents: number, percent: string): number {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(percent.trim());
+  if (m === null) return fixedCents;
+  const decimals = m[2] ?? "";
+  const scale = 10n ** BigInt(decimals.length);
+  const numerator = BigInt(m[1] ?? "0") * scale + BigInt(decimals === "" ? "0" : decimals);
+  const share = BigInt(amountCents) * numerator;
+  const denominator = 100n * scale;
+  return fixedCents + Number((share + denominator - 1n) / denominator);
+}
+
+/** Whether a method takes this amount (a maximum of 0: none). */
+export function methodAllows(m: PayMethod, amountCents: number): boolean {
+  return amountCents >= m.min_cents && (m.max_cents === 0 || amountCents <= m.max_cents);
+}
+
 function AccountPayouts({ account }: { account: AccountRecord }) {
   const api = useApi();
+  const [methods, setMethods] = useState<PayMethod[]>([]);
+  const [chosen, setChosen] = useState<string | null>(null);
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
   const [payouts, setPayouts] = useState<Payout[] | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -199,11 +220,13 @@ function AccountPayouts({ account }: { account: AccountRecord }) {
     Promise.all([
       api.get<Eligibility>(`/accounts/${account.acc}/payout`),
       api.get<Payout[]>(`/accounts/${account.acc}/payouts`),
+      api.get<PayMethod[]>("/payment-methods?kind=withdrawal").catch(() => []),
     ]).then(
-      ([e, p]) => {
+      ([e, p, m]) => {
         if (!alive) return;
         setEligibility(e);
         setPayouts(p);
+        setMethods(m);
       },
       (e: unknown) => {
         if (alive) setError(e);
@@ -235,6 +258,10 @@ function AccountPayouts({ account }: { account: AccountRecord }) {
     return <Card title={title}>{error !== null ? <Problem error={error} /> : <Loading />}</Card>;
   }
   const pending = payouts.some((p) => p.status === "requested" || p.status === "approved");
+  const amount = eligibility.trader_amount_cents;
+  const method = methods.find((m) => m.method_id === chosen) ?? methods[0] ?? null;
+  const charge = method === null ? 0 : methodCharge(amount, method.fixed_charge_cents, method.percent_charge);
+  const fits = method === null || (methodAllows(method, amount) && charge < amount);
   return (
     <Card title={title}>
       <dl className="facts">
@@ -248,9 +275,15 @@ function AccountPayouts({ account }: { account: AccountRecord }) {
             <dd>{formatCents(eligibility.fee_refund_cents)}</dd>
           </>
         )}
+        {method !== null && charge > 0 && (
+          <>
+            <dt>{method.name} charge</dt>
+            <dd>{formatCents(charge)}</dd>
+          </>
+        )}
         <dt>You receive</dt>
         <dd>
-          <strong>{formatCents(eligibility.trader_amount_cents)}</strong>
+          <strong>{formatCents(amount - charge)}</strong>
         </dd>
         {eligibility.opens_at !== null && !eligibility.eligible && (
           <>
@@ -267,12 +300,40 @@ function AccountPayouts({ account }: { account: AccountRecord }) {
         ))}
       </ul>
       {actionError !== null && <Problem error={actionError} />}
+      {eligibility.eligible && !pending && methods.length > 1 && (
+        <fieldset className="segmented" aria-label="Withdrawal method">
+          {methods.map((m) => (
+            <label key={m.method_id} className="segment">
+              <input
+                type="radio"
+                name={`method-${account.acc}`}
+                checked={method?.method_id === m.method_id}
+                onChange={() => {
+                  setChosen(m.method_id);
+                }}
+              />
+              <span>{m.name}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {eligibility.eligible && !pending && !fits && (
+        <Notice>
+          {method.name} takes payouts from {formatCents(method.min_cents)}
+          {method.max_cents > 0 ? ` to ${formatCents(method.max_cents)}` : ""}.
+        </Notice>
+      )}
       {eligibility.eligible && !pending && (
         <Button
           busy={busy}
-          onClick={() => void act(() => api.post<Payout>(`/accounts/${account.acc}/payouts`))}
+          disabled={!fits}
+          onClick={() =>
+            void act(() =>
+              api.post<Payout>(`/accounts/${account.acc}/payouts`, method === null ? undefined : { method: method.method_id }),
+            )
+          }
         >
-          Request payout of {formatCents(eligibility.trader_amount_cents)}
+          Request payout of {formatCents(amount - charge)}
         </Button>
       )}
       {pending && <Notice>A payout of this account is in progress. New orders wait until it is taken out.</Notice>}
@@ -295,7 +356,7 @@ function AccountPayouts({ account }: { account: AccountRecord }) {
               {payouts.map((p) => (
                 <tr key={p.po}>
                   <th scope="row">{p.po}</th>
-                  <td>{formatCents(p.trader_amount_cents)}</td>
+                  <td>{formatCents(p.net_cents ?? p.trader_amount_cents)}</td>
                   <td>
                     {PAYOUT_TEXT[p.status]}
                     {p.failure !== null && ` (${p.failure})`}

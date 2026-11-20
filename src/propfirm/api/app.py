@@ -127,6 +127,7 @@ from propfirm.customers.store import (
     OrderRecord,
     share_of,
 )
+from propfirm.customers.transfers import TransferRefused, Transfers
 from propfirm.journal.inputs import (
     CancelOrder,
     ClosePosition,
@@ -402,6 +403,7 @@ class Deps:
     reserve: Reserve | None = None  # coverage states and moves (D-14.23)
     rails: Rails | None = None  # the rail of each payment method (D-14.24)
     receipts: Receipts | None = None  # manual payments, checked by two (D-14.24)
+    transfers: Transfers | None = None  # payouts sent by hand (D-14.25)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -589,6 +591,18 @@ class ChargebackBody(_Body):
 class ChargebackDecision(_Body):
     outcome: Literal["won", "lost"]
     reason: _Reason
+
+
+class PayoutRequestBody(_Body):
+    """The withdrawal method a payout goes through (D-14.25)."""
+
+    method: Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")] | None = None
+
+
+class TransferBody(_Body):
+    """A payout sent by hand: the transaction that carried it (D-14.25)."""
+
+    tx_ref: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class ReceiptBody(_Body):
@@ -1251,6 +1265,10 @@ def payout_view(p: PayoutRecord) -> dict[str, Any]:
         "paid_at": p.paid_at,
         "provider_ref": p.provider_ref,
         "failure": p.failure,
+        "method_id": p.method_id,
+        "charge_cents": p.charge_cents,
+        "net_cents": p.net_cents,
+        "currency": p.currency,
     }
 
 
@@ -1264,6 +1282,11 @@ PAYOUT_ERRORS = {
     "not_eligible": 409,
     "product": 409,
     "invalid": 422,
+    "unknown_method": 422,  # D-14.25: withdrawal methods at request time
+    "choose_method": 422,
+    "method_unavailable": 409,
+    "outside_limits": 409,
+    "charge_too_high": 409,
 }
 
 
@@ -2163,6 +2186,33 @@ def create_app(
                     "message": "this product is not on sale right now; try again tomorrow",
                 },
             )
+
+    def _transfers(deps: Deps) -> Transfers:
+        if deps.transfers is None:
+            raise HTTPException(status_code=503, detail="manual payouts are not configured")
+        return deps.transfers
+
+    @app.get("/staff/transfers")
+    async def transfers_waiting(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        """Payouts debited and waiting to be sent by hand (D-14.25)."""
+        return await _transfers(deps).waiting()
+
+    @app.post("/staff/payouts/{po}/transfer")
+    async def record_transfer(
+        deps: D,
+        me: SettingsChanger,
+        po: Annotated[str, Path(pattern=r"^PO[0-9]{8}$")],
+        body: TransferBody,
+    ) -> dict[str, Any]:
+        """Record the transaction that sent a payout by hand; it is paid at
+        the next round."""
+        try:
+            return await _transfers(deps).record(po, body.tx_ref, me.subject, deps.clock())
+        except TransferRefused as exc:
+            status = {"unknown": 404}.get(exc.code, 409)
+            raise HTTPException(
+                status_code=status, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
 
     def _receipts(deps: Deps) -> Receipts:
         if deps.receipts is None:
@@ -3215,13 +3265,23 @@ def create_app(
         return eligibility_view(found)
 
     @app.post("/accounts/{account_id}/payouts", status_code=201)
-    async def request_payout(deps: D, me: Trader, account_id: Ident) -> dict[str, Any]:
-        """Ask for the payout the eligibility shows now (MFA login, by policy)."""
+    async def request_payout(
+        deps: D, me: Trader, account_id: Ident, body: PayoutRequestBody | None = None
+    ) -> dict[str, Any]:
+        """Ask for the payout the eligibility shows now (MFA login, by policy),
+        through a withdrawal method when any is offered (D-14.25): its limits
+        are checked and its charge taken now."""
         await _owns(deps, me, account_id)
         cif = await _cif(deps, me)
         try:
             record = await _payouts(deps).request(
-                account_id, cif, me.subject, me.mfa, deps.clock(), me.auth_time
+                account_id,
+                cif,
+                me.subject,
+                me.mfa,
+                deps.clock(),
+                me.auth_time,
+                method=None if body is None else body.method,
             )
         except PayoutRefused as exc:
             raise _payout_refused(exc) from exc

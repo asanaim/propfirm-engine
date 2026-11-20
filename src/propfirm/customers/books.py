@@ -226,8 +226,9 @@ def sweep_entry(row: dict[str, Any], share: Fraction) -> Entry | None:
 
 
 def draw_entry(row: dict[str, Any]) -> Entry:
-    """A paid payout drawn from the reserve back to cash."""
-    amount = int(row["trader_amount_cents"])
+    """A paid payout drawn from the reserve back to cash: what was sent,
+    the trader's amount less the withdrawal method's charge."""
+    amount = int(row["trader_amount_cents"]) - int(row.get("charge_cents") or 0)
     return Entry(
         f"reserve-draw:{row['po']}",
         int(row["paid_at"]),
@@ -274,12 +275,18 @@ def payout_debited_entry(row: dict[str, Any]) -> Entry:
 
 
 def payout_paid_entry(row: dict[str, Any]) -> Entry:
+    """The payable settled: cash for what was sent; the withdrawal method's
+    charge, kept by the firm, lowers the payout cost (D-14.25)."""
     amount = int(row["trader_amount_cents"])
+    charge = int(row.get("charge_cents") or 0)
+    postings = [Posting(PAYOUTS_PAYABLE, amount), Posting(CASH, -(amount - charge))]
+    if charge:
+        postings.append(Posting(PAYOUT_EXPENSE, -charge))
     return Entry(
         f"payout-paid:{row['po']}",
         int(row["paid_at"]),
         "payout_paid",
-        (Posting(PAYOUTS_PAYABLE, amount), Posting(CASH, -amount)),
+        tuple(postings),
         row["po"],
     )
 
@@ -388,7 +395,8 @@ class Books:
             f"WHERE e.entry_id = 'order:' || o.ord) ORDER BY o.paid_at, o.ord"
         )
         payouts = await self._pool.fetch(
-            f"SELECT p.po, p.trader_amount_cents, p.debited_at, p.paid_at, p.status, o.product_id, "
+            f"SELECT p.po, p.trader_amount_cents, p.charge_cents, p.debited_at, p.paid_at, "
+            f"p.status, o.product_id, "
             f"(SELECT e.detail FROM {s}.payout_events e WHERE e.po = p.po AND e.kind = 'requested' "
             f"ORDER BY e.id LIMIT 1) AS requested "
             f"FROM {s}.payouts p JOIN {s}.orders o ON o.ord = p.ord "
@@ -471,7 +479,7 @@ class Books:
             f"WHERE e.entry_id = 'reserve-sweep:' || o.ord) ORDER BY o.paid_at, o.ord"
         )
         paid = await self._pool.fetch(
-            f"SELECT p.po, p.trader_amount_cents, p.paid_at FROM {s}.payouts p "
+            f"SELECT p.po, p.trader_amount_cents, p.charge_cents, p.paid_at FROM {s}.payouts p "
             f"WHERE p.status = 'paid' AND p.paid_at IS NOT NULL "
             f"AND NOT EXISTS (SELECT 1 FROM {s}.ops_entries e "
             f"WHERE e.entry_id = 'reserve-draw:' || p.po) ORDER BY p.paid_at, p.po"
@@ -481,7 +489,7 @@ class Books:
             share = reserve.sweep.get(str(r["product_id"]))
             if share is not None and (e := sweep_entry(dict(r), share)) is not None:
                 out.append(e)
-        out += [draw_entry(dict(r)) for r in paid if int(r["trader_amount_cents"]) > 0]
+        out += [draw_entry(dict(r)) for r in paid]
         moves = await self._pool.fetch(
             f"SELECT m.rsm, m.kind, m.amount_cents, m.decided_at FROM {s}.reserve_moves m "
             f"WHERE m.status = 'approved' AND NOT EXISTS (SELECT 1 FROM {s}.ops_entries e "

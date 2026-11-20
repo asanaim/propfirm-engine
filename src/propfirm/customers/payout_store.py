@@ -50,6 +50,14 @@ class PayoutRecord:
     paid_at: int | None
     provider_ref: str | None
     failure: str | None
+    method_id: str | None = None  # the withdrawal method asked for (D-14.25)
+    charge_cents: int = 0  # the method's charge, taken from the trader's amount
+    currency: str = "USDT"
+
+    @property
+    def net_cents(self) -> int:
+        """What reaches the trader: their amount less the method's charge."""
+        return self.trader_amount_cents - self.charge_cents
 
 
 class PayoutRefused(Exception):
@@ -133,6 +141,8 @@ class PayoutStore:
         debit: int,
         ts: int,
         detail: dict[str, Any],
+        method_id: str | None = None,
+        charge_cents: int = 0,
     ) -> PayoutRecord:
         s = self._s
         async with self._pool.acquire() as conn, conn.transaction():
@@ -147,8 +157,8 @@ class PayoutStore:
             try:
                 await conn.execute(
                     f"INSERT INTO {s}.payouts (po, acc, cif, ord, wal, requested_at, "
-                    f"trader_amount_cents, debit_cents, status) "
-                    f"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested')",
+                    f"trader_amount_cents, debit_cents, status, method_id, charge_cents) "
+                    f"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'requested', $9, $10)",
                     po,
                     acc,
                     cif,
@@ -157,6 +167,8 @@ class PayoutStore:
                     ts,
                     trader_amount,
                     debit,
+                    method_id,
+                    charge_cents,
                 )
             except asyncpg.UniqueViolationError as exc:
                 raise PayoutRefused("pending", "a payout of this account is in progress") from exc

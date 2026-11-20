@@ -48,6 +48,7 @@ from propfirm.customers.referrals import Referrals
 from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore, migrate
+from propfirm.customers.transfers import Transfers, WithdrawalRails
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.market.types import PriceUpdate
 from propfirm.policy import Policy, load_policy
@@ -256,6 +257,7 @@ async def platform(
         cases=cases,
         history=HistoryReader(pool, config.read_schema),
         scaling=scaling,
+        withdrawals=WithdrawalRails(settings, pool, config.customer_schema, sandbox=sandbox),
         wait_s=wait_s,
     )
     staff = Directory(
@@ -296,6 +298,7 @@ async def platform(
         evaluations=evaluations,
         reserve=reserve,
         rails=rails,
+        transfers=Transfers(pool, config.customer_schema),
         receipts=Receipts(pool, config.customer_schema, checkout, rails),
         vault=vault,
         reconciliations=Reconciliations(pool, config.customer_schema),
@@ -569,7 +572,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 26))
+            assert await migrate(conn, schema) == list(range(1, 27))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

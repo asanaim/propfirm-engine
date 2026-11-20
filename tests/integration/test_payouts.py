@@ -8,7 +8,7 @@ from typing import Any
 import asyncpg
 import pytest
 
-from propfirm.customers.providers import PayoutStatus
+from propfirm.customers.providers import PayoutOrder, PayoutStatus
 from propfirm.journal.inputs import VoidAccount
 from propfirm.policy import Policy, load_policy
 from propfirm.rules.products import Stage
@@ -553,12 +553,13 @@ class SlowProvider:
         self.down, self.paid = True, False
         self.sent: list[tuple[str, str, str, int]] = []
 
-    async def send(self, payout: str, network: str, address: str, amount_cents: int) -> str:
+    async def send(self, order: PayoutOrder) -> str:
         if self.down:
             self.down = False
             raise ConnectionError("provider down")
-        self.sent.append((payout, network, address, amount_cents))
-        return f"slow-{payout}"
+        d = order.destination
+        self.sent.append((order.payout, d["network"], d["address"], order.amount_cents))
+        return f"slow-{order.payout}"
 
     async def status(self, ref: str) -> PayoutStatus:
         return PayoutStatus("paid", {"tx": "t1"}) if self.paid else PayoutStatus("pending", {})
