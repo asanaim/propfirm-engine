@@ -235,6 +235,26 @@ class ReferralsPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassesPolicy:
+    """Daily trader classes (D-14.28; strategic review v3, D5). Off when
+    the policy file has no [classes]. A: proven (`a_*` all met); C: watch
+    (any `c_*` met, or a chargeback, or a trades link in an identity
+    cluster); D: restricted (a case actioned within `d_case_days`); B:
+    everyone else."""
+
+    on: bool = False
+    a_min_trading_days: int = 60
+    a_min_trades: int = 200
+    a_min_t_stat: Fraction = Fraction(2)
+    a_min_profit_factor: Fraction = Fraction(13, 10)
+    a_min_paid_payouts: int = 3
+    a_max_short_percent: int = 20
+    c_short_percent: int = 50
+    short_seconds: int = 60
+    d_case_days: int = 90
+
+
+@dataclass(frozen=True, slots=True)
 class ReservePolicy:
     """Payout reserve (D-13.7; D-14.20): at each paid sale `sweep` of the
     price, by product, moves from operating cash to the reserve, and
@@ -350,6 +370,7 @@ class Policy:
     trial: TrialPolicy = field(default_factory=TrialPolicy)
     referrals: ReferralsPolicy = field(default_factory=ReferralsPolicy)
     reserve: ReservePolicy = field(default_factory=ReservePolicy)
+    classes: ClassesPolicy = field(default_factory=ClassesPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -615,6 +636,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
                 _referrals(root.table("referrals")) if root.has("referrals") else ReferralsPolicy()
             ),
             reserve=_reserve(root.table("reserve")) if root.has("reserve") else ReservePolicy(),
+            classes=_classes(root.table("classes")) if root.has("classes") else ClassesPolicy(),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -675,6 +697,27 @@ def _referrals(t: _Table) -> ReferralsPolicy:
     t.done()
     if not 0 < policy.commission < 1:
         raise PolicyError("referrals: commission_percent between 0 and 100")
+    return policy
+
+
+def _classes(t: _Table) -> ClassesPolicy:
+    policy = ClassesPolicy(
+        on=t.boolean("on"),
+        a_min_trading_days=t.integer("a_min_trading_days", 1),
+        a_min_trades=t.integer("a_min_trades", 1),
+        a_min_t_stat=t.ratio("a_min_t_stat"),
+        a_min_profit_factor=t.ratio("a_min_profit_factor"),
+        a_min_paid_payouts=t.integer("a_min_paid_payouts"),
+        a_max_short_percent=t.integer("a_max_short_percent"),
+        c_short_percent=t.integer("c_short_percent", 1),
+        short_seconds=t.integer("short_seconds", 1),
+        d_case_days=t.integer("d_case_days", 1),
+    )
+    t.done()
+    if not 0 <= policy.a_max_short_percent < policy.c_short_percent <= 100:
+        raise PolicyError("classes: 0 <= a_max_short_percent < c_short_percent <= 100")
+    if policy.a_min_profit_factor <= 1 or policy.a_min_t_stat <= 0:
+        raise PolicyError("classes: a_min_profit_factor above 1, a_min_t_stat above 0")
     return policy
 
 

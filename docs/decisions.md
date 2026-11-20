@@ -795,3 +795,35 @@ strategic review v3, D4, as starting values; details taken under D-14.7,
   device fingerprint, and hosted payment pages give it no card or payer
   wallet. Each comes with its source.
 - Read by staff with case work rights (Identity clusters page).
+
+D-14.28, daily trader classes (build plan step 5, line 2; thresholds from
+strategic review v3, D5, as starting values in `[classes]`; decided by the
+owner's rule of 20 Nov 2026, "take the most suitable decision").
+- Built on D-14.5: one record, `account_class_changes`; no second table.
+  The daily job (API loop, once a day) classes every active funded
+  account and records a change only when the class or its reasons
+  change, set by "system", the reason "daily: <reasons>; <measures>".
+- A, proven: 60 trading days, 200 trades, t statistic of daily results
+  above 2, profit factor above 1.3, 3 payouts paid, under 20% of profit
+  from short holds, no case ever actioned. Tested exactly in fractions.
+- C, watch: over 50% of profit from holds under 60 seconds; a chargeback
+  not won; a trades link in an identity cluster (D-14.27).
+- D, restricted: a case on the customer actioned in the last 90 days.
+- B: everyone else, and every account with no record. D wins over C, C
+  over A.
+- A person's decision stands: a class set by staff or by the payout
+  check is changed by the job only to a worse class on a fact newer than
+  it (a chargeback, a cluster link, an actioned case). Short holds carry
+  no date, so they never override staff. The job lifts only classes it
+  set itself.
+- In force now for C and D: every payout reviewed in a case and no
+  scaling (D-14.5, already built); no Instant purchase (403
+  `instant_not_offered`; an evaluation is still sold).
+- Not yet, flagged:
+  - lot caps halved for C and close only for D need an engine input
+    journaled with the risk policy version (line 6);
+  - A's lighter payout review and first place for scaling widen the
+    baseline; they need a second person's approval (D10 of the review);
+  - markout and news window measures need the second price source and
+    the release calendar join.
+- Read by staff with case work rights (Trader classes page).

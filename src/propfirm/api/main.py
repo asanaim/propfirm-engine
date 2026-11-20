@@ -50,6 +50,7 @@ from propfirm.customers.books import Books
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.classes import Classes
 from propfirm.customers.clusters import Clusters
 from propfirm.customers.corrections import Corrections
 from propfirm.customers.directory import Reports, TraderDirectory
@@ -176,6 +177,7 @@ async def _lifecycle_forever(
     books: Books | None = None,
     reserve: Reserve | None = None,
     clusters: Clusters | None = None,
+    classes: Classes | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -202,6 +204,11 @@ async def _lifecycle_forever(
                 await clusters.link(now_ms())
             except Exception:
                 log.exception("cluster linking failed")
+        if classes is not None:
+            try:  # classes every funded account, once a day (D-14.28)
+                await classes.run(now_ms())
+            except Exception:
+                log.exception("trader classes failed")
         frozen = False
         if reserve is not None:
             try:  # records each change of the coverage state, at most a minute apart
@@ -388,6 +395,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         referrals = Referrals(pool, config.customer_schema, settings)
         books = Books(pool, config.customer_schema, settings)
         clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
+        daily_classes = Classes(
+            pool, config.customer_schema, config.read_schema, settings, live, customers
+        )
         payouts = None
         withdrawals = WithdrawalRails(
             settings, pool, config.customer_schema, sandbox=config.sandbox
@@ -462,6 +472,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     books,
                     reserve,
                     clusters,
+                    daily_classes,
                 )
             )
         )
@@ -486,6 +497,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             rails=rails,
             transfers=Transfers(pool, config.customer_schema),
             clusters=clusters,
+            daily_classes=daily_classes,
             receipts=None
             if checkout is None
             else Receipts(pool, config.customer_schema, checkout, rails),

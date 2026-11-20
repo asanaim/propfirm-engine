@@ -714,3 +714,19 @@ red_below = "1.1"
 breach_below = "1.0"
 release_above = "1.3"          # cash above this times R* may return monthly
 sweep_percent = { lite = "72", one-step = "66", instant = "27" }
+
+[classes]
+# Daily trader classes (D-14.28; strategic review v3, D5): starting values
+# to tune on free-trial data. A: proven; B: standard; C: watch (no scaling,
+# no Instant purchase, every payout reviewed in a case); D: restricted (a
+# case actioned in the last d_case_days).
+on = true
+a_min_trading_days = 60
+a_min_trades = 200
+a_min_t_stat = "2.0"           # mean daily result over its standard error
+a_min_profit_factor = "1.3"    # gross profit over gross loss
+a_min_paid_payouts = 3
+a_max_short_percent = 20       # A: under this share of profit from short holds
+c_short_percent = 50           # C: over this share of profit from short holds
+short_seconds = 60             # a short hold: closed by the trader within this
+d_case_days = 90
