@@ -12,7 +12,7 @@ describe("withdrawal methods at request time (D-14.25)", () => {
   });
 
   it("checks the method's limits, a maximum of 0 being none", () => {
-    const m = { method_id: "usdt", name: "USDT", min_cents: 1_000, max_cents: 0, fixed_charge_cents: 0, percent_charge: "0", instructions: "" } as PayMethod;
+    const m: PayMethod = { method_id: "usdt", name: "USDT", min_cents: 1_000, max_cents: 0, fixed_charge_cents: 0, percent_charge: "0", instructions: "" };
     expect(methodAllows(m, 999)).toBe(false);
     expect(methodAllows(m, 10 ** 9)).toBe(true);
     expect(methodAllows({ ...m, max_cents: 5_000 }, 5_001)).toBe(false);
