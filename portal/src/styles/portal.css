@@ -347,10 +347,19 @@ main:focus {
   gap: var(--space-5);
 }
 
-/* the challenges side by side: up to four in a row on a laptop, centred; two on a tablet */
+/* the challenges: one per row on a wide screen (below), two on a tablet,
+   one on a phone; the shop takes more of a wide screen than other pages */
+main:has(.page.shop) {
+  max-width: 1440px;
+}
+
 .grid.products {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
+}
+
+.product-detail > .product-addons {
+  margin: var(--space-4) 0;
 }
 
 @media (min-width: 640px) {
@@ -360,15 +369,73 @@ main:focus {
 }
 
 @media (min-width: 1100px) {
-  /* a quarter of the row each; with fewer than four on sale (a product
-     switched off) the empty tracks collapse and the row sits in the middle */
+  /* one product per row, the full width (owner, 19 Nov: the narrow cards
+     ran long while the screen stood empty): what to choose and the buy
+     button on the left, the stages side by side on the right */
   .grid.products {
-    grid-template-columns: repeat(auto-fit, calc((100% - 3 * var(--space-4)) / 4));
-    justify-content: center;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .products .card {
-    padding: var(--space-5);
+  .grid.products .card {
+    display: grid;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    grid-template-areas:
+      "title detail"
+      "choose detail"
+      "actions detail";
+    grid-template-rows: auto 1fr auto;
+    column-gap: var(--space-6);
+    padding: var(--space-5) var(--space-6);
+  }
+
+  .grid.products .card > .card-title {
+    grid-area: title;
+  }
+
+  .grid.products .card > .product-choose {
+    grid-area: choose;
+  }
+
+  .grid.products .card > .card-actions {
+    grid-area: actions;
+    align-self: end;
+  }
+
+  /* the rules and, straight under them, the add-ons */
+  .grid.products .card > .product-detail {
+    grid-area: detail;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    border-left: 1px solid var(--border);
+    padding-left: var(--space-6);
+  }
+
+  .product-detail > .stages {
+    border-top: 0;
+    padding-top: 0;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); /* a lone stage keeps a column width */
+    gap: var(--space-5);
+  }
+
+  /* the add-ons in one row */
+  .product-detail > .product-addons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    margin: 0;
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border);
+  }
+
+  .product-detail > .product-addons legend {
+    float: left; /* a fieldset legend joins the flex row only when floated */
+    width: 100%;
+    margin-bottom: var(--space-1);
+  }
+
+  .product-detail > .product-addons .addon {
+    flex: 1 1 220px;
   }
 
   .products .facts {
@@ -1659,7 +1726,7 @@ the headline (left) and toward the next section (bottom) */
 
 .curve {
   position: relative;
-  margin: var(--space-4) 0 0;
+  margin: var(--space-4) 0;
   height: clamp(180px, 22vw, 260px);
 }
 
