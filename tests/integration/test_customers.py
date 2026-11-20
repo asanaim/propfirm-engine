@@ -40,6 +40,7 @@ from propfirm.customers.providers import (
     SandboxPayouts,
     SandboxScreener,
 )
+from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
 from propfirm.customers.reserve import Evaluations
 from propfirm.customers.scaling import Scaling
@@ -258,6 +259,7 @@ async def platform(
         books=books,
         liabilities=Liabilities(pool, config.customer_schema, payouts, live),
         evaluations=Evaluations(pool, config.customer_schema, live),
+        reconciliations=Reconciliations(pool, config.customer_schema),
         classes=store,
         scaling=scaling,
         corrections=Corrections(
@@ -524,7 +526,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 22))
+            assert await migrate(conn, schema) == list(range(1, 23))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

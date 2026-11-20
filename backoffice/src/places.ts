@@ -45,6 +45,7 @@ export const PLACES: readonly Place[] = [
   { group: "finance", screen: "progressions", label: "Scaling", path: "/scaling", icon: "scaling", keywords: "scale allocation step grow account size" },
   { group: "finance", screen: "settings", label: "Coupons", path: "/coupons", icon: "coupons", keywords: "discount code coupon promo voucher" },
   { group: "finance", screen: "settings", label: "Liabilities", path: "/liabilities", icon: "liabilities", keywords: "liability obligations payouts owed exposure claim reserve coverage sweep" },
+  { group: "finance", screen: "settings", label: "Reconciliation", path: "/reconciliation", icon: "reconciliation", keywords: "reconcile statement processor settlement match unmatched missing csv" },
   { group: "finance", screen: "settings", label: "Books", path: "/books", icon: "books", keywords: "ledger accounting trial balance expense income bookkeeping" },
   { group: "finance", screen: "settings", label: "Referrals", path: "/referrals", icon: "referrals", keywords: "referral affiliate commission clawback ledger" },
   { group: "finance", screen: "payouts", label: "Payouts", path: "/payouts", icon: "payouts", keywords: "withdrawals transactions money paid" },

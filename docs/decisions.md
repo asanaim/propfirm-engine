@@ -601,3 +601,29 @@ back office accepted a trader's login and the portal a staff login;
   realm for staff, so the two user lists and sessions share nothing.
   It needs a running Keycloak to build and test, which this workspace
   lacks; the binding above already closes the hole at the API.
+
+D-14.21, reconciliation (build plan step 3, line 6; details taken under
+D-14.7, 20 Nov 2026). A processor's statement matched line by line to the
+firm's records.
+- Input: a CSV uploaded by staff with the settings change right, for one
+  provider and one period, saying whether it covers money in (sales),
+  money out (payouts) or both. Columns: date (ISO 8601 with a zone),
+  reference, direction, amount, currency, optional fee. Amounts are
+  dollars with at most two decimals, never rounded. One neutral format,
+  not each processor's own: no processor is contracted yet (step 4), and
+  its export columns would be guesses. A converter per processor comes
+  with its adapter.
+- Refused whole, with the line numbers, when any line is bad (outside the
+  period, a direction not covered, a third decimal, no time zone). The
+  same file twice for one provider is refused.
+- Each line gets one status: matched, amount differs, not settled,
+  unmatched, repeated. Money in matches an order by its provider and
+  provider reference; money out a payout by its provider reference.
+  Missing: paid orders of the provider and paid payouts in the period
+  that the statement leaves out.
+- Stored append-only (`recon_runs`, `recon_lines`, migration 22); to
+  match again, upload again. Read by the settings view right.
+- Amounts are compared in cents as written, whatever the currency; a USDT
+  line is compared at par with the dollar record [A]. Fees are shown per
+  statement; posting them as processor fees stays a staff expense entry
+  (D-14.16) until the adapters report fees.

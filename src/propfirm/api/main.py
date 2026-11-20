@@ -73,6 +73,7 @@ from propfirm.customers.providers import (
     SandboxScreener,
     Screener,
 )
+from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
 from propfirm.customers.reserve import Evaluations
 from propfirm.customers.scaling import Scaling
@@ -428,6 +429,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 else Liabilities(pool, config.customer_schema, payouts, live)
             ),
             evaluations=Evaluations(pool, config.customer_schema, live),
+            reconciliations=Reconciliations(pool, config.customer_schema),
             classes=customers,
             scaling=scaling,
             corrections=Corrections(

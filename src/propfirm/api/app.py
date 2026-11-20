@@ -104,6 +104,7 @@ from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
 from propfirm.customers.payouts import Eligibility, eligibility_json
 from propfirm.customers.pricing import discount_floor, price
+from propfirm.customers.reconciliation import Reconciliations, StatementRefused
 from propfirm.customers.referrals import ReferralRefused, Referrals
 from propfirm.customers.reserve import Evaluations, coverage, k_text
 from propfirm.customers.scaling import Scaling, ScalingRefused
@@ -383,6 +384,7 @@ class Deps:
     app_clients: AppClients | None = None  # token-to-app binding (D-14.19); None: off
     liabilities: Liabilities | None = None  # the liability desk (D-14.18)
     evaluations: Evaluations | None = None  # reserve coverage: evaluations (D-14.20)
+    reconciliations: Reconciliations | None = None  # processor statements (D-14.21)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -507,6 +509,17 @@ class RegisterBody(_Body):
     residence_country: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
     # a referrer's code (D-14.15); a refused one does not stop registration
     ref: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9]{8}$")] | None = None
+
+
+class StatementBody(_Body):
+    """A processor statement to reconcile (D-14.21), CSV text."""
+
+    provider: Annotated[str, StringConstraints(min_length=1, max_length=40)]
+    covers: Literal["in", "out", "both"]
+    period_from: StrictInt = Field(ge=0)
+    period_to: StrictInt = Field(ge=0)
+    filename: Annotated[str, StringConstraints(max_length=200)] = ""
+    csv: Annotated[str, StringConstraints(min_length=1, max_length=1_000_000)]
 
 
 class ExpenseBody(_Body):
@@ -2030,6 +2043,50 @@ def create_app(
     @app.get("/staff/books/expenses")
     async def book_expenses(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
         return await _books(deps).expenses()
+
+    def _recon(deps: Deps) -> Reconciliations:
+        if deps.reconciliations is None:
+            raise HTTPException(status_code=503, detail="reconciliation is not configured")
+        return deps.reconciliations
+
+    def _statement_refused(exc: StatementRefused) -> HTTPException:
+        status = {"unknown": 404, "duplicate": 409}.get(exc.code, 422)
+        message = str(exc) + (": " + "; ".join(exc.problems) if exc.problems else "")
+        detail = {"code": exc.code, "message": message, "problems": list(exc.problems)}
+        return HTTPException(status_code=status, detail=detail)
+
+    @app.post("/staff/reconciliations", status_code=201)
+    async def upload_statement(deps: D, me: SettingsChanger, body: StatementBody) -> dict[str, Any]:
+        """Match a processor statement to orders and payouts (D-14.21);
+        refused whole if any line is bad."""
+        try:
+            return await _recon(deps).upload(
+                body.provider,
+                body.covers,
+                body.period_from,
+                body.period_to,
+                body.filename,
+                body.csv,
+                me.subject,
+                deps.clock(),
+            )
+        except StatementRefused as exc:
+            raise _statement_refused(exc) from exc
+
+    @app.get("/staff/reconciliations")
+    async def statement_runs(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        return await _recon(deps).runs()
+
+    @app.get("/staff/reconciliations/{run}")
+    async def statement_run(
+        deps: D,
+        me: SettingsReader,
+        run: Annotated[str, Path(pattern=r"^REC[0-9]{8}$")],
+    ) -> dict[str, Any]:
+        try:
+            return await _recon(deps).detail(run)
+        except StatementRefused as exc:
+            raise _statement_refused(exc) from exc
 
     @app.post("/staff/books/expenses", status_code=201)
     async def propose_expense(deps: D, me: SettingsChanger, body: ExpenseBody) -> dict[str, Any]:

@@ -776,6 +776,48 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        22,
+        """
+        -- reconciliation (build plan step 3, line 6; D-14.21): a processor
+        -- statement as uploaded, one row per line, matched to an order (money
+        -- in) or a payout (money out) when it is read; append-only, a new
+        -- upload is a new run
+        CREATE SEQUENCE {s}.rec_seq;
+        CREATE TABLE {s}.recon_runs (
+            run text PRIMARY KEY,
+            provider text NOT NULL,
+            covers text NOT NULL CHECK (covers IN ('in', 'out', 'both')),
+            period_from bigint NOT NULL,
+            period_to bigint NOT NULL CHECK (period_to > period_from),
+            filename text NOT NULL,
+            sha256 text NOT NULL,
+            uploaded_by text NOT NULL,
+            uploaded_at bigint NOT NULL,
+            UNIQUE (provider, sha256)
+        );
+        CREATE TABLE {s}.recon_lines (
+            run text NOT NULL REFERENCES {s}.recon_runs (run),
+            line integer NOT NULL,
+            occurred_at bigint NOT NULL,
+            reference text NOT NULL,
+            direction text NOT NULL CHECK (direction IN ('in', 'out')),
+            amount_cents bigint NOT NULL CHECK (amount_cents > 0),
+            fee_cents bigint NOT NULL CHECK (fee_cents >= 0),
+            currency text NOT NULL,
+            status text NOT NULL CHECK (status IN ('matched', 'amount_differs',
+                'not_settled', 'unmatched', 'repeated')),
+            record text,
+            expected_cents bigint,
+            PRIMARY KEY (run, line)
+        );
+        CREATE INDEX ON {s}.recon_lines (reference);
+        CREATE TRIGGER recon_runs_append_only BEFORE UPDATE OR DELETE ON {s}.recon_runs
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER recon_lines_append_only BEFORE UPDATE OR DELETE ON {s}.recon_lines
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 
