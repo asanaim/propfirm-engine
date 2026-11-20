@@ -55,6 +55,7 @@ export const PLACES: readonly Place[] = [
   { group: "finance", screen: "transactions", label: "Transactions and emails", path: "/transactions", icon: "transactions", keywords: "transaction log purchases payouts money export csv email log reports" },
   { group: "finance", screen: "methods", label: "Payment methods", path: "/payment-methods", icon: "methods", keywords: "gateways deposits withdrawal methods charges" },
   { group: "risk", screen: "news", label: "News desk", path: "/news", icon: "news", keywords: "calendar economic events impact" },
+  { group: "risk", screen: "cases", label: "Identity clusters", path: "/clusters", icon: "clusters", keywords: "cluster linked multi accounting same person wallet identity copy trading" },
   { group: "risk", screen: "cases", label: "Price corrections", path: "/corrections", icon: "corrections", keywords: "bad price spike tick reverse reinstate breach correction" },
   { group: "risk", screen: "anomalies", label: "Anomaly report", path: "/anomalies", icon: "anomalies", keywords: "anomalies report unusual" },
   { group: "risk", screen: "audit", label: "Security log", path: "/audit", icon: "audit", keywords: "audit trail log entries" },

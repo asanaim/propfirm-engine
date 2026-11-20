@@ -23,6 +23,7 @@ from propfirm.customers.books import Books
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.clusters import Clusters
 from propfirm.customers.corrections import Corrections
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.disputes import Disputes
@@ -121,6 +122,7 @@ class Platform:
     referrals: Referrals | None = None  # the referral ledger (D-14.15)
     books: Books | None = None  # the operator ledger (D-14.16)
     reserve: Reserve | None = None  # coverage states and moves (D-14.23)
+    clusters: Clusters | None = None  # identity clusters (D-14.27)
 
     async def call(
         self,
@@ -268,7 +270,8 @@ async def platform(
     )
     await staff.bootstrap(clock())
     desk = StaffDesk(pool, config.staff_schema, load_duties())
-    liabilities = Liabilities(pool, config.customer_schema, payouts, live)
+    clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
+    liabilities = Liabilities(pool, config.customer_schema, payouts, live, clusters)
     evaluations = Evaluations(pool, config.customer_schema, live)
     reserve = Reserve(pool, config.customer_schema, settings, books, liabilities, evaluations, desk)
     reserve_box.append(reserve)
@@ -299,6 +302,7 @@ async def platform(
         reserve=reserve,
         rails=rails,
         transfers=Transfers(pool, config.customer_schema),
+        clusters=clusters,
         receipts=Receipts(pool, config.customer_schema, checkout, rails),
         vault=vault,
         reconciliations=Reconciliations(pool, config.customer_schema),
@@ -385,6 +389,7 @@ async def platform(
             scaling=scaling,
             referrals=referrals,
             reserve=reserve,
+            clusters=clusters,
             books=books,
         )
     finally:
@@ -572,7 +577,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 28))
+            assert await migrate(conn, schema) == list(range(1, 29))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

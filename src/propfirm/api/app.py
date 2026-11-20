@@ -82,6 +82,7 @@ from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
+from propfirm.customers.clusters import Clusters
 from propfirm.customers.corrections import CorrectionRefused, Corrections
 from propfirm.customers.directory import (
     SEGMENTS,
@@ -405,6 +406,7 @@ class Deps:
     rails: Rails | None = None  # the rail of each payment method (D-14.24)
     receipts: Receipts | None = None  # manual payments, checked by two (D-14.24)
     transfers: Transfers | None = None  # payouts sent by hand (D-14.25)
+    clusters: Clusters | None = None  # identity clusters (D-14.27)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -2195,6 +2197,25 @@ def create_app(
                     "message": "this product is not on sale right now; try again tomorrow",
                 },
             )
+
+    def _clusters(deps: Deps) -> Clusters:
+        if deps.clusters is None:
+            raise HTTPException(status_code=503, detail="clusters are not configured")
+        return deps.clusters
+
+    @app.get("/staff/clusters")
+    async def cluster_list(deps: D, me: CaseWorker) -> list[dict[str, Any]]:
+        """Customers linked as one person (D-14.27), largest first."""
+        return await _clusters(deps).clusters()
+
+    @app.get("/staff/customers/{cif}/cluster")
+    async def customer_cluster(
+        deps: D, me: CaseWorker, cif: Annotated[str, Path(pattern=r"^CIF[0-9]{8}$")]
+    ) -> dict[str, Any]:
+        found = await _clusters(deps).cluster_of(cif)
+        if found is None:
+            return {"cluster": None, "members": [cif], "links": []}
+        return found
 
     def _transfers(deps: Deps) -> Transfers:
         if deps.transfers is None:

@@ -50,6 +50,7 @@ from propfirm.customers.books import Books
 from propfirm.customers.cases_store import CaseStore
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
+from propfirm.customers.clusters import Clusters
 from propfirm.customers.corrections import Corrections
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.disputes import Disputes
@@ -174,6 +175,7 @@ async def _lifecycle_forever(
     referrals: Referrals | None = None,
     books: Books | None = None,
     reserve: Reserve | None = None,
+    clusters: Clusters | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -195,6 +197,11 @@ async def _lifecycle_forever(
                 await payouts.advance(now_ms())  # each payout's next step, recorded first
             except Exception:  # retried next round
                 log.exception("payout round failed")
+        if clusters is not None:
+            try:  # links customers as one person, at most hourly (D-14.27)
+                await clusters.link(now_ms())
+            except Exception:
+                log.exception("cluster linking failed")
         frozen = False
         if reserve is not None:
             try:  # records each change of the coverage state, at most a minute apart
@@ -380,6 +387,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         trials = Trials(customers, settings, live, gateway)
         referrals = Referrals(pool, config.customer_schema, settings)
         books = Books(pool, config.customer_schema, settings)
+        clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
         payouts = None
         withdrawals = WithdrawalRails(
             settings, pool, config.customer_schema, sandbox=config.sandbox
@@ -400,7 +408,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 withdrawals=withdrawals,
             )
         liabilities = (
-            None if payouts is None else Liabilities(pool, config.customer_schema, payouts, live)
+            None
+            if payouts is None
+            else Liabilities(pool, config.customer_schema, payouts, live, clusters)
         )
         evaluations = Evaluations(pool, config.customer_schema, live)
         reserve = (
@@ -451,6 +461,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     referrals,
                     books,
                     reserve,
+                    clusters,
                 )
             )
         )
@@ -474,6 +485,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             reserve=reserve,
             rails=rails,
             transfers=Transfers(pool, config.customer_schema),
+            clusters=clusters,
             receipts=None
             if checkout is None
             else Receipts(pool, config.customer_schema, checkout, rails),

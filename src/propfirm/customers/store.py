@@ -956,6 +956,25 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        28,
+        """
+        -- identity clusters (build plan step 5, line 1; D-14.27): a link
+        -- between two customers and why; derived from the records and
+        -- rebuildable, so a link's evidence and last sighting are updated
+        CREATE TABLE {s}.cluster_links (
+            a_cif text NOT NULL REFERENCES {s}.cif (cif),
+            b_cif text NOT NULL REFERENCES {s}.cif (cif),
+            reason text NOT NULL CHECK (reason IN ('identity', 'wallet', 'trades')),
+            evidence jsonb NOT NULL,
+            first_seen bigint NOT NULL,
+            last_seen bigint NOT NULL,
+            PRIMARY KEY (a_cif, b_cif, reason),
+            CHECK (a_cif < b_cif)
+        );
+        CREATE INDEX ON {s}.cluster_links (b_cif);
+        """,
+    ),
 )
 
 

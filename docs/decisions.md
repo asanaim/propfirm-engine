@@ -771,3 +771,27 @@ on TRC-20).
   closed later takes no new wallets; wallets on it are still paid.
 - Another network (Solana, a second coin) is code: its address check and
   its name in `customers.networks`, then the switch.
+
+D-14.27, identity clusters (build plan step 5, line 1; thresholds from
+strategic review v3, D4, as starting values; details taken under D-14.7,
+20 Nov 2026).
+- Links between two customers, each with its evidence, looked for at
+  most hourly by the API loop:
+  - identity: the duplicate identity alert raised at funding (same date
+    of birth and name as another verified customer);
+  - wallet: the same payout address on the same network (EVM addresses
+    compared without case); a new link raises a medium fraud alert on
+    both customers, which opens a case and holds their payouts until
+    staff decide;
+  - trades: at least 5 positions opened within 2 seconds of one another
+    on the same symbol, either side, in the last 30 days.
+- A cluster is the connected set; its id is its lowest CIF, so the same
+  links always give the same clusters. Links are derived and
+  rebuildable, so a link's evidence and last sighting are updated.
+- Used now: the reserve's largest claim of one trader (D-14.20) sums a
+  cluster. Next: the allocation cap and the Instant limit (D2 of the
+  review), and the detectors (line 3) read clusters.
+- Not yet: device and payment instrument links. The platform keeps no
+  device fingerprint, and hosted payment pages give it no card or payer
+  wallet. Each comes with its source.
+- Read by staff with case work rights (Identity clusters page).

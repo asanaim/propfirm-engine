@@ -18,6 +18,7 @@ Read on demand; nothing is stored. Amounts in cents.
 """
 
 import logging
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Protocol
@@ -66,6 +67,20 @@ def open_profit_cents(
     return -(-extra * share.numerator // share.denominator)
 
 
+def largest_trader(claims: Iterable[Claim], cluster: Mapping[str, str]) -> int:
+    """The most one trader could claim now: claims summed by customer, and
+    by identity cluster where a customer is in one (D-14.27)."""
+    totals: dict[str, int] = {}
+    for c in claims:
+        who = cluster.get(c.cif, c.cif)
+        totals[who] = totals.get(who, 0) + c.total_cents
+    return max(totals.values(), default=0)
+
+
+class ClusterMap(Protocol):
+    async def map(self) -> dict[str, str]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class Desk:
     as_of: int
@@ -79,7 +94,7 @@ class Desk:
     claims: tuple[Claim, ...]  # largest first
     unread: tuple[str, ...]  # funded accounts whose expected claim could not be read
     open_profit_cents: int = 0  # contingent: profit in open positions
-    largest_customer_cents: int = 0  # the most one customer could claim now
+    largest_customer_cents: int = 0  # the most one customer (or identity cluster) could claim now
 
     @property
     def total_cents(self) -> int:
@@ -93,11 +108,13 @@ class Liabilities:
         schema: str,
         payouts: Eligibilities,
         live: LiveAccounts,
+        clusters: ClusterMap | None = None,
     ) -> None:
         self._pool = pool
         self._s = schema
         self._payouts = payouts
         self._live = live
+        self._clusters = clusters  # D-14.27: one trader per identity cluster
 
     async def desk(self, now: int, top: int = 20) -> Desk:
         s = self._s
@@ -172,9 +189,7 @@ class Liabilities:
             key=lambda c: (-c.total_cents, c.acc),
         )
         payouts_certain = sum(certain.values())
-        by_customer: dict[str, int] = {}
-        for c in claims:
-            by_customer[c.cif] = by_customer.get(c.cif, 0) + c.total_cents
+        cluster = {} if self._clusters is None else await self._clusters.map()
         return Desk(
             as_of=now,
             certain_cents=payouts_certain + int(commissions),
@@ -187,5 +202,5 @@ class Liabilities:
             claims=tuple(claims[:top]),
             unread=tuple(unread),
             open_profit_cents=sum(floating.values()),
-            largest_customer_cents=max(by_customer.values(), default=0),
+            largest_customer_cents=largest_trader(claims, cluster),
         )
