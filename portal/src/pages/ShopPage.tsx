@@ -88,54 +88,58 @@ function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size:
         </Button>
       }
     >
-      <p className="split">{product.profit_split_percent} % profit split</p>
-      {ladderText(product) === null ? null : <p className="split-ladder muted">{ladderText(product)}</p>}
-      {product.retake_discount_percent ? (
-        <p className="muted">After a breach: one retake of the same size at {product.retake_discount_percent} % off.</p>
-      ) : null}
-      {product.fee_refund_with_payout !== null && (
-        <p className="muted">Fee refunded with your {ordinal(product.fee_refund_with_payout)} payout.</p>
-      )}
-      <fieldset className="segmented">
-        <legend>Account size</legend>
-        {product.sizes.map((s) => (
-          <label key={s.size_cents} className="segment">
-            <input
-              type="radio"
-              name={id}
-              value={s.size_cents}
-              checked={s.size_cents === size}
-              onChange={() => {
-                setSize(s.size_cents);
-              }}
-            />
-            <span>{formatSize(s.size_cents)}</span>
-          </label>
-        ))}
-      </fieldset>
-      {offered.length > 0 ? (
-        <fieldset className="addons">
-          <legend>Add-ons</legend>
-          {offered.map((a) => (
-            <label key={a.id} className="addon">
+      <div className="product-choose">
+        <p className="split">{product.profit_split_percent} % profit split</p>
+        {ladderText(product) === null ? null : <p className="split-ladder muted">{ladderText(product)}</p>}
+        {product.retake_discount_percent ? (
+          <p className="muted">After a breach: one retake of the same size at {product.retake_discount_percent} % off.</p>
+        ) : null}
+        {product.fee_refund_with_payout !== null && (
+          <p className="muted">Fee refunded with your {ordinal(product.fee_refund_with_payout)} payout.</p>
+        )}
+        <fieldset className="segmented">
+          <legend>Account size</legend>
+          {product.sizes.map((s) => (
+            <label key={s.size_cents} className="segment">
               <input
-                type="checkbox"
-                checked={chosen.includes(a.id)}
-                onChange={(e) => {
-                  setChosen(e.target.checked ? [...chosen, a.id] : chosen.filter((c) => c !== a.id));
+                type="radio"
+                name={id}
+                value={s.size_cents}
+                checked={s.size_cents === size}
+                onChange={() => {
+                  setSize(s.size_cents);
                 }}
               />
-              <span>
-                {ADDON_TEXT[a.id] ?? a.id} <span className="muted">+{a.price_percent} %</span>
-              </span>
+              <span>{formatSize(s.size_cents)}</span>
             </label>
           ))}
         </fieldset>
-      ) : null}
-      <div className="stages">
-        {product.stages.map((stage) => (
-          <StageRules key={stage.rsv_id} stage={stage} />
-        ))}
+      </div>
+      <div className="product-detail">
+        <div className="stages">
+          {product.stages.map((stage) => (
+            <StageRules key={stage.rsv_id} stage={stage} />
+          ))}
+        </div>
+        {offered.length > 0 ? (
+          <fieldset className="addons product-addons">
+            <legend>Add-ons</legend>
+            {offered.map((a) => (
+              <label key={a.id} className="addon">
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(a.id)}
+                  onChange={(e) => {
+                    setChosen(e.target.checked ? [...chosen, a.id] : chosen.filter((c) => c !== a.id));
+                  }}
+                />
+                <span>
+                  {ADDON_TEXT[a.id] ?? a.id} <span className="muted">+{a.price_percent} %</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
       </div>
     </Card>
   );
@@ -246,7 +250,7 @@ export function ShopPage() {
   };
 
   return (
-    <div className="page">
+    <div className="page shop">
       <h1>Challenges</h1>
       <p className="lead">Pass the evaluation, then trade a funded account and keep most of the profit.</p>
       {error !== null && <Problem error={error} />}
