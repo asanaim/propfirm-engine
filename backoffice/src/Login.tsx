@@ -6,6 +6,7 @@ import { Terrain } from "./components/Terrain";
 /** The terrain rests this long after the pointer last moved (it holds its
 last frame; a screen left open costs no drawing). */
 const REST_MS = 3_000;
+import { refusedSignIn } from "./auth";
 import { config } from "./config";
 import { useThemeMark } from "./Layout";
 import { useTilt } from "./motion";
@@ -35,6 +36,11 @@ export function Login() {
         <Typography color="text.secondary" sx={{ mb: 3 }}>
           Staff only. Sign in with your password and your authenticator app.
         </Typography>
+        {refusedSignIn() !== null ? (
+          <Typography role="alert" color="error" sx={{ mb: 2 }}>
+            That sign-in is not a staff login, so it was signed out here. Traders sign in at the trader portal.
+          </Typography>
+        ) : null}
         <Button variant="contained" size="large" fullWidth onClick={() => void login({})}>
           Sign in
         </Button>

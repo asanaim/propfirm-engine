@@ -68,6 +68,10 @@ class ServiceConfig:
     oidc_issuer: str = ""  # e.g. http://localhost:8080/realms/propfirm (API only)
     oidc_jwks_url: str = ""  # where the API fetches the realm's signing keys
     oidc_audience: str = "propfirm-api"
+    # D-14.19: the OIDC clients (token `azp`) of each app; `dev-cli` is a
+    # development client the production realm does not have
+    oidc_portal_clients: tuple[str, ...] = ("portal", "dev-cli")
+    oidc_office_clients: tuple[str, ...] = ("backoffice", "dev-cli")
     sandbox: bool = False  # sandbox payments and screening; never in production
     country_header: str | None = None  # header a trusted proxy sets with the IP country
     client_ip_header: str | None = None  # header a trusted proxy sets with the client's address
@@ -215,6 +219,8 @@ class ServiceConfig:
             oidc_issuer=text("OIDC_ISSUER", ""),
             oidc_jwks_url=text("OIDC_JWKS_URL", ""),
             oidc_audience=text("OIDC_AUDIENCE", "propfirm-api"),
+            oidc_portal_clients=_clients(env.get("OIDC_PORTAL_CLIENTS", "portal,dev-cli")),
+            oidc_office_clients=_clients(env.get("OIDC_OFFICE_CLIENTS", "backoffice,dev-cli")),
             sandbox=sandbox == "1",
             country_header=env.get("PROPFIRM_COUNTRY_HEADER") or None,
             client_ip_header=env.get("PROPFIRM_CLIENT_IP_HEADER") or None,
@@ -233,3 +239,11 @@ class ServiceConfig:
             block_ms=number("PROPFIRM_BLOCK_MS", 1_000),
             publish_ms=number("PROPFIRM_PUBLISH_MS", 250),
         )
+
+
+def _clients(text: str) -> tuple[str, ...]:
+    """A comma list of OIDC client ids; at least one."""
+    found = tuple(c.strip() for c in text.split(",") if c.strip())
+    if not found:
+        raise ValueError("an app needs at least one OIDC client")
+    return found
