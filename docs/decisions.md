@@ -689,3 +689,38 @@ review v3, D3).
 - Not built: class C payouts reviewed by hand in amber (trader classes
   come in step 5); a generated repricing proposal (the alert names the
   product; the price change goes through the settings proposals as now).
+
+D-14.24, payment rails (build plan step 4, lines 1 and 3; details taken
+under D-14.7, 20 Nov 2026; vendors from the functional outline: USDT on
+TRC-20 through NOWPayments, no cards until a prop-specialist processor
+at expansion).
+- Interface: a rail creates an invoice on the provider's hosted page (no
+  card or wallet data reaches pipridge) and reads the provider's signed
+  notices as one event: paid, refunded, disputed, or nothing. Each
+  payment method names its rail and holds its secrets (AC13, AC14), so
+  the method is the switch in the back office. An order records its
+  method as its provider; webhooks arrive at
+  `/webhooks/payments/<method>`.
+- Paid opens the account once, however often the notice comes, and only
+  for the order's exact price; another amount opens nothing and alerts
+  finance. A dispute is recorded as a chargeback at once (D-14.22). A
+  refund reported by the provider alerts finance to record it; refunds
+  are not sent through the rails (NOWPayments has no refund call).
+- NOWPayments: invoices in USD, paid in `usdttrc20` only (the 1%
+  single-currency fee, vendor-stated, not the 1.5% multi-currency one);
+  notices checked by HMAC-SHA512 over the key-sorted JSON, as JavaScript
+  writes it (checked against Node), compared in constant time; only
+  `finished` is money received. Its sandbox API is used when
+  PROPFIRM_SANDBOX=1. Not yet proven against the vendor's sandbox: that
+  needs the operator's account (C6) and network access this workspace
+  does not have.
+- Manual (bank transfer or any payment checked by hand): the order shows
+  the method's instructions and its own number as the reference; one
+  member of staff records the receipt (exact price, bank reference), a
+  different one confirms it, and only then is the order paid. Off until
+  an owner attaches such a method; the launch configuration has no bank
+  wire.
+- Production purchases need a method once the sandbox is off.
+- Not built: the card adapter (no processor chosen; cards come at
+  expansion); payout rails without a fixed network and withdrawal
+  limits and charges (step 4, lines 4 and 5).

@@ -37,6 +37,7 @@ const ReferralsPage = lazyPage(() => import("./Referrals"), "ReferralsPage");
 const BooksPage = lazyPage(() => import("./Books"), "BooksPage");
 const ReconciliationPage = lazyPage(() => import("./Reconciliation"), "ReconciliationPage");
 const DisputesPage = lazyPage(() => import("./Disputes"), "DisputesPage");
+const ReceiptsPage = lazyPage(() => import("./Receipts"), "ReceiptsPage");
 const LiabilitiesPage = lazyPage(() => import("./Liabilities"), "LiabilitiesPage");
 const StaffProfilePage = lazyPage(() => import("./StaffProfile"), "StaffProfilePage");
 const CaseList = lazyPage(() => import("./resources/cases"), "CaseList");
@@ -105,6 +106,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
                 {screens.has("settings") ? <Route path="/books" element={<BooksPage />} /> : null}
                 {screens.has("settings") ? <Route path="/reconciliation" element={<ReconciliationPage />} /> : null}
                 {screens.has("settings") ? <Route path="/disputes" element={<DisputesPage />} /> : null}
+                {screens.has("settings") ? <Route path="/receipts" element={<ReceiptsPage />} /> : null}
                 {screens.has("settings") ? <Route path="/liabilities" element={<LiabilitiesPage />} /> : null}
                 <Route path="/profile" element={<StaffProfilePage />} />
                 {screens.has("policies") ? <Route path="/policies" element={<PolicyPages />} /> : null}

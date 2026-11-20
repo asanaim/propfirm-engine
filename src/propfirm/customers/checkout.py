@@ -183,10 +183,13 @@ class Checkout:
         code: str | None,
         ts: int,
         addons: tuple[str, ...] = (),
+        rail: PaymentProvider | None = None,
     ) -> tuple[OrderRecord, str]:
         """Create an order and its invoice; return (order, payment URL).
         `addons`: add-on ids (D-13.18); the account opens on its stage's
-        rule set with them."""
+        rule set with them. `rail`: the payment method's rail (D-14.24);
+        None: this checkout's own provider."""
+        payments = rail if rail is not None else self._payments
         if cif.status != "registered":
             raise CheckoutError("blocked", "this customer cannot buy")
         policy = await self._policy.current()
@@ -239,7 +242,7 @@ class Checkout:
                 discount_code=code if quote.discount_kind is DiscountKind.CODE else None,
                 price_cents=quote.price_cents,
                 rsv_id=with_addons(first_stage.rsv_id, quote.addons),
-                provider=self._payments.name,
+                provider=payments.name,
                 ts=ts,
                 retake_of=basis,
                 hold_since=hold_since,
@@ -247,7 +250,12 @@ class Checkout:
             )
         except RetakeTakenError:
             raise CheckoutError("retake_taken", "this breach's retake is already in use") from None
-        invoice = await self._payments.create_invoice(order.ord, order.price_cents)
+        try:
+            invoice = await payments.create_invoice(order.ord, order.price_cents)
+        except Exception as exc:  # the order stays pending, with no invoice: never paid
+            raise CheckoutError(
+                "payment_unavailable", "payment is not available right now; try again later"
+            ) from exc
         stored = await self._store.set_provider_ref(order.ord, invoice.provider_ref, ts)
         return stored, invoice.pay_url
 
@@ -403,6 +411,10 @@ class Checkout:
             )
 
     # --- payment and provisioning ---------------------------------------------------
+
+    async def order_for_payment(self, provider: str, provider_ref: str) -> OrderRecord | None:
+        """The order a provider's invoice belongs to."""
+        return await self._store.order_by_ref(provider, provider_ref)
 
     async def payment_received(self, provider: str, provider_ref: str, ts: int) -> OrderRecord:
         order = await self._store.order_by_ref(provider, provider_ref)

@@ -46,6 +46,7 @@ import {
   StickyNote,
   TicketPercent,
   BookOpenCheck,
+  Landmark,
   ListChecks,
   Scale,
   UserPlus,
@@ -115,5 +116,6 @@ export const ICONS = {
   liabilities: Scale,
   reconciliation: ListChecks,
   disputes: ReceiptText,
+  receipts: Landmark,
   referrals: UserPlus,
 } satisfies Record<string, LucideIcon>;

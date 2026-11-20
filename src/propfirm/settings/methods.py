@@ -31,7 +31,7 @@ METHOD_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 SECRET_NAME = re.compile(r"[a-z][a-z0-9_]{0,39}")
 KINDS = ("payment", "withdrawal")
 # the adapters this build has: a method can only name one of them
-ADAPTERS = ("sandbox", "manual")
+ADAPTERS = ("sandbox", "manual", "nowpayments")  # D-14.24
 FIELD_TYPES = ("text", "number", "email")
 
 
