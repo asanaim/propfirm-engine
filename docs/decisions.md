@@ -658,3 +658,34 @@ account).
   charged back before it accrued.
 - Not changed: the reserve keeps the sweep of a refunded order (the safe
   side; the monthly release returns any surplus).
+
+D-14.23, reserve states acted on (completes build plan step 3, line 5;
+details taken under D-14.7, 20 Nov 2026; responses from strategic
+review v3, D3).
+- Watch: the API loop computes coverage K at most once a minute and
+  records each change of state (append-only `reserve_states`), alerting
+  the settings change audience (urgent in red and breach); a return to
+  normal closes the alert. Requests read the last recorded state, never
+  the desk. With the reserve off the state is normal.
+- Each state adds its limits to the ones before:
+  - amber: discount codes refused at checkout (`promotions_paused`);
+    scaling neither proposed nor approved; Instant sales capped per UTC
+    day at the trailing 30 day daily average, rounded up, at least one.
+    Retake and repeat prices are product rules and stay.
+  - red: Instant sales stopped (`sold_out_today`): a paid Instant order
+    would open a funded account at once, so it is not sold rather than
+    sold and queued; passed traders' funded accounts queue after
+    signing and open by themselves when the state improves. The alert
+    names the product with the highest share of its 90-day sales paid
+    out in the same days, for repricing.
+  - breach: a payout delay notice on the trader site (`/site/status`,
+    the Payouts page), with the date it began. Payouts continue in
+    request order, as they already are.
+- Top-ups (owners' capital into the reserve: reserve against owner's
+  equity) and releases (reserve back to cash, at most what lies above
+  1.3 x R*, checked again at the decision) are proposed by one member of
+  staff with the settings change right and decided by another; the
+  books post them.
+- Not built: class C payouts reviewed by hand in amber (trader classes
+  come in step 5); a generated repricing proposal (the alert names the
+  product; the price change goes through the settings proposals as now).

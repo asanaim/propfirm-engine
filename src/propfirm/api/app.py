@@ -107,7 +107,15 @@ from propfirm.customers.payouts import Eligibility, eligibility_json
 from propfirm.customers.pricing import discount_floor, price
 from propfirm.customers.reconciliation import Reconciliations, StatementRefused
 from propfirm.customers.referrals import ReferralRefused, Referrals
-from propfirm.customers.reserve import Evaluations, coverage, k_text
+from propfirm.customers.reserve import (
+    Evaluations,
+    MoveRefused,
+    Reserve,
+    coverage,
+    instant_cap,
+    k_text,
+    limits,
+)
 from propfirm.customers.scaling import Scaling, ScalingRefused
 from propfirm.customers.store import (
     AccountRecord,
@@ -387,6 +395,7 @@ class Deps:
     evaluations: Evaluations | None = None  # reserve coverage: evaluations (D-14.20)
     reconciliations: Reconciliations | None = None  # processor statements (D-14.21)
     disputes: Disputes | None = None  # refunds and chargebacks (D-14.22)
+    reserve: Reserve | None = None  # coverage states and moves (D-14.23)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -573,6 +582,19 @@ class ChargebackBody(_Body):
 
 class ChargebackDecision(_Body):
     outcome: Literal["won", "lost"]
+    reason: _Reason
+
+
+class ReserveMoveBody(_Body):
+    """Owners' capital into the reserve, or surplus back to cash (D-14.23)."""
+
+    kind: Literal["topup", "release"]
+    amount_cents: Annotated[int, Field(ge=1, le=10**12)]
+    reason: _Reason
+
+
+class ReserveMoveDecision(_Body):
+    approve: bool
     reason: _Reason
 
 
@@ -2089,6 +2111,79 @@ def create_app(
         detail = {"code": exc.code, "message": message, "problems": list(exc.problems)}
         return HTTPException(status_code=status, detail=detail)
 
+    async def _reserve_allows(deps: Deps, product_id: str, code: str | None) -> None:
+        """The purchase limits of the reserve state (D-14.23)."""
+        assert deps.reserve is not None
+        held = limits(await deps.reserve.state())
+        if code and held.codes_paused:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "promotions_paused",
+                    "message": "discount codes are paused for now; buy at the list price",
+                },
+            )
+        if held.instant == "open":
+            return
+        if deps.policy is None:
+            return
+        try:
+            product = (await deps.policy.current()).product(product_id)
+        except KeyError:
+            return  # refused later as unknown
+        if not instant_funding(product):
+            return
+        sold_today, sold_before = await deps.reserve.instant_sold(product_id, deps.clock())
+        if held.instant == "stopped" or sold_today >= instant_cap(sold_before):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "sold_out_today",
+                    "message": "this product is not on sale right now; try again tomorrow",
+                },
+            )
+
+    def _reserve(deps: Deps) -> Reserve:
+        if deps.reserve is None:
+            raise HTTPException(status_code=503, detail="the reserve is not configured")
+        return deps.reserve
+
+    def _move_refused(exc: MoveRefused) -> HTTPException:
+        status = {"unknown": 404, "same_person": 403, "invalid": 422}.get(exc.code, 409)
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    @app.get("/staff/reserve/moves")
+    async def reserve_moves(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        return await _reserve(deps).moves()
+
+    @app.post("/staff/reserve/moves", status_code=201)
+    async def propose_reserve_move(
+        deps: D, me: SettingsChanger, body: ReserveMoveBody
+    ) -> dict[str, Any]:
+        """Propose a top-up or a release; someone else decides. A release is
+        bounded by what lies above the release line, checked again at the
+        decision."""
+        try:
+            return await _reserve(deps).propose(
+                body.kind, body.amount_cents, body.reason, me.subject, deps.clock()
+            )
+        except MoveRefused as exc:
+            raise _move_refused(exc) from exc
+
+    @app.post("/staff/reserve/moves/{rsm}/decision")
+    async def decide_reserve_move(
+        deps: D,
+        me: SettingsChanger,
+        rsm: Annotated[str, Path(pattern=r"^RSM[0-9]{8}$")],
+        body: ReserveMoveDecision,
+    ) -> dict[str, Any]:
+        try:
+            return await _reserve(deps).decide(
+                rsm, body.approve, body.reason, me.subject, deps.clock()
+            )
+        except MoveRefused as exc:
+            raise _move_refused(exc) from exc
+
     def _disputes(deps: Deps) -> Disputes:
         if deps.disputes is None:
             raise HTTPException(status_code=503, detail="refunds are not configured")
@@ -2383,6 +2478,14 @@ def create_app(
 
     @app.post("/staff/scaling/{scl}/approve")
     async def approve_scaling(deps: D, me: Approver, scl: SclId) -> dict[str, Any]:
+        if deps.reserve is not None and limits(await deps.reserve.state()).scaling_frozen:
+            raise HTTPException(  # D-14.23
+                status_code=409,
+                detail={
+                    "code": "scaling_frozen",
+                    "message": "scaling is frozen: reserve cover is thin",
+                },
+            )
         try:
             return await _scaling(deps).approve(scl, me.subject, deps.clock())
         except ScalingRefused as exc:
@@ -2737,6 +2840,8 @@ def create_app(
                 detail={"code": "policies_pending", "message": "accept the updated policies"},
             )
         await check_method(deps, body)
+        if deps.reserve is not None:
+            await _reserve_allows(deps, body.product_id, body.code)
         if deps.disputes is not None and await deps.disputes.blocks_purchase(cif.cif):
             raise HTTPException(  # D-14.22: a chargeback open or lost
                 status_code=403,
@@ -3979,7 +4084,18 @@ def create_app(
         """Whether the site is under maintenance and registration is open
         (rule AC17, public); the pages' text is in `/site`."""
         mode = await _mode(deps)
-        return {**mode_json(mode), "registering": mode.registering, "selling": mode.selling}
+        delayed, since = False, None
+        if deps.reserve is not None:
+            delayed = limits(await deps.reserve.state()).payouts_delayed
+            since = await deps.reserve.since() if delayed else None
+        return {
+            **mode_json(mode),
+            "registering": mode.registering,
+            "selling": mode.selling,
+            # D-14.23: a delay is published, never silent
+            "payouts_delayed": delayed,
+            "payouts_delayed_since": since,
+        }
 
     @app.put("/admin/site-mode")
     async def propose_site_mode(deps: D, me: SettingsChanger, body: SiteModeBody) -> dict[str, Any]:
