@@ -103,9 +103,10 @@ choice. Charges round up to a whole cent. Secrets are sealed with
 AES-256-GCM (key `PROPFIRM_SECRETS_KEY`, outside the database), bound to
 their method, shown only as "set", and replaced by an owner-approved
 proposal. Settings migration 10. Not yet: withdrawal methods applied to
-payout requests (limits and charge at request time) and real provider
-adapters (only `sandbox` and `manual` exist; NOWPayments and a card
-processor need the operator's accounts).
+payout requests (limits and charge at request time) and a card
+processor (none chosen; cards come at expansion). Rails `sandbox`,
+`manual` (bank transfer, two-person receipts) and `nowpayments` exist
+(D-14.24); NOWPayments still needs the operator's account (C6).
 
 News impact (decided 8 Nov 2026). In place: the risk desk (one person,
 as adding a news window) marks each release high, medium or low impact

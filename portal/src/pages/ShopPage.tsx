@@ -10,6 +10,21 @@ import { navigate } from "../router";
 
 
 /** The split ladder in a line, or null for a product without one (Instant). */
+/** A method paid by hand (D-14.24): how to pay, and the reference to quote.
+The account opens once two members of staff have seen the money. */
+export function ManualPayment({ order }: { order: PlacedOrder }) {
+  return (
+    <div className="manual-payment">
+      <p>Pay {formatCents(order.price_cents)} as follows, quoting the reference exactly:</p>
+      {order.pay_instructions ? <p className="manual-instructions">{order.pay_instructions}</p> : null}
+      <p>
+        Reference: <strong className="mono">{order.pay_reference ?? order.ord}</strong>
+      </p>
+      <Notice>Your account opens once we have seen the payment, usually within one business day.</Notice>
+    </div>
+  );
+}
+
 export function ladderText(p: { split_after_payouts?: number | null; split_percent_after_payouts?: string | null }): string | null {
   if (p.split_after_payouts === null || p.split_after_payouts === undefined || !p.split_percent_after_payouts) return null;
   return `${p.split_percent_after_payouts} % after ${p.split_after_payouts.toString()} paid payouts, more with scaling`;
@@ -281,9 +296,11 @@ export function ShopPage() {
             <Notice tone="ok">Payment received. Your account opens in a moment under Accounts.</Notice>
           ) : order.pay_url.startsWith("/dev/") ? (
             <Button onClick={() => void pay(order)}>Complete payment (sandbox)</Button>
+          ) : order.pay_url === "" ? (
+            <ManualPayment order={order} />
           ) : (
             <a className="button button-primary" href={order.pay_url} rel="noopener noreferrer">
-              Pay with USDT (TRC-20)
+              Go to payment
             </a>
           )}
         </Card>

@@ -105,6 +105,8 @@ from propfirm.customers.payout_service import Payouts
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
 from propfirm.customers.payouts import Eligibility, eligibility_json
 from propfirm.customers.pricing import discount_floor, price
+from propfirm.customers.rails import RailRejected, Rails, RailUnavailable
+from propfirm.customers.receipts import ReceiptRefused, Receipts
 from propfirm.customers.reconciliation import Reconciliations, StatementRefused
 from propfirm.customers.referrals import ReferralRefused, Referrals
 from propfirm.customers.reserve import (
@@ -235,6 +237,8 @@ from propfirm.staff.screening import Screening
 from propfirm.staff.screening import checks as screening_checks
 from propfirm.staff.training import courses, current, valid_until
 from propfirm.trading.orders import OrderRequest, OrderType, Side
+
+log = logging.getLogger(__name__)
 
 ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 Ident = Annotated[str, Path(pattern=ID_PATTERN)]
@@ -396,6 +400,8 @@ class Deps:
     reconciliations: Reconciliations | None = None  # processor statements (D-14.21)
     disputes: Disputes | None = None  # refunds and chargebacks (D-14.22)
     reserve: Reserve | None = None  # coverage states and moves (D-14.23)
+    rails: Rails | None = None  # the rail of each payment method (D-14.24)
+    receipts: Receipts | None = None  # manual payments, checked by two (D-14.24)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -582,6 +588,21 @@ class ChargebackBody(_Body):
 
 class ChargebackDecision(_Body):
     outcome: Literal["won", "lost"]
+    reason: _Reason
+
+
+class ReceiptBody(_Body):
+    """Money seen for an order paid by hand (D-14.24)."""
+
+    amount_cents: Annotated[int, Field(ge=1, le=10**12)]
+    reference: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ]
+    received_at: Annotated[int, Field(ge=0)]
+
+
+class ReceiptDecision(_Body):
+    confirm: bool
     reason: _Reason
 
 
@@ -2143,6 +2164,56 @@ def create_app(
                 },
             )
 
+    def _receipts(deps: Deps) -> Receipts:
+        if deps.receipts is None:
+            raise HTTPException(status_code=503, detail="manual payments are not configured")
+        return deps.receipts
+
+    def _receipt_refused(exc: ReceiptRefused) -> HTTPException:
+        status = {"unknown": 404, "same_person": 403}.get(exc.code, 409)
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    @app.get("/staff/receipts")
+    async def receipt_list(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """Receipts recorded, and pending orders of manual methods awaiting one."""
+        r = _receipts(deps)
+        return {"receipts": await r.receipts(), "awaiting": await r.awaiting()}
+
+    @app.post("/staff/orders/{ord_id}/receipts", status_code=201)
+    async def record_receipt(
+        deps: D,
+        me: SettingsChanger,
+        ord_id: Annotated[str, Path(pattern=r"^ORD[0-9]{8}$")],
+        body: ReceiptBody,
+    ) -> dict[str, Any]:
+        """Record money seen for an order paid by hand; someone else confirms it."""
+        try:
+            return await _receipts(deps).record(
+                ord_id,
+                body.amount_cents,
+                body.reference,
+                body.received_at,
+                me.subject,
+                deps.clock(),
+            )
+        except ReceiptRefused as exc:
+            raise _receipt_refused(exc) from exc
+
+    @app.post("/staff/receipts/{rcp}/decision")
+    async def decide_receipt(
+        deps: D,
+        me: SettingsChanger,
+        rcp: Annotated[str, Path(pattern=r"^RCP[0-9]{8}$")],
+        body: ReceiptDecision,
+    ) -> dict[str, Any]:
+        """Confirm (the order is paid, its account opens) or reject."""
+        try:
+            return await _receipts(deps).decide(
+                rcp, body.confirm, body.reason, me.subject, deps.clock()
+            )
+        except ReceiptRefused as exc:
+            raise _receipt_refused(exc) from exc
+
     def _reserve(deps: Deps) -> Reserve:
         if deps.reserve is None:
             raise HTTPException(status_code=503, detail="the reserve is not configured")
@@ -2850,13 +2921,117 @@ def create_app(
                     "message": "purchases are held on this account; contact support",
                 },
             )
+        rail = None
+        instructions = None
+        if deps.rails is not None and body.method is not None:
+            try:  # D-14.24: the method's own rail
+                rail = await deps.rails.for_method(body.method)
+                if rail.adapter == "manual":
+                    instructions = (await deps.rails.method(body.method)).instructions
+            except RailUnavailable as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"code": "payment_unavailable", "message": "payment is not available"},
+                ) from exc
         try:
             order, pay_url = await _checkout(deps).place_order(
-                cif, body.product_id, body.size_cents, body.code, deps.clock(), tuple(body.addons)
+                cif,
+                body.product_id,
+                body.size_cents,
+                body.code,
+                deps.clock(),
+                tuple(body.addons),
+                rail=rail,
             )
         except CheckoutError as exc:
             raise _refused(exc) from exc
-        return {**order_view(order), "pay_url": pay_url}
+        placed = {**order_view(order), "pay_url": pay_url}
+        if instructions is not None:  # a manual method: pay by hand, quoting the order
+            placed["pay_instructions"] = instructions
+            placed["pay_reference"] = order.ord
+        return placed
+
+    @app.post("/webhooks/payments/{method_id}")
+    async def payment_webhook(
+        deps: D,
+        request: Request,
+        method_id: Annotated[str, Path(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")],
+    ) -> dict[str, Any]:
+        """A payment provider's signed notice (D-14.24). Paid: the order is
+        paid and its account opens, once however often it is sent; the
+        amount must be the order's price. Disputed: recorded as a
+        chargeback at once (D-14.22). Refunded: staff are told to record
+        it. Anything else is acknowledged and ignored."""
+        if deps.rails is None:
+            raise HTTPException(status_code=404, detail="not found")
+        try:
+            rail = await deps.rails.for_method(method_id)
+            event = rail.parse(request.headers, await request.body())
+        except (RailUnavailable, RailRejected) as exc:
+            log.warning("payment notice for %s refused: %s", method_id, exc)
+            raise HTTPException(status_code=401, detail="not accepted") from exc
+        if event.kind == "nothing":
+            return {"ok": True, "done": "nothing"}
+        order = await _checkout(deps).order_for_payment(rail.name, event.provider_ref)
+        if order is None:
+            log.warning("payment notice for unknown invoice %s/%s", method_id, event.provider_ref)
+            return {"ok": True, "done": "unknown_invoice"}
+        now = deps.clock()
+        if event.kind == "paid":
+            if event.amount_cents != order.price_cents:
+                log.error(
+                    "payment notice %s: %s cents, order %s",
+                    order.ord,
+                    event.amount_cents,
+                    order.price_cents,
+                )
+                await _tell_finance(
+                    deps,
+                    "payment_mismatch",
+                    order.ord,
+                    f"Payment amount differs on {order.ord}",
+                    f"{method_id} reports {event.amount_cents} cents; "
+                    f"the order is {order.price_cents}. Not opened.",
+                    now,
+                )
+                return {"ok": True, "done": "amount_differs"}
+            try:
+                await _checkout(deps).payment_received(rail.name, event.provider_ref, now)
+            except CheckoutError as exc:
+                raise _refused(exc) from exc
+            return {"ok": True, "done": "paid"}
+        if event.kind == "disputed" and deps.disputes is not None:
+            try:
+                await deps.disputes.record_chargeback(
+                    order.ord,
+                    event.amount_cents or order.price_cents,
+                    0,
+                    str(event.detail.get("payment_id", event.provider_ref)),
+                    "reported by the payment provider",
+                    now,
+                    f"rail:{method_id}",
+                    now,
+                )
+            except DisputeRefused as exc:
+                log.warning("dispute on %s not recorded: %s", order.ord, exc)
+            return {"ok": True, "done": "disputed"}
+        if event.kind == "refunded":
+            await _tell_finance(
+                deps,
+                "refund_reported",
+                order.ord,
+                f"Refund reported on {order.ord}",
+                f"{method_id} reports a refund. Record it under Refunds and chargebacks.",
+                now,
+            )
+            return {"ok": True, "done": "refunded"}
+        return {"ok": True, "done": "nothing"}
+
+    async def _tell_finance(
+        deps: Deps, kind: str, ref: str, title: str, body: str, now: int
+    ) -> None:
+        if deps.desk is not None:
+            await deps.desk.notify("settings.change", kind, ref, title, body, now, urgent=True)
 
     @app.get("/trial")
     async def trial_offer(deps: D) -> dict[str, Any]:
@@ -3871,7 +4046,8 @@ def create_app(
             return
         method = methods.get(body.method or "")
         wrong = (
-            deps.checkout is not None
+            deps.rails is None  # with rails, each method brings its own (D-14.24)
+            and deps.checkout is not None
             and method is not None
             and (method.adapter != deps.checkout.adapter)
         )

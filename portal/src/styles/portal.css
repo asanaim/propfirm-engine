@@ -2680,3 +2680,17 @@ a soft fade and a slight scale, on the system's spring-like curve */
     color: #000;
   }
 }
+
+/* a method paid by hand (D-14.24): the instructions as written, the reference set apart */
+.manual-payment .manual-instructions {
+  white-space: pre-line;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-small);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.manual-payment .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+}

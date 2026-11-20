@@ -41,6 +41,8 @@ from propfirm.customers.providers import (
     SandboxPayouts,
     SandboxScreener,
 )
+from propfirm.customers.rails import Rails, SandboxRail
+from propfirm.customers.receipts import Receipts
 from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
 from propfirm.customers.reserve import Evaluations, Reserve, limits
@@ -57,6 +59,7 @@ from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
 from propfirm.service.setup import setup_from_policy
+from propfirm.settings.methods import Vault
 from propfirm.settings.newsdesk import NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
@@ -72,6 +75,22 @@ pytestmark = pytest.mark.integration
 TODAY = date(2026, 10, 29)
 ADULT = {"full_name": "Ada Trader", "date_of_birth": "1990-05-17", "residence_country": "DE"}
 LITE_10K = {"product_id": "lite", "size_cents": 1_000_000}
+
+
+def fake_nowpayments() -> httpx.AsyncClient:
+    """NOWPayments' sandbox as far as the tests need it: each invoice gets
+    the next id from 9001 (D-14.24)."""
+    made = {"n": 9000}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/invoice") and request.headers.get("x-api-key"):
+            made["n"] += 1
+            return httpx.Response(
+                200, json={"id": made["n"], "invoice_url": f"https://pay.example/{made['n']}"}
+            )
+        return httpx.Response(401)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(answer))
 
 
 @dataclass
@@ -251,6 +270,10 @@ async def platform(
     evaluations = Evaluations(pool, config.customer_schema, live)
     reserve = Reserve(pool, config.customer_schema, settings, books, liabilities, evaluations, desk)
     reserve_box.append(reserve)
+    vault = Vault(bytes(range(32)))  # a fixed test key
+    rails = Rails(
+        settings, vault, fake_nowpayments(), "http://t", sandbox=sandbox, default=SandboxRail()
+    )
     identity = SandboxIdentity()
     cutoffs = Cutoffs(staff.store, identity, desk)
     oversight = Oversight(pool, config.staff_schema, config.customer_schema, staff.store, desk)
@@ -272,6 +295,9 @@ async def platform(
         liabilities=liabilities,
         evaluations=evaluations,
         reserve=reserve,
+        rails=rails,
+        receipts=Receipts(pool, config.customer_schema, checkout, rails),
+        vault=vault,
         reconciliations=Reconciliations(pool, config.customer_schema),
         disputes=Disputes(
             pool, config.customer_schema, gateway, live, cases, referrals, wait_s=wait_s
@@ -543,7 +569,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 25))
+            assert await migrate(conn, schema) == list(range(1, 26))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

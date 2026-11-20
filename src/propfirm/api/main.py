@@ -74,6 +74,8 @@ from propfirm.customers.providers import (
     SandboxScreener,
     Screener,
 )
+from propfirm.customers.rails import NoDefaultRail, Rails, SandboxRail
+from propfirm.customers.receipts import Receipts
 from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
 from propfirm.customers.reserve import Evaluations, Reserve, limits
@@ -90,6 +92,7 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
+from propfirm.settings.methods import Vault
 from propfirm.settings.newsdesk import Author, NewsDesk, NewsStore
 from propfirm.settings.service import Settings
 from propfirm.settings.store import SettingsStore
@@ -304,18 +307,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         oversight = Oversight(pool, config.staff_schema, config.customer_schema, staff.store, desk)
         tasks.append(asyncio.create_task(_oversight_forever(oversight, settings)))
         live = LiveReader(client, config.live_prefix)
-        checkout = None
-        if config.sandbox:
-            checkout = Checkout(
-                customers,
-                settings,
-                SandboxPayments(),
-                SandboxScreener(),
-                gateway,
-                funded=onboardings,
-                cases=cases,
-                live=live,
-            )
         kyc: KycProvider | None = None
         screener: Screener | None = None
         if config.didit:
@@ -324,6 +315,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             screener = WorkflowScreening()  # the Didit workflow includes AML screening
         elif config.sandbox:
             kyc, screener = SandboxKyc(), SandboxScreener()
+        vault = Vault.from_env()
+        rails = Rails(  # D-14.24: each payment method's rail, with its secrets
+            settings,
+            vault,
+            http,
+            config.public_url,
+            sandbox=config.sandbox,
+            default=SandboxRail() if config.sandbox else None,
+        )
+        checkout = None
+        if config.sandbox or screener is not None:
+            checkout = Checkout(
+                customers,
+                settings,
+                SandboxPayments() if config.sandbox else NoDefaultRail(),
+                SandboxScreener() if config.sandbox or screener is None else screener,
+                gateway,
+                funded=onboardings,
+                cases=cases,
+                live=live,
+            )
         reserve_box: list[Reserve] = []  # built once payouts exist, below
 
         async def funded_held() -> bool:  # D-14.23: new funded accounts queue in red
@@ -455,6 +467,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             liabilities=liabilities,
             evaluations=evaluations,
             reserve=reserve,
+            rails=rails,
+            receipts=None
+            if checkout is None
+            else Receipts(pool, config.customer_schema, checkout, rails),
+            vault=vault,
             reconciliations=Reconciliations(pool, config.customer_schema),
             disputes=Disputes(pool, config.customer_schema, gateway, live, cases, referrals),
             classes=customers,

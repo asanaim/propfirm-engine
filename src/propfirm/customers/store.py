@@ -896,6 +896,31 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        25,
+        """
+        -- receipts of manual payments (D-14.24): a bank transfer or other
+        -- payment checked by hand; one member of staff records it, another
+        -- confirms it, and only then is the order paid
+        CREATE SEQUENCE {s}.rcp_seq;
+        CREATE TABLE {s}.receipts (
+            rcp text PRIMARY KEY,
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            amount_cents bigint NOT NULL CHECK (amount_cents > 0),
+            reference text NOT NULL,
+            received_at bigint NOT NULL,
+            recorded_by text NOT NULL,
+            recorded_at bigint NOT NULL,
+            status text NOT NULL CHECK (status IN ('recorded', 'confirmed', 'rejected')),
+            decided_by text,
+            decided_at bigint,
+            decision_reason text,
+            CHECK (decided_by IS NULL OR decided_by <> recorded_by)
+        );
+        CREATE UNIQUE INDEX receipts_one_open ON {s}.receipts (ord)
+            WHERE status IN ('recorded', 'confirmed');
+        """,
+    ),
 )
 
 

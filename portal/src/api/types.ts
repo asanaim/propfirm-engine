@@ -55,7 +55,11 @@ export interface Order {
 }
 
 export interface PlacedOrder extends Order {
+  /** where to pay: the sandbox, or the provider's hosted page; empty for a method paid by hand */
   pay_url: string;
+  /** a method paid by hand (a bank transfer): how to pay, and the reference to quote (D-14.24) */
+  pay_instructions?: string;
+  pay_reference?: string;
 }
 
 export interface AccountRecord {
