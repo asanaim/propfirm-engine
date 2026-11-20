@@ -9,14 +9,17 @@ from propfirm.customers.networks import NETWORKS, evm_address_valid, keccak256
 from propfirm.policy import PAYOUT_NETWORKS, PolicyError, load_policy, parse_policy
 from tests.test_policy import edited
 
+# pragma: allowlist nextline secret
 TRON = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"  # Tether's USDT contract on TRON
 
 
 def test_keccak_is_ethereums_not_nist_sha3() -> None:
     assert keccak256(b"").hex() == (
+        # pragma: allowlist nextline secret
         "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
     )
     assert keccak256(b"abc").hex() == (
+        # pragma: allowlist nextline secret
         "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45"
     )
     long = keccak256(b"a" * 200)  # crosses the 136-byte block
@@ -43,6 +46,7 @@ def test_good_evm_addresses(address: str) -> None:
     [
         "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD",  # one letter's case wrong
         "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAe",  # 39 digits
+        # pragma: allowlist nextline secret
         "5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed00",  # no 0x
         "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeg",  # not hex
         TRON,
