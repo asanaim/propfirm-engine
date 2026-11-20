@@ -61,6 +61,10 @@ min_trading_days = 0           # none, as FTMO and FundedNext
 maximum_cents = 0              # no maximum, as FTMO and FundedNext
 # Payout processing (M19), starting values [DEFAULT]:
 trading_during_payout = "paused"  # D23: no new orders from request to approval (the debit)
+# D-14.26: the networks a trader may add a payout wallet on. Built and
+# tested: TRC20, ERC20, BEP20, POLYGON (all USDT). Adding one is an owner's
+# switch; the finance desk must be able to send on it first.
+networks = ["TRC20"]
 require_mfa = true             # M04: the login must have used MFA to change the wallet or ask
 # Step-up (M06): that second factor entered no more than this many minutes
 # before the wallet change or payout request, as Binance asks for a 2FA

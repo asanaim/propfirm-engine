@@ -943,6 +943,19 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.payout_transfers FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        27,
+        """
+        -- payout networks (D-14.26): a wallet may be on any network built;
+        -- the policy decides which are open for new wallets
+        ALTER TABLE {s}.wallets DROP CONSTRAINT wallets_network_check;
+        ALTER TABLE {s}.wallets DROP CONSTRAINT wallets_address_check;
+        ALTER TABLE {s}.wallets ADD CONSTRAINT wallets_network_address CHECK (
+            (network = 'TRC20' AND address ~ '^T[1-9A-HJ-NP-Za-km-z]{{33}}$')
+            OR (network IN ('ERC20', 'BEP20', 'POLYGON') AND address ~ '^0x[0-9a-fA-F]{{40}}$')
+        );
+        """,
+    ),
 )
 
 

@@ -18,3 +18,13 @@ describe("withdrawal methods at request time (D-14.25)", () => {
     expect(methodAllows({ ...m, max_cents: 5_000 }, 5_001)).toBe(false);
   });
 });
+
+describe("payout networks (D-14.26)", () => {
+  it("checks the shape of an address on its own network", async () => {
+    const { looksLike } = await import("./PayoutsPage");
+    expect(looksLike("TRC20", "TJRabPrwbZy45sbavfcjinPJC18kjpRTv8")).toBe(true);
+    expect(looksLike("BEP20", "TJRabPrwbZy45sbavfcjinPJC18kjpRTv8")).toBe(false);
+    expect(looksLike("ERC20", "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")).toBe(true);
+    expect(looksLike("TRC20", "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")).toBe(false);
+  });
+});

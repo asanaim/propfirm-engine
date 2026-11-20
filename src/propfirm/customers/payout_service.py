@@ -14,9 +14,10 @@ from typing import Any, Protocol
 
 from propfirm.analysis import ShortHold, short_hold, trades_from
 from propfirm.customers.casework import Casework, Submitter
+from propfirm.customers.networks import NETWORKS
 from propfirm.customers.notifications import wallet_notice
 from propfirm.customers.onboarding_store import OnboardingStore
-from propfirm.customers.payout_flow import payout_state, tron_address_valid
+from propfirm.customers.payout_flow import payout_state
 from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, PayoutStore, Wallet
 from propfirm.customers.payouts import (
     FAIL,
@@ -34,7 +35,6 @@ from propfirm.rules.addons import addons_of
 from propfirm.settings.notices import Notices
 
 log = logging.getLogger(__name__)
-NETWORK = "TRC20"  # USDT on TRON, the only payout method [CONFIRMED]
 SEND_RETRY_MS = 60_000  # a failed send is tried again after this
 DEBIT_RETRY_MS = 60_000  # an unanswered debit is published again after this
 
@@ -180,13 +180,18 @@ class Payouts:
         address: str,
         ts: int,
         auth_time: int | None = None,
+        network: str = "TRC20",
     ) -> Wallet:
         """A new payout wallet replaces the one in use (after the cooling-off
         period, if one is set); the customer is emailed at the registered
-        address."""
+        address. The network must be open (D-14.26) and the address valid
+        for it."""
         await self._mfa(mfa, auth_time, ts)
-        if not tron_address_valid(address):
-            raise PayoutRefused("invalid", "not a TRON (TRC-20) address")
+        found = NETWORKS.get(network)
+        if found is None or network not in (await self._policy.current()).payouts.networks:
+            raise PayoutRefused("invalid", f"payouts are not sent on {network}")
+        if not found.valid(address):
+            raise PayoutRefused("invalid", f"not an address on {found.name}: {found.hint}")
         previous = await self._store.wallet(cif.cif)
         wording = None if self._notices is None else await self._notices.notices()
         notice = wallet_notice(
@@ -198,7 +203,7 @@ class Payouts:
             wording,
         )
         detail = {"mfa": mfa, "auth_time": auth_time}
-        return await self._store.add_wallet(cif.cif, NETWORK, address, subject, ts, detail, notice)
+        return await self._store.add_wallet(cif.cif, network, address, subject, ts, detail, notice)
 
     async def short_hold(self, acc: str) -> ShortHold | None:
         """The short-hold measure of the account's current payout period;

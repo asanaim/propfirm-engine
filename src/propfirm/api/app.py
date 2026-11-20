@@ -99,6 +99,7 @@ from propfirm.customers.leaderboard import Leaderboard
 from propfirm.customers.liability import Claim, Liabilities
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
+from propfirm.customers.networks import NETWORKS
 from propfirm.customers.onboarding_store import OnboardingRecord, OnboardingStateError
 from propfirm.customers.payout_flow import payout_state
 from propfirm.customers.payout_service import Payouts
@@ -778,7 +779,8 @@ class GraduateBody(_Body):
 
 
 class WalletBody(_Body):
-    address: Annotated[str, StringConstraints(min_length=34, max_length=34)]
+    address: Annotated[str, StringConstraints(min_length=34, max_length=42)]
+    network: Literal["TRC20", "ERC20", "BEP20", "POLYGON"] = "TRC20"  # D-14.26
 
 
 class AlertBody(_Body):
@@ -1965,12 +1967,19 @@ def create_app(
 
     @app.post("/me/wallet", status_code=201)
     async def add_wallet(deps: D, me: Trader, body: WalletBody) -> dict[str, Any]:
-        """A new payout wallet (USDT, TRC-20): used after the cooling-off
-        period; replaces the one in use (MFA login, by policy)."""
+        """A new payout wallet (USDT, on an open network, D-14.26): used after
+        the cooling-off period; replaces the one in use (MFA login, by
+        policy)."""
         cif = await _cif(deps, me)
         try:
             wallet = await _payouts(deps).add_wallet(
-                cif, me.subject, me.mfa, body.address, deps.clock(), me.auth_time
+                cif,
+                me.subject,
+                me.mfa,
+                body.address,
+                deps.clock(),
+                me.auth_time,
+                network=body.network,
             )
         except PayoutRefused as exc:
             raise _payout_refused(exc) from exc
@@ -2775,6 +2784,18 @@ def create_app(
                 }
             )
         return out
+
+    @app.get("/payout-networks")
+    async def payout_networks(deps: D) -> list[dict[str, str]]:
+        """The networks a payout wallet may be added on now (D-14.26)."""
+        if deps.policy is None:
+            return []
+        open_ = (await deps.policy.current()).payouts.networks
+        return [
+            {"code": n.code, "name": n.name, "currency": n.currency, "hint": n.hint}
+            for code in open_
+            if (n := NETWORKS.get(code)) is not None
+        ]
 
     @app.get("/me/wallet")
     async def my_wallet(deps: D, me: Trader) -> dict[str, Any]:
