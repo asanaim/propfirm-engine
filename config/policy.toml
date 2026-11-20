@@ -694,3 +694,19 @@ on = true
 commission_percent = "10"
 holdback_days = 30
 refused_countries = ["BD", "IN"]  # C8: no referrals by or of residents
+
+[reserve]
+# Payout reserve (D-13.7, 13 Nov 2026; built under D-14.20). At each paid
+# sale this share of the price moves from operating cash to the reserve,
+# and payouts are drawn from it. The shares are the base model's (strategic
+# review v3, D3): 1.25 times each product's expected payout share. Classic
+# is off sale; it needs a share before it opens.
+on = true
+sweep_factor = "1.25"          # sweep = factor x expected payout share
+open_weight = "0.5"            # R*: weight of profit in open positions
+expected_weight = "1.5"        # R*: weight of evaluations' expected payouts
+amber_below = "1.3"            # coverage K: normal at or above
+red_below = "1.1"
+breach_below = "1.0"
+release_above = "1.3"          # cash above this times R* may return monthly
+sweep_percent = { lite = "72", one-step = "66", instant = "27" }

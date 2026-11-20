@@ -41,6 +41,7 @@ from propfirm.customers.providers import (
     SandboxScreener,
 )
 from propfirm.customers.referrals import Referrals
+from propfirm.customers.reserve import Evaluations
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.journal.stream import InputStreamWriter
@@ -215,7 +216,7 @@ async def platform(
     notifications = Notifications(NotificationStore(pool, config.customer_schema), mailer)
     scaling = Scaling(pool, config.customer_schema, settings, live, gateway, wait_s)
     referrals = Referrals(pool, config.customer_schema, settings)
-    books = Books(pool, config.customer_schema)
+    books = Books(pool, config.customer_schema, settings)
     payouts = Payouts(
         PayoutStore(pool, config.customer_schema),
         store,
@@ -256,6 +257,7 @@ async def platform(
         referrals=referrals,
         books=books,
         liabilities=Liabilities(pool, config.customer_schema, payouts, live),
+        evaluations=Evaluations(pool, config.customer_schema, live),
         classes=store,
         scaling=scaling,
         corrections=Corrections(

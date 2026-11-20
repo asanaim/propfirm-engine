@@ -230,6 +230,30 @@ class ReferralsPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class ReservePolicy:
+    """Payout reserve (D-13.7; D-14.20): at each paid sale `sweep` of the
+    price, by product, moves from operating cash to the reserve, and
+    payouts are drawn from it. Coverage K = reserve / R*, where R* =
+    certain + `open_weight` x open profit + `expected_weight` x expected
+    on evaluations + the largest claim of one customer; the expected
+    payout of an evaluation is its price x sweep / `sweep_factor` (the
+    sweep is `sweep_factor` times the expected payout share). K at or
+    above `amber_below` is normal, then amber, red below `red_below`,
+    breach below `breach_below`. Off when the policy file has no
+    [reserve]."""
+
+    on: bool = False
+    sweep: Mapping[str, Fraction] = field(default_factory=dict)  # by product id
+    sweep_factor: Fraction = Fraction(5, 4)
+    open_weight: Fraction = Fraction(1, 2)
+    expected_weight: Fraction = Fraction(3, 2)
+    amber_below: Fraction = Fraction(13, 10)
+    red_below: Fraction = Fraction(11, 10)
+    breach_below: Fraction = Fraction(1)
+    release_above: Fraction = Fraction(13, 10)
+
+
+@dataclass(frozen=True, slots=True)
 class TrialPolicy:
     """The free trial (D-13.17): the product's first stage rules on one
     size, for `days` days, one per customer, never funded and never paid.
@@ -320,6 +344,7 @@ class Policy:
     addons: AddonsPolicy = field(default_factory=AddonsPolicy)
     trial: TrialPolicy = field(default_factory=TrialPolicy)
     referrals: ReferralsPolicy = field(default_factory=ReferralsPolicy)
+    reserve: ReservePolicy = field(default_factory=ReservePolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -584,6 +609,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             referrals=(
                 _referrals(root.table("referrals")) if root.has("referrals") else ReferralsPolicy()
             ),
+            reserve=_reserve(root.table("reserve")) if root.has("reserve") else ReservePolicy(),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -604,6 +630,12 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
     for offer in policy.addons.offers:
         if unknown := sorted(offer.products - set(ids)):
             raise PolicyError(f"addons.{offer.id}: unknown products {unknown}")
+    if policy.reserve.on:
+        on_sale = {p.id for p in policy.products if policy.catalogue.on_sale(p)}
+        if missing := sorted(on_sale - set(policy.reserve.sweep)):
+            raise PolicyError(f"reserve.sweep_percent: no share for products on sale {missing}")
+        if unknown := sorted(set(policy.reserve.sweep) - set(ids)):
+            raise PolicyError(f"reserve.sweep_percent: unknown products {unknown}")
     refunds = [c for p in policy.products if p.fee_refund_with_payout for _, c in p.prices_cents]
     if policy.payouts.maximum_cents and policy.payouts.maximum_cents < max(refunds, default=0):
         # the fee refund is paid with a payout and counts towards its maximum
@@ -638,6 +670,37 @@ def _referrals(t: _Table) -> ReferralsPolicy:
     t.done()
     if not 0 < policy.commission < 1:
         raise PolicyError("referrals: commission_percent between 0 and 100")
+    return policy
+
+
+def _reserve(t: _Table) -> ReservePolicy:
+    shares = t.mapping("sweep_percent")
+    where = t.name("sweep_percent")
+    sweep: dict[str, Fraction] = {}
+    for product_id, value in shares.items():
+        share = parse_percent(value, f"{where}.{product_id}")
+        assert share is not None
+        if not 0 < share <= 1:
+            raise PolicyError(f"{where}.{product_id}: between 0 (excluded) and 100")
+        sweep[str(product_id)] = share
+    policy = ReservePolicy(
+        on=t.boolean("on"),
+        sweep=sweep,
+        sweep_factor=t.ratio("sweep_factor"),
+        open_weight=t.ratio("open_weight"),
+        expected_weight=t.ratio("expected_weight"),
+        amber_below=t.ratio("amber_below"),
+        red_below=t.ratio("red_below"),
+        breach_below=t.ratio("breach_below"),
+        release_above=t.ratio("release_above"),
+    )
+    t.done()
+    if policy.sweep_factor < 1:
+        raise PolicyError("reserve.sweep_factor: at least 1")
+    if not policy.amber_below >= policy.red_below >= policy.breach_below > 0:
+        raise PolicyError("reserve: amber_below >= red_below >= breach_below > 0")
+    if policy.release_above < policy.amber_below:
+        raise PolicyError("reserve.release_above: at least amber_below")
     return policy
 
 

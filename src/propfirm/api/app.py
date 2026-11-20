@@ -105,6 +105,7 @@ from propfirm.customers.payout_store import PayoutRecord, PayoutRefused, Wallet
 from propfirm.customers.payouts import Eligibility, eligibility_json
 from propfirm.customers.pricing import discount_floor, price
 from propfirm.customers.referrals import ReferralRefused, Referrals
+from propfirm.customers.reserve import Evaluations, coverage, k_text
 from propfirm.customers.scaling import Scaling, ScalingRefused
 from propfirm.customers.store import (
     AccountRecord,
@@ -381,6 +382,7 @@ class Deps:
     books: Books | None = None  # the operator ledger (D-14.16)
     app_clients: AppClients | None = None  # token-to-app binding (D-14.19); None: off
     liabilities: Liabilities | None = None  # the liability desk (D-14.18)
+    evaluations: Evaluations | None = None  # reserve coverage: evaluations (D-14.20)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -1907,6 +1909,7 @@ def create_app(
             "open_cents": c.open_cents,
             "expected_cents": c.expected_cents,
             "total_cents": c.total_cents,
+            "open_profit_cents": c.open_profit_cents,
         }
 
     @app.get("/staff/liabilities")
@@ -1916,6 +1919,33 @@ def create_app(
         if deps.liabilities is None:
             raise HTTPException(status_code=503, detail="the liability desk is not configured")
         d = await deps.liabilities.desk(deps.clock())
+        reserve: dict[str, Any] | None = None
+        policy = (await deps.policy.current()).reserve if deps.policy is not None else None
+        if policy is not None and policy.on and deps.books and deps.evaluations:
+            expected, evaluations = await deps.evaluations.expected(policy)
+            c = coverage(await deps.books.reserve_cents(), d, expected, evaluations, policy)
+            reserve = {
+                "reserve_cents": c.reserve_cents,
+                "certain_cents": c.certain_cents,
+                "open_profit_cents": c.open_profit_cents,
+                "expected_cents": c.expected_cents,
+                "evaluations": c.evaluations,
+                "largest_customer_cents": c.largest_customer_cents,
+                "required_cents": c.required_cents,
+                "k": k_text(c.k),
+                "state": c.state,
+                "releasable_cents": c.releasable_cents,
+                "thresholds": {
+                    "amber_below": k_text(policy.amber_below),
+                    "red_below": k_text(policy.red_below),
+                    "breach_below": k_text(policy.breach_below),
+                    "release_above": k_text(policy.release_above),
+                },
+                "weights": {
+                    "open": k_text(policy.open_weight),
+                    "expected": k_text(policy.expected_weight),
+                },
+            }
         return {
             "as_of": d.as_of,
             "certain_cents": d.certain_cents,
@@ -1928,6 +1958,9 @@ def create_app(
             "largest": None if d.largest is None else claim_view(d.largest),
             "claims": [claim_view(c) for c in d.claims],
             "unread": list(d.unread),
+            "open_profit_cents": d.open_profit_cents,
+            "largest_customer_cents": d.largest_customer_cents,
+            "reserve": reserve,
         }
 
     @app.get("/staff/books/trial-balance")

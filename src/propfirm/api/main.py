@@ -74,6 +74,7 @@ from propfirm.customers.providers import (
     Screener,
 )
 from propfirm.customers.referrals import Referrals
+from propfirm.customers.reserve import Evaluations
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore
 from propfirm.customers.trials import Trials
@@ -349,7 +350,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         scaling = Scaling(pool, config.customer_schema, settings, live, gateway)
         trials = Trials(customers, settings, live, gateway)
         referrals = Referrals(pool, config.customer_schema, settings)
-        books = Books(pool, config.customer_schema)
+        books = Books(pool, config.customer_schema, settings)
         payouts = None
         if config.sandbox and notifications is not None:
             payouts = Payouts(
@@ -426,6 +427,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 if payouts is None
                 else Liabilities(pool, config.customer_schema, payouts, live)
             ),
+            evaluations=Evaluations(pool, config.customer_schema, live),
             classes=customers,
             scaling=scaling,
             corrections=Corrections(
