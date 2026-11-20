@@ -576,3 +576,28 @@ review v3, D3).
   queue, owners alerted, repricing proposal; breach: published delay),
   owners' capital top-ups, and the monthly release of the surplus. They
   follow as their own pull request.
+D-14.19, staff and trader sign-ins kept apart (owner, 19 Nov 2026: the
+back office accepted a trader's login and the portal a staff login;
+"follow the standard and safe protocol").
+- Separate entry points stay: the trader portal and the back office are
+  two apps with two Keycloak clients and, in production, two addresses.
+  One login page that sends each user to the right app by their ID was
+  considered and not taken: it puts the staff sign-in on the public
+  site, where phishing and password guessing aim, and shares one session
+  between the two. Workforce and customer sign-ins are kept apart as
+  standard practice.
+- The API binds each token to the app it was issued to (OIDC `azp`):
+  portal tokens reach only trader endpoints, back-office tokens only
+  staff endpoints; anything else is refused with `wrong_app`. Clients
+  per app are settings (`OIDC_PORTAL_CLIENTS`, `OIDC_OFFICE_CLIENTS`);
+  `dev-cli` is listed for development and absent from the production
+  realm.
+- The back office always asks for the password and second factor
+  (`prompt=login`), so a Keycloak session opened in the portal is never
+  reused there; a login that is not staff (`not_staff`) is signed out at
+  once and told to use the trader portal. The portal tells a staff login
+  that staff do not hold accounts there (the existing ban, 6 Nov 2026).
+- Not done here, and recommended before launch: a separate Keycloak
+  realm for staff, so the two user lists and sessions share nothing.
+  It needs a running Keycloak to build and test, which this workspace
+  lacks; the binding above already closes the hole at the API.

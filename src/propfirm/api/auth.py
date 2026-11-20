@@ -8,6 +8,10 @@ roles in the token: `trader` (default for self-registered users), `staff`
 (employees) and `admin`; what each may see is decided in `propfirm.api.app`,
 for employees by the staff directory (`propfirm.staff`).
 
+The app a token was issued to (`azp`) binds it (D-14.19): a portal token
+is refused on staff endpoints and a back-office token on trader endpoints,
+so a session taken from one app is no key to the other (`AppClients`).
+
 Keys are fetched from the realm's JWKS address and cached; an unknown key
 id triggers one refetch (Keycloak key rotation), at most every 30 seconds,
 so a stream of forged key ids cannot hammer Keycloak.
@@ -23,6 +27,14 @@ import jwt
 
 ALGORITHMS = ["RS256"]
 LEEWAY_S = 30  # clock difference tolerated between Keycloak and the API
+
+
+@dataclass(frozen=True, slots=True)
+class AppClients:
+    """Which OIDC clients may call which side of the API (D-14.19)."""
+
+    portal: frozenset[str]  # trader endpoints
+    office: frozenset[str]  # staff endpoints
 
 
 class AuthError(Exception):
@@ -41,6 +53,7 @@ class Principal:
     roles: frozenset[str]
     mfa: bool = False  # the login used a second factor (token claim `amr`)
     auth_time: int | None = None  # ms UTC: when the user last authenticated (`auth_time`)
+    client: str | None = None  # the app the token was issued to (`azp`, OIDC authorized party)
 
     def has(self, role: str) -> bool:
         return role in self.roles
@@ -136,6 +149,7 @@ class TokenVerifier:
             roles=frozenset(r for r in roles or () if isinstance(r, str)),
             mfa=bool(methods & SECOND_FACTORS),
             auth_time=auth_time,
+            client=azp if isinstance(azp := claims.get("azp"), str) and azp else None,
         )
 
 

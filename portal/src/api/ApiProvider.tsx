@@ -24,6 +24,15 @@ export type MeState =
   | { status: "ready"; me: Me }
   | { status: "error"; error: string };
 
+/** What a failed GET /me says to the trader. A staff login is refused
+here (staff do not trade; D-14.19): it is told where to go. */
+export function meError(error: unknown): string {
+  if (error instanceof ApiError && error.status === 403 && (error.code === "staff_trading_banned" || error.code === "wrong_app")) {
+    return "This is a staff login. Staff do not hold accounts here: sign out and use the back office.";
+  }
+  return error instanceof Error ? error.message : "failed";
+}
+
 /** The signed-in customer: GET /me (404: not registered yet). */
 export function useMe(): MeState & { reload: () => void } {
   const api = useApi();
@@ -43,7 +52,7 @@ export function useMe(): MeState & { reload: () => void } {
         const state: MeState =
           error instanceof ApiError && error.status === 404
             ? { status: "unregistered" }
-            : { status: "error", error: error instanceof Error ? error.message : "failed" };
+            : { status: "error", error: meError(error) };
         setFetched({ round, state });
       },
     );

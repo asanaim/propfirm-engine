@@ -359,6 +359,15 @@ export function recordHit(query: string, screens: ReadonlySet<string>): Hit | nu
   return { label: `${kind.label} ${ref}`, group: "Record", path: kind.path(ref), icon: kind.icon };
 }
 
+/** The page of a record reference (prefix and 8 digits), or null for a
+reference no page shows. */
+export function recordPath(ref: string | null): string | null {
+  if (ref === null) return null;
+  const m = /^(PO|CAS|ONB|PRG|CIF)([0-9]{8})$/.exec(ref);
+  if (m === null) return null;
+  return RECORDS.find((r) => r.prefix === m[1])?.path(ref) ?? null;
+}
+
 /** Suggestions for an empty query: recent pages, then common ones. */
 export function starters(screens: ReadonlySet<string>, recent: readonly Hit[] = recentHits(), limit = 8): Hit[] {
   const out: Hit[] = recent.map((h) => ({ ...h, group: "Recent" }));
