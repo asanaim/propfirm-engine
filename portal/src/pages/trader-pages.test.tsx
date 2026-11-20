@@ -130,3 +130,13 @@ describe("referrals (D-14.15)", () => {
     expect(storedRef()).toBeNull();
   });
 });
+
+describe("staff logins (D-14.19)", () => {
+  it("tells a staff login to use the back office", async () => {
+    const { meError } = await import("../api/ApiProvider");
+    const { ApiError } = await import("../api/client");
+    expect(meError(new ApiError(403, "staff_trading_banned", "staff do not hold challenges or trade"))).toMatch(/staff login.*back office/);
+    expect(meError(new ApiError(403, "wrong_app", "x"))).toMatch(/back office/);
+    expect(meError(new ApiError(500, null, "boom"))).toBe("boom");
+  });
+});

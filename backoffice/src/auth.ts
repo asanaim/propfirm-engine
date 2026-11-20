@@ -32,6 +32,14 @@ export interface Me {
 
 let current: User | null = null;
 
+/** Why the last sign-in was refused here (D-14.19), shown on the sign-in
+page; cleared by the next sign-in. */
+let refused: "not_staff" | "wrong_app" | null = null;
+
+export function refusedSignIn(): "not_staff" | "wrong_app" | null {
+  return refused;
+}
+
 /** The access token, renewed silently when it has expired. */
 export function tokenSource(manager: UserManager): () => Promise<string | null> {
   return async () => {
@@ -86,7 +94,10 @@ export function authProvider(manager: UserManager, api: Api): AuthProvider {
   return {
     async login() {
       const back = window.location.hash === "#/login" ? "" : window.location.hash;
-      await manager.signinRedirect({ state: { returnTo: back } });
+      refused = null;
+      // D-14.19: always ask for the password and second factor here; a
+      // Keycloak session opened in the trader portal is never reused
+      await manager.signinRedirect({ prompt: "login", state: { returnTo: back } });
     },
     async logout() {
       const user = await manager.getUser();
@@ -98,6 +109,19 @@ export function authProvider(manager: UserManager, api: Api): AuthProvider {
     },
     async checkAuth() {
       if ((await tokenSource(manager)()) === null) throw new Error("not signed in");
+      try {
+        await staffMe.get();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403 && (error.code === "not_staff" || error.code === "wrong_app")) {
+          // D-14.19: a trader's login never stays in the back office
+          refused = error.code;
+          current = null;
+          staffMe.drop();
+          await manager.removeUser();
+          throw new Error("not a staff login", { cause: error });
+        }
+        // anything else (screening, the network) is shown on its own screen
+      }
     },
     checkError(error: unknown) {
       if (error instanceof StepUpRequired) return Promise.resolve(); // shown with its own button

@@ -42,7 +42,7 @@ import valkey.asyncio as avalkey
 from fastapi import FastAPI
 
 from propfirm.api.app import Deps, create_app
-from propfirm.api.auth import JwksKeys, TokenVerifier
+from propfirm.api.auth import AppClients, JwksKeys, TokenVerifier
 from propfirm.api.system import SystemProbe
 from propfirm.audit.store import AuditStore
 from propfirm.audit.store import migrate as migrate_audit
@@ -414,6 +414,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 config.oidc_issuer, config.oidc_audience, JwksKeys(config.oidc_jwks_url, http)
             ),
             customers=customers,
+            app_clients=AppClients(
+                frozenset(config.oidc_portal_clients), frozenset(config.oidc_office_clients)
+            ),
             leaderboard=customers,
             codes=customers,
             referrals=referrals,

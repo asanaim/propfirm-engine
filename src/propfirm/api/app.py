@@ -72,7 +72,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints
 
 from propfirm.analysis import analyse, trades_from
-from propfirm.api.auth import AuthError, Principal, TokenVerifier, bearer_token
+from propfirm.api.auth import AppClients, AuthError, Principal, TokenVerifier, bearer_token
 from propfirm.audit.chain import AuditEvent
 from propfirm.audit.http import UNMATCHED, audited, clean, client_ip
 from propfirm.audit.http import target as audit_target
@@ -379,6 +379,7 @@ class Deps:
     codes: CodeStore | None = None  # the coupons screen (D-14.14)
     referrals: Referrals | None = None  # the referral ledger (D-14.15)
     books: Books | None = None  # the operator ledger (D-14.16)
+    app_clients: AppClients | None = None  # token-to-app binding (D-14.19); None: off
     liabilities: Liabilities | None = None  # the liability desk (D-14.18)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
@@ -1270,9 +1271,31 @@ async def _staff_policy(deps: Deps) -> StaffPolicy:
     return (await deps.policy.current()).staff if deps.policy is not None else StaffPolicy()
 
 
+def _wrong_app(use: str) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": "wrong_app",
+            "message": f"this sign-in is not for this app; use the {use}",
+        },
+    )
+
+
+def _bound(deps: Deps, me: Principal, side: str) -> None:
+    """D-14.19: a token works only on the app it was issued to."""
+    clients = deps.app_clients
+    if clients is None:
+        return  # no binding configured (tests, local tools)
+    if side == "portal" and me.client not in clients.portal:
+        raise _wrong_app("back office")
+    if side == "office" and me.client not in clients.office:
+        raise _wrong_app("trader portal")
+
+
 async def _trader(deps: D, me: Me) -> Principal:
     """A trader, never staff: staff and apprentices do not buy or trade
     (`staff.staff_may_trade`, decided 6 Nov 2026)."""
+    _bound(deps, me, "portal")
     _role(me, TRADER_ROLES)
     banned = not (await _staff_policy(deps)).staff_may_trade
     if banned and (await _access(deps, me)).tier is not None:
@@ -1299,6 +1322,7 @@ async def _access(deps: Deps, me: Principal) -> Access:
 async def _staff_access(deps: Deps, me: Principal) -> Access:
     """The login's staff access; a login with any staff access must have
     signed in with a second factor (`staff.login_needs_mfa`)."""
+    _bound(deps, me, "office")
     access = await _access(deps, me)
     if access.source == "screening":
         raise HTTPException(
@@ -1393,7 +1417,10 @@ async def _employee(deps: D, me: Me) -> Principal:
     """Anyone with staff access now (an apprentice too)."""
     access = await _staff_access(deps, me)
     if access.tier is None:
-        raise HTTPException(status_code=403, detail="not in this login's view")
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "not_staff", "message": "this sign-in is not a staff login"},
+        )
     return me
 
 

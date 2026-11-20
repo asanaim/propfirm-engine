@@ -36,6 +36,7 @@ def token(
     drop: tuple[str, ...] = (),
     amr: tuple[str, ...] = ("pwd", "otp"),
     auth_time: int | None = None,  # seconds; default now
+    azp: str | None = None,  # the client the token was issued to; None: no claim
 ) -> str:
     now = int(time.time())
     claims: dict[str, Any] = {
@@ -49,6 +50,8 @@ def token(
         "amr": list(amr),
         "auth_time": now if auth_time is None else auth_time,
     }
+    if azp is not None:
+        claims["azp"] = azp
     for name in drop:
         claims.pop(name, None)
     return jwt.encode(claims, key, algorithm=algorithm, headers={"kid": kid})
@@ -60,9 +63,10 @@ def bearer(
     *,
     mfa: bool = True,
     auth_time: int | None = None,
+    azp: str | None = None,
 ) -> dict[str, str]:
     amr = ("pwd", "otp") if mfa else ("pwd",)
-    raw = token(subject, roles, f"{subject}@example.com", amr=amr, auth_time=auth_time)
+    raw = token(subject, roles, f"{subject}@example.com", amr=amr, auth_time=auth_time, azp=azp)
     return {"Authorization": f"Bearer {raw}"}
 
 
