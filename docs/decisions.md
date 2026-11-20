@@ -627,3 +627,34 @@ firm's records.
   line is compared at par with the dollar record [A]. Fees are shown per
   statement; posting them as processor fees stays a staff expense entry
   (D-14.16) until the adapters report fees.
+
+D-14.22, refunds and chargebacks (build plan step 3, line 7; details
+taken under D-14.7, 20 Nov 2026; FTMO practice: a chargeback ends the
+account).
+- Refund: proposed by one member of staff with the settings change right
+  (an amount and a reason), approved or rejected by a different one.
+  Approved and proposed refunds plus open and lost chargebacks never
+  exceed the price paid; no refund while a chargeback on the order is
+  open. A refund in full ends the order's account if active (the engine
+  closes its positions and locks it; not a breach) and takes back any
+  referral commission. A part refund (goodwill, an add-on) leaves the
+  account alone.
+- Chargeback: recorded by staff until the payment adapters report
+  disputes (step 4), with the processor's case id, amount, fee and the
+  day the money was taken. At once, without a second person, because a
+  restriction never waits: a high-severity fraud alert on the customer's
+  case (which holds payouts, funded reviews and contracts while open),
+  the order's account ended, the referral commission taken back, and
+  new purchases refused while it is open or lost. A different member of
+  staff records the outcome, won or lost; won allows purchases again.
+  The case is decided on its own four-eyes path; an ended account is not
+  reopened automatically.
+- Books: `refund:<RFD>` (refunds, contra income, against cash);
+  `chargeback:<CBK>` (chargebacks, contra income, and the processor fee
+  as an operating cost, against cash); `chargeback-won:<CBK>` (the amount
+  back; the fee is not). Both lower net revenue; the cash view has
+  refunds paid and chargebacks lines.
+- A referral commission no longer accrues on an order refunded or
+  charged back before it accrued.
+- Not changed: the reserve keeps the sweep of a refunded order (the safe
+  side; the monthly release returns any surplus).

@@ -50,6 +50,7 @@ import {
   Scale,
   UserPlus,
   TrendingUp,
+  ReceiptText,
   Undo2,
 } from "lucide-react";
 
@@ -113,5 +114,6 @@ export const ICONS = {
   books: BookOpenCheck,
   liabilities: Scale,
   reconciliation: ListChecks,
+  disputes: ReceiptText,
   referrals: UserPlus,
 } satisfies Record<string, LucideIcon>;

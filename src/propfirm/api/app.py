@@ -90,6 +90,7 @@ from propfirm.customers.directory import (
     TxFilter,
     export_rows,
 )
+from propfirm.customers.disputes import DisputeRefused, Disputes
 from propfirm.customers.four_eyes import open_proposal, proposal_json
 from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
@@ -385,6 +386,7 @@ class Deps:
     liabilities: Liabilities | None = None  # the liability desk (D-14.18)
     evaluations: Evaluations | None = None  # reserve coverage: evaluations (D-14.20)
     reconciliations: Reconciliations | None = None  # processor statements (D-14.21)
+    disputes: Disputes | None = None  # refunds and chargebacks (D-14.22)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
@@ -540,6 +542,38 @@ class ExpenseBody(_Body):
     memo: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
     paid: bool  # paid now (cash) or owed (payables)
     incurred_at: Annotated[int, Field(ge=0)]
+
+
+_Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class RefundBody(_Body):
+    """A refund on a paid order (D-14.22); a second member of staff decides."""
+
+    amount_cents: Annotated[int, Field(ge=1, le=10**12)]
+    reason: _Reason
+
+
+class RefundDecision(_Body):
+    approve: bool
+    reason: _Reason
+
+
+class ChargebackBody(_Body):
+    """A chargeback the processor reported (D-14.22)."""
+
+    amount_cents: Annotated[int, Field(ge=1, le=10**12)]
+    fee_cents: Annotated[int, Field(ge=0, le=10**9)] = 0
+    provider_case: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ]
+    reason: _Reason
+    received_at: Annotated[int, Field(ge=0)]
+
+
+class ChargebackDecision(_Body):
+    outcome: Literal["won", "lost"]
+    reason: _Reason
 
 
 class ExpenseDecision(_Body):
@@ -2055,6 +2089,87 @@ def create_app(
         detail = {"code": exc.code, "message": message, "problems": list(exc.problems)}
         return HTTPException(status_code=status, detail=detail)
 
+    def _disputes(deps: Deps) -> Disputes:
+        if deps.disputes is None:
+            raise HTTPException(status_code=503, detail="refunds are not configured")
+        return deps.disputes
+
+    def _dispute_refused(exc: DisputeRefused) -> HTTPException:
+        status = {"unknown": 404, "same_person": 403}.get(exc.code, 409)
+        if exc.code == "invalid":
+            status = 422
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    OrdPath = Annotated[str, Path(pattern=r"^ORD[0-9]{8}$")]
+
+    @app.get("/staff/refunds")
+    async def refund_list(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        return await _disputes(deps).refunds()
+
+    @app.post("/staff/orders/{ord_id}/refunds", status_code=201)
+    async def propose_refund(
+        deps: D, me: SettingsChanger, ord_id: OrdPath, body: RefundBody
+    ) -> dict[str, Any]:
+        """Propose a refund; a different member of staff decides it."""
+        try:
+            return await _disputes(deps).propose_refund(
+                ord_id, body.amount_cents, body.reason, me.subject, deps.clock()
+            )
+        except DisputeRefused as exc:
+            raise _dispute_refused(exc) from exc
+
+    @app.post("/staff/refunds/{rfd}/decision")
+    async def decide_refund(
+        deps: D,
+        me: SettingsChanger,
+        rfd: Annotated[str, Path(pattern=r"^RFD[0-9]{8}$")],
+        body: RefundDecision,
+    ) -> dict[str, Any]:
+        try:
+            return await _disputes(deps).decide_refund(
+                rfd, body.approve, body.reason, me.subject, deps.clock()
+            )
+        except DisputeRefused as exc:
+            raise _dispute_refused(exc) from exc
+
+    @app.get("/staff/chargebacks")
+    async def chargeback_list(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        return await _disputes(deps).chargebacks()
+
+    @app.post("/staff/orders/{ord_id}/chargebacks", status_code=201)
+    async def record_chargeback(
+        deps: D, me: SettingsChanger, ord_id: OrdPath, body: ChargebackBody
+    ) -> dict[str, Any]:
+        """Record a chargeback: the account ends, payouts are held by a case
+        and the customer cannot buy, at once."""
+        try:
+            return await _disputes(deps).record_chargeback(
+                ord_id,
+                body.amount_cents,
+                body.fee_cents,
+                body.provider_case,
+                body.reason,
+                body.received_at,
+                me.subject,
+                deps.clock(),
+            )
+        except DisputeRefused as exc:
+            raise _dispute_refused(exc) from exc
+
+    @app.post("/staff/chargebacks/{cbk}/decision")
+    async def decide_chargeback(
+        deps: D,
+        me: SettingsChanger,
+        cbk: Annotated[str, Path(pattern=r"^CBK[0-9]{8}$")],
+        body: ChargebackDecision,
+    ) -> dict[str, Any]:
+        try:
+            return await _disputes(deps).decide_chargeback(
+                cbk, body.outcome, body.reason, me.subject, deps.clock()
+            )
+        except DisputeRefused as exc:
+            raise _dispute_refused(exc) from exc
+
     @app.post("/staff/reconciliations", status_code=201)
     async def upload_statement(deps: D, me: SettingsChanger, body: StatementBody) -> dict[str, Any]:
         """Match a processor statement to orders and payouts (D-14.21);
@@ -2622,6 +2737,14 @@ def create_app(
                 detail={"code": "policies_pending", "message": "accept the updated policies"},
             )
         await check_method(deps, body)
+        if deps.disputes is not None and await deps.disputes.blocks_purchase(cif.cif):
+            raise HTTPException(  # D-14.22: a chargeback open or lost
+                status_code=403,
+                detail={
+                    "code": "purchases_held",
+                    "message": "purchases are held on this account; contact support",
+                },
+            )
         try:
             order, pay_url = await _checkout(deps).place_order(
                 cif, body.product_id, body.size_cents, body.code, deps.clock(), tuple(body.addons)
