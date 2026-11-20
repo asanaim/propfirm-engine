@@ -8,6 +8,9 @@ export interface SiteStatus {
   registration_open: boolean;
   registering: boolean;
   selling: boolean;
+  /** D-14.23: published when the payout reserve is short, never silent. */
+  payouts_delayed?: boolean;
+  payouts_delayed_since?: number | null;
 }
 
 export type ClosedKind = "maintenance" | "registration_closed";
@@ -102,6 +105,12 @@ export function MaintenanceBanner({ status }: { status: SiteStatus }) {
       Maintenance: new registrations and challenge purchases are paused. Sign in, trading and payouts work as usual.
     </div>
   );
+}
+
+/** The words shown on the payouts page while payouts are delayed (D-14.23). */
+export function payoutDelayText(since: number | null | undefined): string {
+  const from = since ? ` since ${new Date(since).toISOString().slice(0, 10)}` : "";
+  return `Payouts are taking longer than usual${from}. Every approved payout will be paid, in the order it was requested; you do not need to request again.`;
 }
 
 /** One website section's approved fields (empty until approved, or if

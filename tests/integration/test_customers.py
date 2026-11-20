@@ -43,7 +43,7 @@ from propfirm.customers.providers import (
 )
 from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
-from propfirm.customers.reserve import Evaluations
+from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.journal.stream import InputStreamWriter
@@ -100,6 +100,7 @@ class Platform:
     scaling: Scaling | None = None  # scaling steps (D-14.8)
     referrals: Referrals | None = None  # the referral ledger (D-14.15)
     books: Books | None = None  # the operator ledger (D-14.16)
+    reserve: Reserve | None = None  # coverage states and moves (D-14.23)
 
     async def call(
         self,
@@ -191,6 +192,11 @@ async def platform(
         cases=cases,
         live=live,
     )
+    reserve_box: list[Reserve] = []
+
+    async def funded_held() -> bool:
+        return bool(reserve_box) and limits(await reserve_box[0].state()).funded_queue
+
     onboarding = (
         Onboarding(
             onboardings,
@@ -203,6 +209,7 @@ async def platform(
             sandbox=sandbox,
             wait_s=wait_s,
             cases=cases,
+            held=funded_held,
         )
         if funded
         else None
@@ -240,6 +247,10 @@ async def platform(
     )
     await staff.bootstrap(clock())
     desk = StaffDesk(pool, config.staff_schema, load_duties())
+    liabilities = Liabilities(pool, config.customer_schema, payouts, live)
+    evaluations = Evaluations(pool, config.customer_schema, live)
+    reserve = Reserve(pool, config.customer_schema, settings, books, liabilities, evaluations, desk)
+    reserve_box.append(reserve)
     identity = SandboxIdentity()
     cutoffs = Cutoffs(staff.store, identity, desk)
     oversight = Oversight(pool, config.staff_schema, config.customer_schema, staff.store, desk)
@@ -258,8 +269,9 @@ async def platform(
         codes=store,
         referrals=referrals,
         books=books,
-        liabilities=Liabilities(pool, config.customer_schema, payouts, live),
-        evaluations=Evaluations(pool, config.customer_schema, live),
+        liabilities=liabilities,
+        evaluations=evaluations,
+        reserve=reserve,
         reconciliations=Reconciliations(pool, config.customer_schema),
         disputes=Disputes(
             pool, config.customer_schema, gateway, live, cases, referrals, wait_s=wait_s
@@ -343,6 +355,7 @@ async def platform(
             trail,
             scaling=scaling,
             referrals=referrals,
+            reserve=reserve,
             books=books,
         )
     finally:
@@ -530,7 +543,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 24))
+            assert await migrate(conn, schema) == list(range(1, 25))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

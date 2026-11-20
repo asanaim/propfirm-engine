@@ -76,7 +76,7 @@ from propfirm.customers.providers import (
 )
 from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
-from propfirm.customers.reserve import Evaluations
+from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore
 from propfirm.customers.trials import Trials
@@ -169,6 +169,7 @@ async def _lifecycle_forever(
     trials: Trials | None = None,
     referrals: Referrals | None = None,
     books: Books | None = None,
+    reserve: Reserve | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -190,7 +191,14 @@ async def _lifecycle_forever(
                 await payouts.advance(now_ms())  # each payout's next step, recorded first
             except Exception:  # retried next round
                 log.exception("payout round failed")
-        if scaling is not None:
+        frozen = False
+        if reserve is not None:
+            try:  # records each change of the coverage state, at most a minute apart
+                await reserve.watch(now_ms())
+                frozen = limits(await reserve.state()).scaling_frozen
+            except Exception:
+                log.exception("reserve watch failed")
+        if scaling is not None and not frozen:  # D-14.23: frozen while cover is thin
             try:  # proposes due scaling steps, at most hourly (D-14.8)
                 await scaling.run(now_ms())
             except Exception:
@@ -316,6 +324,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             screener = WorkflowScreening()  # the Didit workflow includes AML screening
         elif config.sandbox:
             kyc, screener = SandboxKyc(), SandboxScreener()
+        reserve_box: list[Reserve] = []  # built once payouts exist, below
+
+        async def funded_held() -> bool:  # D-14.23: new funded accounts queue in red
+            return bool(reserve_box) and limits(await reserve_box[0].state()).funded_queue
+
         onboarding = None
         if kyc is not None and screener is not None:
             onboarding = Onboarding(
@@ -329,6 +342,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 sandbox=config.sandbox,
                 callback_url=config.public_url,
                 cases=cases,
+                held=funded_held,
             )
         lifecycle = Lifecycle(progressions, settings, gateway, cases=cases, notices=settings)
         mailer: Mailer | None = None
@@ -368,6 +382,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 history=HistoryReader(pool, config.read_schema),
                 scaling=scaling,
             )
+        liabilities = (
+            None if payouts is None else Liabilities(pool, config.customer_schema, payouts, live)
+        )
+        evaluations = Evaluations(pool, config.customer_schema, live)
+        reserve = (
+            None
+            if liabilities is None
+            else Reserve(
+                pool, config.customer_schema, settings, books, liabilities, evaluations, desk
+            )
+        )
+        if reserve is not None:
+            reserve_box.append(reserve)
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
         tasks.append(asyncio.create_task(_publish_calendars(news, live)))
         if config.news_collector:
@@ -406,6 +433,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     trials,
                     referrals,
                     books,
+                    reserve,
                 )
             )
         )
@@ -424,12 +452,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             codes=customers,
             referrals=referrals,
             books=books,
-            liabilities=(
-                None
-                if payouts is None
-                else Liabilities(pool, config.customer_schema, payouts, live)
-            ),
-            evaluations=Evaluations(pool, config.customer_schema, live),
+            liabilities=liabilities,
+            evaluations=evaluations,
+            reserve=reserve,
             reconciliations=Reconciliations(pool, config.customer_schema),
             disputes=Disputes(pool, config.customer_schema, gateway, live, cases, referrals),
             classes=customers,

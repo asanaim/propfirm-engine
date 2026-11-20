@@ -9,6 +9,7 @@ loop) retries whatever a crash or an unanswered call left undone.
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -72,6 +73,7 @@ class Onboarding:
         callback_url: str | None = None,
         wait_s: float = 5.0,
         cases: Casework | None = None,
+        held: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
         """`checkout` opens Instant accounts (None: Instant onboardings stop
         after signing). Outside the sandbox, a contract whose firm name or
@@ -87,6 +89,7 @@ class Onboarding:
         self._callback = callback_url
         self._wait_s = wait_s
         self._cases = cases
+        self._held = held  # whether new funded accounts wait (reserve red)
 
     @property
     def store(self) -> OnboardingStore:
@@ -355,6 +358,8 @@ class Onboarding:
         record = await self._get(onb)
         if record.status != "signed" or record.acc is None:
             return record
+        if record.source != "order" and self._held is not None and await self._held():
+            return record  # D-14.23: new funded accounts queue in red; retried each round
         if record.source == "order":
             if self._checkout is None:
                 return record

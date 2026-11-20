@@ -952,7 +952,8 @@ def test_the_site_is_open_until_a_second_person_approves_a_change_of_mode() -> N
                           "tiers": OWNERS}  # fmt: skip
     status = api("GET", "/site/status", signed_in=False, **kw).json()
     assert status == {"maintenance": False, "registration_open": True,
-                      "registering": True, "selling": True}  # fmt: skip
+                      "registering": True, "selling": True,
+                      "payouts_delayed": False, "payouts_delayed_since": None}  # fmt: skip
     body = {"maintenance": True, "registration_open": True, "reason": "database upgrade"}
     assert api("PUT", "/admin/site-mode", body, user="admin-1", **kw).status_code == 200
     assert api("GET", "/site/status", signed_in=False, **kw).json()["maintenance"] is False

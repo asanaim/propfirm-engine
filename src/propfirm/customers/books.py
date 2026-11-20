@@ -27,6 +27,9 @@ twice posts once:
 - `reserve-sweep:<ORD>`: with the reserve on (D-14.20), the product's
   sweep share of a paid order's price, rounded up to the cent, moves from
   cash to the payout reserve.
+- `reserve-topup:<RSM>`: owners' capital put into the reserve;
+  `reserve-release:<RSM>`: reserve above the release line back to cash.
+  Both approved by a second member of staff (D-14.23).
 - `reserve-draw:<PO>`: a paid payout is drawn from the reserve back to
   cash, in full. A reserve drawn below zero is a shortfall owed to it.
 
@@ -231,6 +234,22 @@ def draw_entry(row: dict[str, Any]) -> Entry:
         "reserve_draw",
         (Posting(CASH, amount), Posting(RESERVE, -amount)),
         row["po"],
+    )
+
+
+def reserve_move_entry(row: dict[str, Any]) -> Entry:
+    """An approved top-up (owner -> reserve) or release (reserve -> cash)."""
+    amount = int(row["amount_cents"])
+    if row["kind"] == "topup":
+        postings = (Posting(RESERVE, amount), Posting(OWNER_EQUITY, -amount))
+    else:
+        postings = (Posting(CASH, amount), Posting(RESERVE, -amount))
+    return Entry(
+        f"reserve-{row['kind']}:{row['rsm']}",
+        int(row["decided_at"]),
+        f"reserve_{row['kind']}",
+        postings,
+        str(row["rsm"]),
     )
 
 
@@ -463,6 +482,13 @@ class Books:
             if share is not None and (e := sweep_entry(dict(r), share)) is not None:
                 out.append(e)
         out += [draw_entry(dict(r)) for r in paid if int(r["trader_amount_cents"]) > 0]
+        moves = await self._pool.fetch(
+            f"SELECT m.rsm, m.kind, m.amount_cents, m.decided_at FROM {s}.reserve_moves m "
+            f"WHERE m.status = 'approved' AND NOT EXISTS (SELECT 1 FROM {s}.ops_entries e "
+            f"WHERE e.entry_id = 'reserve-' || m.kind || ':' || m.rsm) "
+            f"ORDER BY m.decided_at, m.rsm"
+        )
+        out += [reserve_move_entry(dict(r)) for r in moves]
         return out
 
     async def reserve_cents(self) -> int:

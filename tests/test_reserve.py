@@ -179,3 +179,33 @@ def test_r_star_rounds_up_and_a_short_reserve_is_red_then_breach() -> None:
     assert coverage(-10, desk(100), 0, 0, POLICY).state == BREACH
     assert coverage(0, desk(), 0, 0, POLICY).state == NORMAL  # nothing owed
     assert coverage(0, desk(), 0, 0, POLICY).releasable_cents == 0
+
+
+def test_each_state_adds_its_limits_to_the_ones_before() -> None:
+    from propfirm.customers.reserve import Limits, limits
+
+    assert limits(NORMAL) == Limits(False, False, "open", False, False)
+    assert limits(AMBER) == Limits(True, True, "capped", False, False)
+    assert limits(RED) == Limits(True, True, "stopped", True, False)
+    assert limits(BREACH) == Limits(True, True, "stopped", True, True)
+
+
+def test_the_instant_cap_is_the_trailing_daily_average_rounded_up() -> None:
+    from propfirm.customers.reserve import instant_cap
+
+    assert instant_cap(0) == 1  # capped, never stopped, in amber
+    assert instant_cap(30) == 1
+    assert instant_cap(31) == 2
+    assert instant_cap(300) == 10
+
+
+def test_top_ups_come_from_the_owners_and_releases_go_to_cash() -> None:
+    from propfirm.customers.books import OWNER_EQUITY, reserve_move_entry
+
+    row = {"rsm": "RSM1", "kind": "topup", "amount_cents": 500, "decided_at": 3}
+    up = reserve_move_entry(row)
+    assert (up.entry_id, up.kind) == ("reserve-topup:RSM1", "reserve_topup")
+    assert [(p.account, p.amount) for p in up.postings] == [(RESERVE, 500), (OWNER_EQUITY, -500)]
+    down = reserve_move_entry({**row, "kind": "release"})
+    assert (down.entry_id, down.kind) == ("reserve-release:RSM1", "reserve_release")
+    assert [(p.account, p.amount) for p in down.postings] == [(CASH, 500), (RESERVE, -500)]

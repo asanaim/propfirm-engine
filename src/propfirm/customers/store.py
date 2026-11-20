@@ -864,6 +864,38 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX ON {s}.chargebacks (cif);
         """,
     ),
+    (
+        24,
+        """
+        -- reserve states and moves (D-14.23): each change of the coverage
+        -- state as it was seen (append-only), and owners' top-ups and
+        -- releases, proposed by one member of staff and decided by another
+        CREATE TABLE {s}.reserve_states (
+            seq bigserial PRIMARY KEY,
+            at bigint NOT NULL,
+            state text NOT NULL CHECK (state IN ('normal', 'amber', 'red', 'breach')),
+            k text,
+            reserve_cents bigint NOT NULL,
+            required_cents bigint NOT NULL
+        );
+        CREATE TRIGGER reserve_states_append_only BEFORE UPDATE OR DELETE ON {s}.reserve_states
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE SEQUENCE {s}.rsm_seq;
+        CREATE TABLE {s}.reserve_moves (
+            rsm text PRIMARY KEY,
+            kind text NOT NULL CHECK (kind IN ('topup', 'release')),
+            amount_cents bigint NOT NULL CHECK (amount_cents > 0),
+            reason text NOT NULL,
+            proposed_by text NOT NULL,
+            proposed_at bigint NOT NULL,
+            status text NOT NULL CHECK (status IN ('proposed', 'approved', 'rejected')),
+            decided_by text,
+            decided_at bigint,
+            decision_reason text,
+            CHECK (decided_by IS NULL OR decided_by <> proposed_by)
+        );
+        """,
+    ),
 )
 
 

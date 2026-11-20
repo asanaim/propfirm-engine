@@ -1,5 +1,6 @@
 import { useEffect, useState, type SyntheticEvent } from "react";
 import { useApi, useMe } from "../api/ApiProvider";
+import { payoutDelayText, useSiteStatus } from "../components/SiteStatus";
 import { ApiError } from "../api/client";
 import type { AccountRecord, Eligibility, Payout, PayoutStatus, Wallet } from "../api/types";
 import { useAuth } from "../auth/AuthProvider";
@@ -36,6 +37,7 @@ export function looksLikeTron(address: string): boolean {
 export function PayoutsPage() {
   const auth = useAuth();
   const me = useMe();
+  const site = useSiteStatus();
   const [round, setRound] = useState(0);
   if (me.status === "loading") return <Loading />;
   if (me.status === "anonymous") {
@@ -64,6 +66,7 @@ export function PayoutsPage() {
   return (
     <div className="page">
       <h1>Payouts</h1>
+      {site.status.payouts_delayed ? <Notice>{payoutDelayText(site.status.payouts_delayed_since)}</Notice> : null}
       <WalletCard onSaved={walletSaved} />
       {funded.length === 0 ? (
         <Card>

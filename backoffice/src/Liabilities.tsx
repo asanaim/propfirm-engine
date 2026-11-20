@@ -1,5 +1,10 @@
-import { Alert, Box, Card, CardContent, CardHeader, Chip, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { useState } from "react";
 import { Title } from "react-admin";
+import { ApiError } from "./api";
+import { cents } from "./Books";
+import { useBackOffice } from "./context";
+import { when } from "./format";
 import { usd } from "./Scaling";
 import { useGet } from "./useGet";
 
@@ -50,9 +55,9 @@ export interface Desk {
 /** What each coverage state means and what follows it (D-14.20). */
 export const STATES: Record<Reserve["state"], { label: string; color: "success" | "warning" | "error"; note: string }> = {
   normal: { label: "Normal", color: "success", note: "The reserve covers what is owed with room to spare." },
-  amber: { label: "Amber", color: "warning", note: "Thin cover: hold promotions below list and scaling." },
-  red: { label: "Red", color: "error", note: "New funded accounts should queue; owners act." },
-  breach: { label: "Breach", color: "error", note: "Owners add capital or stop the worst product; publish any delay." },
+  amber: { label: "Amber", color: "warning", note: "In force: discount codes paused, scaling frozen, Instant capped at its 30 day daily average." },
+  red: { label: "Red", color: "error", note: "In force: amber's limits, Instant sales stopped and new funded accounts queued. Owners: reprice the product with the highest payout ratio." },
+  breach: { label: "Breach", color: "error", note: "In force: red's limits and a payout delay notice on the trader site. Owners: add capital below or stop the worst product." },
 };
 
 /** The parts of the requirement R*: label, amount, note. */
@@ -129,6 +134,116 @@ export function tiles(d: Desk): [string, number, string][] {
 }
 
 /** Liability desk (D-14.18): what the firm owes or may owe traders. */
+interface Move {
+  rsm: string;
+  kind: "topup" | "release";
+  amount_cents: number;
+  reason: string;
+  proposed_by: string;
+  proposed_at: number;
+  status: "proposed" | "approved" | "rejected";
+  decided_by: string | null;
+}
+
+/** Owners' capital into the reserve, and surplus back to cash: proposed by
+one member of staff, decided by another (D-14.23). */
+function ReserveMoves() {
+  const { api } = useBackOffice();
+  const moves = useGet<Move[]>("/staff/reserve/moves");
+  const [form, setForm] = useState({ kind: "topup", amount: "", reason: "" });
+  const [why, setWhy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const amount = cents(form.amount);
+  const run = async (path: string, body: unknown, done: string) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.post(path, body);
+      setMessage({ ok: true, text: done });
+      moves.reload();
+      return true;
+    } catch (exc) {
+      setMessage({ ok: false, text: exc instanceof ApiError ? exc.message : "The request failed." });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader title="Top-ups and releases" subheader="Owners' capital into the reserve, or what lies above the release line back to cash. Someone else decides; the books post it within a minute." />
+      <CardContent>
+        <Stack spacing={1.5}>
+          {message ? <Alert severity={message.ok ? "success" : "error"}>{message.text}</Alert> : null}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+            <TextField select size="small" label="Move" value={form.kind} onChange={(e) => { setForm({ ...form, kind: e.target.value }); }} sx={{ minWidth: 150 }}>
+              <MenuItem value="topup">Top-up</MenuItem>
+              <MenuItem value="release">Release</MenuItem>
+            </TextField>
+            <TextField size="small" label="Amount (USD)" value={form.amount} onChange={(e) => { setForm({ ...form, amount: e.target.value }); }} sx={{ width: 150 }} />
+            <TextField size="small" label="Reason" value={form.reason} onChange={(e) => { setForm({ ...form, reason: e.target.value }); }} sx={{ flexGrow: 1 }} />
+            <Button
+              variant="contained"
+              disabled={busy || amount === null || form.reason.trim() === ""}
+              onClick={() => {
+                if (amount === null) return;
+                void run("/staff/reserve/moves", { kind: form.kind, amount_cents: amount, reason: form.reason.trim() }, "Proposed.").then((ok) => {
+                  if (ok) setForm({ ...form, amount: "", reason: "" });
+                });
+              }}
+            >
+              Propose
+            </Button>
+          </Stack>
+          <TextField size="small" label="Reason for a decision" value={why} onChange={(e) => { setWhy(e.target.value); }} />
+          {moves.result.state === "ready" && moves.result.data.length > 0 ? (
+            <Table size="small" aria-label="Reserve moves">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Move</TableCell>
+                  <TableCell>Kind</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                  <TableCell>Reason</TableCell>
+                  <TableCell>Proposed</TableCell>
+                  <TableCell>State</TableCell>
+                  <TableCell />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {moves.result.data.map((m) => (
+                  <TableRow key={m.rsm}>
+                    <TableCell sx={{ fontFamily: "monospace" }}>{m.rsm}</TableCell>
+                    <TableCell>{m.kind === "topup" ? "Top-up" : "Release"}</TableCell>
+                    <TableCell align="right">{usd(m.amount_cents)}</TableCell>
+                    <TableCell>{m.reason}</TableCell>
+                    <TableCell>{when(m.proposed_at)} by {m.proposed_by}</TableCell>
+                    <TableCell>
+                      <Chip size="small" label={m.status} color={m.status === "approved" ? "success" : m.status === "proposed" ? "warning" : "default"} />
+                    </TableCell>
+                    <TableCell>
+                      {m.status === "proposed" ? (
+                        <Stack direction="row" spacing={1}>
+                          <Button size="small" disabled={busy || why.trim() === ""} onClick={() => void run(`/staff/reserve/moves/${m.rsm}/decision`, { approve: true, reason: why.trim() }, `${m.rsm} approved.`)}>
+                            Approve
+                          </Button>
+                          <Button size="small" color="inherit" disabled={busy || why.trim() === ""} onClick={() => void run(`/staff/reserve/moves/${m.rsm}/decision`, { approve: false, reason: why.trim() }, `${m.rsm} rejected.`)}>
+                            Reject
+                          </Button>
+                        </Stack>
+                      ) : null}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : null}
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function LiabilitiesPage() {
   const { result } = useGet<Desk>("/staff/liabilities");
   return (
@@ -157,6 +272,7 @@ export function LiabilitiesPage() {
             ))}
           </Box>
           {result.data.reserve ? <ReservePanel r={result.data.reserve} /> : null}
+          {result.data.reserve ? <ReserveMoves /> : null}
           <Card>
             <CardHeader title="Largest claims" subheader={`As of ${new Date(result.data.as_of).toLocaleString()}`} />
             <CardContent>
