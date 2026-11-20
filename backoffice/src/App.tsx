@@ -31,6 +31,8 @@ const AnomalyReport = lazyPage(() => import("./Reports"), "AnomalyReport");
 const AuditTrail = lazyPage(() => import("./Reports"), "AuditTrail");
 const NewsDesk = lazyPage(() => import("./Reports"), "NewsDesk");
 const CorrectionsPage = lazyPage(() => import("./Corrections"), "CorrectionsPage");
+const ClustersPage = lazyPage(() => import("./Clusters"), "ClustersPage");
+const ClassesPage = lazyPage(() => import("./Classes"), "ClassesPage");
 const ScalingPage = lazyPage(() => import("./Scaling"), "ScalingPage");
 const CouponsPage = lazyPage(() => import("./Coupons"), "CouponsPage");
 const ReferralsPage = lazyPage(() => import("./Referrals"), "ReferralsPage");
@@ -101,6 +103,8 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
                 {screens.has("audit") ? <Route path="/audit" element={<AuditTrail />} /> : null}
                 {screens.has("news") ? <Route path="/news" element={<NewsDesk />} /> : null}
                 {screens.has("cases") ? <Route path="/corrections" element={<CorrectionsPage />} /> : null}
+                {screens.has("cases") ? <Route path="/clusters" element={<ClustersPage />} /> : null}
+                {screens.has("cases") ? <Route path="/classes" element={<ClassesPage />} /> : null}
                 {screens.has("progressions") ? <Route path="/scaling" element={<ScalingPage />} /> : null}
                 {screens.has("settings") ? <Route path="/coupons" element={<CouponsPage />} /> : null}
                 {screens.has("settings") ? <Route path="/referrals" element={<ReferralsPage />} /> : null}

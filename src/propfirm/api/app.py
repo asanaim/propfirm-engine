@@ -82,6 +82,9 @@ from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout, CheckoutError, Registration
+from propfirm.customers.classes import Classes
+from propfirm.customers.classes import counts as class_counts
+from propfirm.customers.clusters import Clusters
 from propfirm.customers.corrections import CorrectionRefused, Corrections
 from propfirm.customers.directory import (
     SEGMENTS,
@@ -405,8 +408,10 @@ class Deps:
     rails: Rails | None = None  # the rail of each payment method (D-14.24)
     receipts: Receipts | None = None  # manual payments, checked by two (D-14.24)
     transfers: Transfers | None = None  # payouts sent by hand (D-14.25)
+    clusters: Clusters | None = None  # identity clusters (D-14.27)
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
+    daily_classes: Classes | None = None  # the daily classing job's view (D-14.28)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
     client_ip_header: str | None = None  # set by a trusted proxy (X-Forwarded-For), else None
     didit_webhook_secret: str | None = None
@@ -2196,6 +2201,60 @@ def create_app(
                 },
             )
 
+    async def _no_instant_when_watched(deps: Deps, product_id: str) -> None:
+        """D-14.28: a customer in class C or D does not buy Instant."""
+        if deps.policy is None:
+            return
+        try:
+            product = (await deps.policy.current()).product(product_id)
+        except KeyError:
+            return
+        if instant_funding(product):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "instant_not_offered",
+                    "message": "instant funding is not offered on this profile; an evaluation is",
+                },
+            )
+
+    def _classes(deps: Deps) -> Classes:
+        if deps.daily_classes is None:
+            raise HTTPException(status_code=503, detail="classes are not configured")
+        return deps.daily_classes
+
+    @app.get("/staff/classes")
+    async def class_list(deps: D, me: CaseWorker) -> dict[str, Any]:
+        """Every classed account's class in force (D-14.28), with counts;
+        an account with no record is class B."""
+        rows = await _classes(deps).current()
+        return {"counts": class_counts(rows), "accounts": rows}
+
+    @app.get("/staff/accounts/{acc}/class")
+    async def class_history(deps: D, me: CaseWorker, acc: Ident) -> dict[str, Any]:
+        """An account's class in force (B when none) and every change."""
+        history = await _classes(deps).history(acc)
+        return {"class": history[-1]["class"] if history else "B", "history": history}
+
+    def _clusters(deps: Deps) -> Clusters:
+        if deps.clusters is None:
+            raise HTTPException(status_code=503, detail="clusters are not configured")
+        return deps.clusters
+
+    @app.get("/staff/clusters")
+    async def cluster_list(deps: D, me: CaseWorker) -> list[dict[str, Any]]:
+        """Customers linked as one person (D-14.27), largest first."""
+        return await _clusters(deps).clusters()
+
+    @app.get("/staff/customers/{cif}/cluster")
+    async def customer_cluster(
+        deps: D, me: CaseWorker, cif: Annotated[str, Path(pattern=r"^CIF[0-9]{8}$")]
+    ) -> dict[str, Any]:
+        found = await _clusters(deps).cluster_of(cif)
+        if found is None:
+            return {"cluster": None, "members": [cif], "links": []}
+        return found
+
     def _transfers(deps: Deps) -> Transfers:
         if deps.transfers is None:
             raise HTTPException(status_code=503, detail="manual payouts are not configured")
@@ -2984,6 +3043,8 @@ def create_app(
         await check_method(deps, body)
         if deps.reserve is not None:
             await _reserve_allows(deps, body.product_id, body.code)
+        if deps.daily_classes is not None and await deps.daily_classes.watched(cif.cif):
+            await _no_instant_when_watched(deps, body.product_id)
         if deps.disputes is not None and await deps.disputes.blocks_purchase(cif.cif):
             raise HTTPException(  # D-14.22: a chargeback open or lost
                 status_code=403,

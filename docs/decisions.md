@@ -771,3 +771,59 @@ on TRC-20).
   closed later takes no new wallets; wallets on it are still paid.
 - Another network (Solana, a second coin) is code: its address check and
   its name in `customers.networks`, then the switch.
+
+D-14.27, identity clusters (build plan step 5, line 1; thresholds from
+strategic review v3, D4, as starting values; details taken under D-14.7,
+20 Nov 2026).
+- Links between two customers, each with its evidence, looked for at
+  most hourly by the API loop:
+  - identity: the duplicate identity alert raised at funding (same date
+    of birth and name as another verified customer);
+  - wallet: the same payout address on the same network (EVM addresses
+    compared without case); a new link raises a medium fraud alert on
+    both customers, which opens a case and holds their payouts until
+    staff decide;
+  - trades: at least 5 positions opened within 2 seconds of one another
+    on the same symbol, either side, in the last 30 days.
+- A cluster is the connected set; its id is its lowest CIF, so the same
+  links always give the same clusters. Links are derived and
+  rebuildable, so a link's evidence and last sighting are updated.
+- Used now: the reserve's largest claim of one trader (D-14.20) sums a
+  cluster. Next: the allocation cap and the Instant limit (D2 of the
+  review), and the detectors (line 3) read clusters.
+- Not yet: device and payment instrument links. The platform keeps no
+  device fingerprint, and hosted payment pages give it no card or payer
+  wallet. Each comes with its source.
+- Read by staff with case work rights (Identity clusters page).
+
+D-14.28, daily trader classes (build plan step 5, line 2; thresholds from
+strategic review v3, D5, as starting values in `[classes]`; decided by the
+owner's rule of 20 Nov 2026, "take the most suitable decision").
+- Built on D-14.5: one record, `account_class_changes`; no second table.
+  The daily job (API loop, once a day) classes every active funded
+  account and records a change only when the class or its reasons
+  change, set by "system", the reason "daily: <reasons>; <measures>".
+- A, proven: 60 trading days, 200 trades, t statistic of daily results
+  above 2, profit factor above 1.3, 3 payouts paid, under 20% of profit
+  from short holds, no case ever actioned. Tested exactly in fractions.
+- C, watch: over 50% of profit from holds under 60 seconds; a chargeback
+  not won; a trades link in an identity cluster (D-14.27).
+- D, restricted: a case on the customer actioned in the last 90 days.
+- B: everyone else, and every account with no record. D wins over C, C
+  over A.
+- A person's decision stands: a class set by staff or by the payout
+  check is changed by the job only to a worse class on a fact newer than
+  it (a chargeback, a cluster link, an actioned case). Short holds carry
+  no date, so they never override staff. The job lifts only classes it
+  set itself.
+- In force now for C and D: every payout reviewed in a case and no
+  scaling (D-14.5, already built); no Instant purchase (403
+  `instant_not_offered`; an evaluation is still sold).
+- Not yet, flagged:
+  - lot caps halved for C and close only for D need an engine input
+    journaled with the risk policy version (line 6);
+  - A's lighter payout review and first place for scaling widen the
+    baseline; they need a second person's approval (D10 of the review);
+  - markout and news window measures need the second price source and
+    the release calendar join.
+- Read by staff with case work rights (Trader classes page).
