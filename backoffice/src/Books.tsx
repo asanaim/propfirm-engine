@@ -50,6 +50,8 @@ export const LINES: Record<"accrual" | "cash", [string, string][]> = {
     ["fees", "Fees"],
     ["discounts", "Discounts"],
     ["fee_refunds", "Fee refunds"],
+    ["refunds", "Refunds"],
+    ["chargebacks", "Chargebacks"],
     ["net_revenue", "Net revenue"],
     ["payouts", "Trader payouts"],
     ["commissions", "Commissions"],
@@ -59,6 +61,8 @@ export const LINES: Record<"accrual" | "cash", [string, string][]> = {
   ],
   cash: [
     ["received", "Received"],
+    ["refunds_paid", "Refunds paid"],
+    ["chargebacks", "Chargebacks and their fees"],
     ["payouts_paid", "Payouts paid"],
     ["commissions_paid", "Commissions paid"],
     ["expenses_paid", "Expenses paid"],

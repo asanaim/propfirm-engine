@@ -75,7 +75,7 @@ describe("income statement", () => {
     const { LINES, utcMonth } = await import("./Books");
     expect(utcMonth(Date.UTC(2026, 0, 31, 23, 59))).toBe("2026-01");
     expect(utcMonth(Date.UTC(2026, 1, 1))).toBe("2026-02");
-    expect(LINES.accrual.map(([k]) => k)).toEqual(["fees", "discounts", "fee_refunds", "net_revenue", "payouts", "commissions", "contribution", "operating", "profit"]);
+    expect(LINES.accrual.map(([k]) => k)).toEqual(["fees", "discounts", "fee_refunds", "refunds", "chargebacks", "net_revenue", "payouts", "commissions", "contribution", "operating", "profit"]);
     expect(LINES.cash.at(-1)?.[0]).toBe("net_cash");
   });
 });

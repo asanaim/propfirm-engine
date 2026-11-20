@@ -132,7 +132,10 @@ class Referrals:
             return 0
         s = self._s
         rows = await self._pool.fetch(
-            f"SELECT DISTINCT ON (o.cif) o.ord, o.cif, o.price_cents, o.paid_at, r.referrer_cif "
+            f"SELECT DISTINCT ON (o.cif) o.ord, o.cif, o.price_cents, o.paid_at, r.referrer_cif, "
+            f"(EXISTS (SELECT 1 FROM {s}.chargebacks c WHERE c.ord = o.ord) OR EXISTS "
+            f"(SELECT 1 FROM {s}.refunds f WHERE f.ord = o.ord AND f.status = 'approved')) "
+            f"AS disputed "
             f"FROM {s}.orders o JOIN {s}.referrals r ON r.cif = o.cif "
             f"WHERE o.status IN ('paid', 'provisioned') AND o.rsv_id NOT LIKE '%-trial' "
             f"AND NOT EXISTS (SELECT 1 FROM {s}.referral_entries e "
@@ -142,6 +145,8 @@ class Referrals:
         made = 0
         share = policy.commission
         for row in rows:
+            if row["disputed"]:
+                continue  # refunded or charged back before it accrued (D-14.22)
             amount = row["price_cents"] * share.numerator // share.denominator
             if amount <= 0:
                 continue  # nothing paid: no commission

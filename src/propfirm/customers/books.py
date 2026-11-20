@@ -19,6 +19,11 @@ twice posts once:
   payable) or clawed back (the reverse).
 - `expense:<EXP>`: an operating expense, proposed by one member of staff
   and approved by another; against cash if paid, else against payables.
+- `refund:<RFD>`: an approved refund (D-14.22): refunds (contra income)
+  against cash.
+- `chargeback:<CBK>`: a recorded chargeback: chargebacks (contra income)
+  and the processor's fee against cash. `chargeback-won:<CBK>`: the
+  money came back (the fee does not).
 - `reserve-sweep:<ORD>`: with the reserve on (D-14.20), the product's
   sweep share of a paid order's price, rounded up to the cent, moves from
   cash to the payout reserve.
@@ -92,6 +97,14 @@ def discounts(product_id: str) -> str:
     return f"income:discounts:{product_id}"  # contra income: debit balance
 
 
+def refunds(product_id: str) -> str:
+    return f"income:refunds:{product_id}"  # contra income: debit balance
+
+
+def chargebacks(product_id: str) -> str:
+    return f"income:chargebacks:{product_id}"  # contra income: debit balance
+
+
 def fee_refunds(product_id: str) -> str:
     return f"income:fee_refunds:{product_id}"  # contra income: debit balance
 
@@ -119,6 +132,10 @@ def account_name(account: str) -> str:
         return f"Discounts: {parts[2]}"
     if parts[:2] == ["income", "fee_refunds"]:
         return f"Fee refunds: {parts[2]}"
+    if parts[:2] == ["income", "refunds"]:
+        return f"Refunds: {parts[2]}"
+    if parts[:2] == ["income", "chargebacks"]:
+        return f"Chargebacks: {parts[2]}"
     if account == PROCESSOR_FEES:
         return "Processor fees"
     if parts[:2] == ["expense", "operating"]:
@@ -143,6 +160,45 @@ def order_entry(row: dict[str, Any]) -> Entry | None:
         postings.append(Posting(discounts(product), off))
     return Entry(
         f"order:{row['ord']}", int(row["paid_at"]), "order_paid", tuple(postings), row["ord"]
+    )
+
+
+def refund_entry(row: dict[str, Any]) -> Entry:
+    """An approved refund; the reference is the order, so the statement
+    finds its product."""
+    amount = int(row["amount_cents"])
+    return Entry(
+        f"refund:{row['rfd']}",
+        int(row["decided_at"]),
+        "order_refunded",
+        (Posting(refunds(str(row["product_id"])), amount), Posting(CASH, -amount)),
+        str(row["ord"]),
+    )
+
+
+def chargeback_entry(row: dict[str, Any]) -> Entry:
+    amount, fee = int(row["amount_cents"]), int(row["fee_cents"])
+    postings = [Posting(chargebacks(str(row["product_id"])), amount)]
+    if fee:
+        postings.append(Posting(PROCESSOR_FEES, fee))
+    postings.append(Posting(CASH, -(amount + fee)))
+    return Entry(
+        f"chargeback:{row['cbk']}",
+        int(row["received_at"]),
+        "chargeback",
+        tuple(postings),
+        str(row["ord"]),
+    )
+
+
+def chargeback_won_entry(row: dict[str, Any]) -> Entry:
+    amount = int(row["amount_cents"])
+    return Entry(
+        f"chargeback-won:{row['cbk']}",
+        int(row["decided_at"]),
+        "chargeback_won",
+        (Posting(CASH, amount), Posting(chargebacks(str(row["product_id"])), -amount)),
+        str(row["ord"]),
     )
 
 
@@ -348,8 +404,36 @@ class Books:
                 entries.append(payout_paid_entry(row))
         entries += [referral_entry(dict(r)) for r in referrals]
         entries += [expense_entry(dict(r)) for r in expenses]
+        entries += await self._dispute_entries()
         entries += await self._reserve_entries()
         return await self._post_all(entries, now)
+
+    async def _dispute_entries(self) -> list[Entry]:
+        """Approved refunds and chargebacks not yet in the book (D-14.22)."""
+        s = self._s
+        approved = await self._pool.fetch(
+            f"SELECT r.rfd, r.ord, r.amount_cents, r.decided_at, o.product_id "
+            f"FROM {s}.refunds r JOIN {s}.orders o ON o.ord = r.ord "
+            f"WHERE r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM {s}.ops_entries e "
+            f"WHERE e.entry_id = 'refund:' || r.rfd) ORDER BY r.decided_at, r.rfd"
+        )
+        charged = await self._pool.fetch(
+            f"SELECT c.cbk, c.ord, c.amount_cents, c.fee_cents, c.received_at, c.status, "
+            f"c.decided_at, o.product_id, EXISTS (SELECT 1 FROM {s}.ops_entries e "
+            f"WHERE e.entry_id = 'chargeback:' || c.cbk) AS posted "
+            f"FROM {s}.chargebacks c JOIN {s}.orders o "
+            f"ON o.ord = c.ord WHERE NOT EXISTS (SELECT 1 FROM {s}.ops_entries e "
+            f"WHERE e.entry_id = 'chargeback:' || c.cbk) OR (c.status = 'won' AND "
+            f"NOT EXISTS (SELECT 1 FROM {s}.ops_entries e "
+            f"WHERE e.entry_id = 'chargeback-won:' || c.cbk)) ORDER BY c.received_at, c.cbk"
+        )
+        out = [refund_entry(dict(r)) for r in approved]
+        for r in charged:
+            if not r["posted"]:
+                out.append(chargeback_entry(dict(r)))
+            if r["status"] == "won" and r["decided_at"] is not None:
+                out.append(chargeback_won_entry(dict(r)))
+        return out
 
     async def _reserve_entries(self) -> list[Entry]:
         """Sweeps of paid orders and draws of paid payouts not yet in the
@@ -536,6 +620,8 @@ ACCRUAL_LINES = (
     "fees",
     "discounts",
     "fee_refunds",
+    "refunds",
+    "chargebacks",
     "net_revenue",
     "payouts",
     "commissions",
@@ -543,7 +629,15 @@ ACCRUAL_LINES = (
     "operating",
     "profit",
 )
-CASH_LINES = ("received", "payouts_paid", "commissions_paid", "expenses_paid", "net_cash")
+CASH_LINES = (
+    "received",
+    "refunds_paid",
+    "chargebacks",
+    "payouts_paid",
+    "commissions_paid",
+    "expenses_paid",
+    "net_cash",
+)
 
 
 def month_of(ms: int) -> str:
@@ -570,6 +664,10 @@ def accrual_line(account: str) -> str | None:
         return "discounts"
     if account.startswith("income:fee_refunds:"):
         return "fee_refunds"
+    if account.startswith("income:refunds:"):
+        return "refunds"
+    if account.startswith("income:chargebacks:"):
+        return "chargebacks"
     if account == PAYOUT_EXPENSE:
         return "payouts"
     if account == COMMISSION_EXPENSE:
@@ -581,6 +679,9 @@ def accrual_line(account: str) -> str | None:
 
 CASH_LINE = {
     "order_paid": "received",
+    "order_refunded": "refunds_paid",
+    "chargeback": "chargebacks",
+    "chargeback_won": "chargebacks",
     "payout_paid": "payouts_paid",
     "commission_paid": "commissions_paid",
     "operating_expense": "expenses_paid",
@@ -589,7 +690,9 @@ CASH_LINE = {
 
 def _totals(lines: dict[str, int]) -> dict[str, int]:
     out = dict(lines)
-    out["net_revenue"] = out["fees"] - out["discounts"] - out["fee_refunds"]
+    out["net_revenue"] = (
+        out["fees"] - out["discounts"] - out["fee_refunds"] - out["refunds"] - out["chargebacks"]
+    )
     out["contribution"] = out["net_revenue"] - out["payouts"] - out["commissions"]
     out["profit"] = out["contribution"] - out["operating"]
     return out
@@ -639,6 +742,8 @@ def statement_rows(
         else:
             lines["net_cash"] = (
                 lines["received"]
+                - lines["refunds_paid"]
+                - lines["chargebacks"]
                 - lines["payouts_paid"]
                 - lines["commissions_paid"]
                 - lines["expenses_paid"]

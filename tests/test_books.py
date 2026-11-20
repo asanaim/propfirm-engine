@@ -235,8 +235,9 @@ def test_month_arithmetic_and_csv() -> None:
     rows = statement_rows(POSTINGS, "cash", ["2026-02"])
     text = statement_csv(rows, "cash")
     assert text.splitlines() == [
-        "month,product,received,payouts_paid,commissions_paid,expenses_paid,net_cash",
-        "2026-02,all,0.00,855.00,0.00,0.00,-855.00",
-        "2026-02,lite,0.00,855.00,0.00,0.00,-855.00",
+        "month,product,received,refunds_paid,chargebacks,payouts_paid,commissions_paid,"
+        "expenses_paid,net_cash",
+        "2026-02,all,0.00,0.00,0.00,855.00,0.00,0.00,-855.00",
+        "2026-02,lite,0.00,0.00,0.00,855.00,0.00,0.00,-855.00",
     ]
     assert (cents_text(5), cents_text(-12_345), cents_text(0)) == ("0.05", "-123.45", "0.00")

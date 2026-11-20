@@ -52,6 +52,7 @@ from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
 from propfirm.customers.corrections import Corrections
 from propfirm.customers.directory import Reports, TraderDirectory
+from propfirm.customers.disputes import Disputes
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowScreening
 from propfirm.customers.liability import Liabilities
@@ -430,6 +431,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
             evaluations=Evaluations(pool, config.customer_schema, live),
             reconciliations=Reconciliations(pool, config.customer_schema),
+            disputes=Disputes(pool, config.customer_schema, gateway, live, cases, referrals),
             classes=customers,
             scaling=scaling,
             corrections=Corrections(

@@ -818,6 +818,52 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        23,
+        """
+        -- refunds and chargebacks (build plan step 3, line 7; D-14.22). A
+        -- refund is proposed by one member of staff and decided by another;
+        -- a chargeback is recorded by one and its outcome decided by another.
+        CREATE SEQUENCE {s}.rfd_seq;
+        CREATE TABLE {s}.refunds (
+            rfd text PRIMARY KEY,
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            amount_cents bigint NOT NULL CHECK (amount_cents > 0),
+            reason text NOT NULL,
+            proposed_by text NOT NULL,
+            proposed_at bigint NOT NULL,
+            status text NOT NULL CHECK (status IN ('proposed', 'approved', 'rejected')),
+            decided_by text,
+            decided_at bigint,
+            decision_reason text,
+            ended_acc text,
+            CHECK (decided_by IS NULL OR decided_by <> proposed_by)
+        );
+        CREATE INDEX ON {s}.refunds (ord);
+        CREATE SEQUENCE {s}.cbk_seq;
+        CREATE TABLE {s}.chargebacks (
+            cbk text PRIMARY KEY,
+            ord text NOT NULL REFERENCES {s}.orders (ord),
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            amount_cents bigint NOT NULL CHECK (amount_cents > 0),
+            fee_cents bigint NOT NULL CHECK (fee_cents >= 0),
+            provider_case text NOT NULL,
+            reason text NOT NULL,
+            received_at bigint NOT NULL,
+            recorded_by text NOT NULL,
+            recorded_at bigint NOT NULL,
+            status text NOT NULL CHECK (status IN ('open', 'won', 'lost')),
+            decided_by text,
+            decided_at bigint,
+            decision_reason text,
+            cas text,
+            ended_acc text,
+            CHECK (decided_by IS NULL OR decided_by <> recorded_by)
+        );
+        CREATE INDEX ON {s}.chargebacks (ord);
+        CREATE INDEX ON {s}.chargebacks (cif);
+        """,
+    ),
 )
 
 
