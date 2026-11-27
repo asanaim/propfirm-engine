@@ -989,6 +989,26 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        30,
+        """
+        -- exposure desk (D-14.32): lot cap cut levels per symbol and side,
+        -- as decided (append-only); the levels in force are a replay
+        CREATE TABLE {s}.exposure_moves (
+            seq bigserial PRIMARY KEY,
+            at bigint NOT NULL,
+            symbol text NOT NULL,
+            side text NOT NULL CHECK (side IN ('buy', 'sell')),
+            event text NOT NULL CHECK (event IN ('raise', 'under', 'over', 'restore')),
+            level text NOT NULL CHECK (level IN ('halve', 'quarter')),
+            ratio text NOT NULL,
+            scenario text,
+            policy_version bigint NOT NULL
+        );
+        CREATE TRIGGER exposure_moves_append_only BEFORE UPDATE OR DELETE
+            ON {s}.exposure_moves FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

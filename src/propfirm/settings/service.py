@@ -152,6 +152,11 @@ class Settings:
             self._cached = (version, policy)
         return self._cached[1]
 
+    async def version(self) -> int:
+        """The settings version now in force: the number of the last
+        recorded change (0: the policy file as shipped)."""
+        return await self._records.version()
+
     async def history(self, limit: int = 100) -> Sequence[ChangeStatus]:
         return await self._records.history(limit)
 
