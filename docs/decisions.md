@@ -852,3 +852,28 @@ values in `[detectors]`; decided by the owner's rule of 20 Nov 2026).
     not keep yet;
   - gap trading, consistency gaming, request rate and payment risk: next,
     from records the platform already has.
+
+D-14.30, gap trading and consistency gaming detectors (build plan step 5,
+line 3; thresholds from strategic review v3, D6, as starting values in
+`[detectors]`; decided by the owner's rule of 20 Nov 2026).
+- Gap trading: a profitable closed position counts if either holds:
+  - it was opened at most 2 hours before a long market break (the market
+    break rule's, 120 minutes or more) and closed after the market
+    reopened;
+  - it was opened within 5 minutes of a listed release affecting its
+    symbol (either side, inclusive; the news rule's symbol map), at a
+    volume above twice the account's median volume over 30 days.
+  Each such position raises one low integrity alert. Staff may remove the
+  profit (two people). Positions at a loss are not flagged: they cost the
+  firm nothing. Releases are read from the news calendars, so a release
+  added by hand on the news desk is not seen yet.
+- Consistency gaming: one trade (same account, symbol and side) closed
+  before the 17:00 New York boundary and opened again within 60 seconds
+  after it. Three in 30 days raise one medium integrity alert a month per
+  account.
+- The payout's consistency check merges the two trading days of every
+  re-entry, whatever the count. A re-entry within a minute is one trade
+  split by the clock, so merging is fair to an honest trader and closes
+  the gain to a gaming one. This applies only to rule sets that have the
+  consistency rule, and only while the detector is on.
+- Remaining detectors: request rate and payment risk.

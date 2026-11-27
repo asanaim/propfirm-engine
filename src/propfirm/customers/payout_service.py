@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from propfirm.analysis import ShortHold, short_hold, trades_from
 from propfirm.customers.casework import Casework, Submitter
+from propfirm.customers.detectors import legs_from, reentries
 from propfirm.customers.networks import NETWORKS
 from propfirm.customers.notifications import wallet_notice
 from propfirm.customers.onboarding_store import OnboardingStore
@@ -32,6 +33,7 @@ from propfirm.customers.transfers import WithdrawalRails, WithdrawalUnavailable
 from propfirm.journal.inputs import DebitPayout
 from propfirm.policy import PolicySource, parse_percent
 from propfirm.rules.addons import addons_of
+from propfirm.rules.clock import NEW_YORK_17
 from propfirm.settings.notices import Notices
 
 log = logging.getLogger(__name__)
@@ -147,6 +149,9 @@ class Payouts:
             confirmed_cases=await self._cases.confirmed_cases(cif.cif) if self._cases else 0,
             scaling_steps=await self._scaling.steps_taken(record.ord) if self._scaling else 0,
             addons=addons_of(rules["rsv_id"]),
+            day_links=(
+                await self.day_links(acc, cif.cif, now) if rules["consistency_percent"] else []
+            ),
             pending_payout=pending is not None and pending.po != ignore,
             wallet_added_at=wallet.added_at if wallet else None,
             kept_floor_cents=(
@@ -215,6 +220,12 @@ class Payouts:
             raise PayoutRefused("unknown", f"no account {acc}")
         policy = await self._policy.current()
         since = await self._store.last_debited(acc) or record.created_at
+        events = await self._events(acc)
+        return short_hold(trades_from(events), policy.payouts.short_hold_seconds, since)
+
+    async def _events(self, acc: str) -> list[dict[str, Any]]:
+        """The account's projected journal events, every page."""
+        assert self._history is not None
         events: list[dict[str, Any]] = []
         after = 0
         while True:
@@ -223,7 +234,22 @@ class Payouts:
             if len(page) < 1_000:
                 break
             after = int(page[-1]["seq"])
-        return short_hold(trades_from(events), policy.payouts.short_hold_seconds, since)
+        return events
+
+    async def day_links(self, acc: str, cif: str, now: int) -> list[tuple[int, int]]:
+        """Trading days joined by a re-entry across the boundary (D-14.30),
+        when the consistency gaming detector is on; none without history."""
+        window = (await self._policy.current()).detectors
+        if self._history is None or not window.reentry:
+            return []
+        try:
+            events = await self._events(acc)
+        except Exception:  # history not readable: staff still approve every payout
+            log.exception("re-entries of %s unavailable", acc)
+            return []
+        legs = legs_from(events, {acc: cif}, now)
+        found = reentries(legs, NEW_YORK_17.next_boundary, window.reentry_seconds * 1000)
+        return [r.days(NEW_YORK_17.day_start) for r in found]
 
     async def _hold_short_holds(self, acc: str, cif: CifRecord, ts: int) -> None:
         """Raise an integrity case, once per payout period, when the period's
