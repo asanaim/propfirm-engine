@@ -403,7 +403,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         books = Books(pool, config.customer_schema, settings)
         clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
         detectors = Detectors(
-            pool, config.customer_schema, config.read_schema, settings, clusters, cases
+            pool,
+            config.customer_schema,
+            config.read_schema,
+            settings,
+            clusters,
+            cases,
+            [item.event for calendar in news.calendars for item in calendar.events],
         )
         daily_classes = Classes(
             pool, config.customer_schema, config.read_schema, settings, live, customers

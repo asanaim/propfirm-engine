@@ -261,13 +261,28 @@ class DetectorsPolicy:
     positions on one symbol on two accounts of one customer or one identity
     cluster, opened within `hedging_window_seconds` of each other, open
     together for at least `hedging_overlap_percent` of the shorter
-    position's holding time, `hedging_matches` times in `hedging_days`."""
+    position's holding time, `hedging_matches` times in `hedging_days`.
+    Gap trading (`gap_*`): a profitable position opened shortly before a
+    long break and held through it, or opened near a release at an
+    outsized volume. Consistency gaming (`reentry_*`): the same trade
+    closed before a trading day boundary and opened again just after it;
+    the payout's consistency check merges the two days whatever the
+    count."""
 
     hedging: bool = False
     hedging_window_seconds: int = 120
     hedging_overlap_percent: int = 50
     hedging_matches: int = 3
     hedging_days: int = 30
+    gap: bool = False
+    gap_before_break_minutes: int = 120
+    gap_release_minutes: int = 5
+    gap_size_multiple: Fraction = Fraction(2)
+    gap_days: int = 30
+    reentry: bool = False
+    reentry_seconds: int = 60
+    reentry_matches: int = 3
+    reentry_days: int = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -727,10 +742,21 @@ def _detectors(t: _Table) -> DetectorsPolicy:
         hedging_overlap_percent=t.integer("hedging_overlap_percent", 1),
         hedging_matches=t.integer("hedging_matches", 1),
         hedging_days=t.integer("hedging_days", 1),
+        gap=t.boolean("gap"),
+        gap_before_break_minutes=t.integer("gap_before_break_minutes", 1),
+        gap_release_minutes=t.integer("gap_release_minutes", 1),
+        gap_size_multiple=t.ratio("gap_size_multiple"),
+        gap_days=t.integer("gap_days", 1),
+        reentry=t.boolean("reentry"),
+        reentry_seconds=t.integer("reentry_seconds", 1),
+        reentry_matches=t.integer("reentry_matches", 1),
+        reentry_days=t.integer("reentry_days", 1),
     )
     t.done()
     if policy.hedging_overlap_percent > 100:
         raise PolicyError("detectors: hedging_overlap_percent from 1 to 100")
+    if policy.gap_size_multiple < 1:
+        raise PolicyError("detectors: gap_size_multiple at least 1")
     return policy
 
 
