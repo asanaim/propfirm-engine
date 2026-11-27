@@ -827,3 +827,28 @@ owner's rule of 20 Nov 2026, "take the most suitable decision").
   - markout and news window measures need the second price source and
     the release calendar join.
 - Read by staff with case work rights (Trader classes page).
+
+D-14.29, behaviour detectors, first: hedging across accounts (build plan
+step 5, line 3; thresholds from strategic review v3, D6, as starting
+values in `[detectors]`; decided by the owner's rule of 20 Nov 2026).
+- The detectors run in the API loop at most hourly. Each finding raises
+  one high fraud alert per account (keyed, never repeated). The alert
+  opens a case on the customer, so their payouts are held until staff
+  decide. Voiding needs two people (the case rules).
+- Hedging across accounts: two positions on one symbol, on opposite sides,
+  on two accounts of one customer or of customers in one identity
+  cluster (D-14.27), opened within 120 seconds of each other, and open
+  together for at least half the shorter position's holding time. Three
+  such pairs on one pair of accounts in 30 days make a finding. A
+  position still open counts as held until now. The review's "overlapping
+  half the holding time" is read as half the shorter hold. That is the
+  strict reading: a quick hedge inside a long position still counts.
+- Order of the remaining detectors, by expected loss, with what each
+  waits for:
+  - stale price: the second price source (step 8);
+  - copy cluster: already covered by the trades link (D-14.27) and class
+    C (D-14.28);
+  - account sharing: device and sign in records, which the platform does
+    not keep yet;
+  - gap trading, consistency gaming, request rate and payment risk: next,
+    from records the platform already has.

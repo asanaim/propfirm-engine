@@ -53,6 +53,7 @@ from propfirm.customers.checkout import Checkout
 from propfirm.customers.classes import Classes
 from propfirm.customers.clusters import Clusters
 from propfirm.customers.corrections import Corrections
+from propfirm.customers.detectors import Detectors
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.disputes import Disputes
 from propfirm.customers.funding import Onboarding
@@ -178,6 +179,7 @@ async def _lifecycle_forever(
     reserve: Reserve | None = None,
     clusters: Clusters | None = None,
     classes: Classes | None = None,
+    detectors: Detectors | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -204,6 +206,11 @@ async def _lifecycle_forever(
                 await clusters.link(now_ms())
             except Exception:
                 log.exception("cluster linking failed")
+        if detectors is not None:
+            try:  # behaviour detectors, at most hourly (D-14.29)
+                await detectors.run(now_ms())
+            except Exception:
+                log.exception("detectors failed")
         if classes is not None:
             try:  # classes every funded account, once a day (D-14.28)
                 await classes.run(now_ms())
@@ -395,6 +402,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         referrals = Referrals(pool, config.customer_schema, settings)
         books = Books(pool, config.customer_schema, settings)
         clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
+        detectors = Detectors(
+            pool, config.customer_schema, config.read_schema, settings, clusters, cases
+        )
         daily_classes = Classes(
             pool, config.customer_schema, config.read_schema, settings, live, customers
         )
@@ -473,6 +483,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     reserve,
                     clusters,
                     daily_classes,
+                    detectors,
                 )
             )
         )

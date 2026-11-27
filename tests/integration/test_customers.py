@@ -26,6 +26,7 @@ from propfirm.customers.checkout import Checkout
 from propfirm.customers.classes import Classes
 from propfirm.customers.clusters import Clusters
 from propfirm.customers.corrections import Corrections
+from propfirm.customers.detectors import Detectors
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.disputes import Disputes
 from propfirm.customers.funding import Onboarding
@@ -125,6 +126,7 @@ class Platform:
     reserve: Reserve | None = None  # coverage states and moves (D-14.23)
     clusters: Clusters | None = None  # identity clusters (D-14.27)
     daily_classes: Classes | None = None  # the daily classing job (D-14.28)
+    detectors: Detectors | None = None  # behaviour detectors (D-14.29)
 
     async def call(
         self,
@@ -273,6 +275,9 @@ async def platform(
     await staff.bootstrap(clock())
     desk = StaffDesk(pool, config.staff_schema, load_duties())
     clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
+    detectors = Detectors(
+        pool, config.customer_schema, config.read_schema, settings, clusters, cases
+    )
     daily_classes = Classes(pool, config.customer_schema, config.read_schema, settings, live, store)
     liabilities = Liabilities(pool, config.customer_schema, payouts, live, clusters)
     evaluations = Evaluations(pool, config.customer_schema, live)
@@ -396,6 +401,7 @@ async def platform(
             clusters=clusters,
             books=books,
             daily_classes=daily_classes,
+            detectors=detectors,
         )
     finally:
         await stop_engine()

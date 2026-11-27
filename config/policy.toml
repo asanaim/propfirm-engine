@@ -730,3 +730,13 @@ a_max_short_percent = 20       # A: under this share of profit from short holds
 c_short_percent = 50           # C: over this share of profit from short holds
 short_seconds = 60             # a short hold: closed by the trader within this
 d_case_days = 90
+
+[detectors]
+# Behaviour detectors (D-14.29; strategic review v3, D6): starting values
+# to tune on free-trial data. Each raises a high fraud alert, which opens a
+# case and so holds the customer's payouts; two people decide a void.
+hedging = true                 # opposite positions across accounts of one person
+hedging_window_seconds = 120   # opened within this of each other
+hedging_overlap_percent = 50   # open together this share of the shorter hold
+hedging_matches = 3            # this many hedged pairs ...
+hedging_days = 30              # ... in this many days

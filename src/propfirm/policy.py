@@ -255,6 +255,22 @@ class ClassesPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class DetectorsPolicy:
+    """Behaviour detectors (D-14.29; strategic review v3, D6). Off when
+    the policy file has no [detectors]. Hedging across accounts: opposite
+    positions on one symbol on two accounts of one customer or one identity
+    cluster, opened within `hedging_window_seconds` of each other, open
+    together for at least `hedging_overlap_percent` of the shorter
+    position's holding time, `hedging_matches` times in `hedging_days`."""
+
+    hedging: bool = False
+    hedging_window_seconds: int = 120
+    hedging_overlap_percent: int = 50
+    hedging_matches: int = 3
+    hedging_days: int = 30
+
+
+@dataclass(frozen=True, slots=True)
 class ReservePolicy:
     """Payout reserve (D-13.7; D-14.20): at each paid sale `sweep` of the
     price, by product, moves from operating cash to the reserve, and
@@ -371,6 +387,7 @@ class Policy:
     referrals: ReferralsPolicy = field(default_factory=ReferralsPolicy)
     reserve: ReservePolicy = field(default_factory=ReservePolicy)
     classes: ClassesPolicy = field(default_factory=ClassesPolicy)
+    detectors: DetectorsPolicy = field(default_factory=DetectorsPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -637,6 +654,9 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             ),
             reserve=_reserve(root.table("reserve")) if root.has("reserve") else ReservePolicy(),
             classes=_classes(root.table("classes")) if root.has("classes") else ClassesPolicy(),
+            detectors=(
+                _detectors(root.table("detectors")) if root.has("detectors") else DetectorsPolicy()
+            ),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -697,6 +717,20 @@ def _referrals(t: _Table) -> ReferralsPolicy:
     t.done()
     if not 0 < policy.commission < 1:
         raise PolicyError("referrals: commission_percent between 0 and 100")
+    return policy
+
+
+def _detectors(t: _Table) -> DetectorsPolicy:
+    policy = DetectorsPolicy(
+        hedging=t.boolean("hedging"),
+        hedging_window_seconds=t.integer("hedging_window_seconds", 1),
+        hedging_overlap_percent=t.integer("hedging_overlap_percent", 1),
+        hedging_matches=t.integer("hedging_matches", 1),
+        hedging_days=t.integer("hedging_days", 1),
+    )
+    t.done()
+    if policy.hedging_overlap_percent > 100:
+        raise PolicyError("detectors: hedging_overlap_percent from 1 to 100")
     return policy
 
 
