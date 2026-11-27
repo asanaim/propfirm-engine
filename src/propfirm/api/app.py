@@ -113,6 +113,7 @@ from propfirm.customers.rails import RailRejected, Rails, RailUnavailable
 from propfirm.customers.receipts import ReceiptRefused, Receipts
 from propfirm.customers.reconciliation import Reconciliations, StatementRefused
 from propfirm.customers.referrals import ReferralRefused, Referrals
+from propfirm.customers.request_rate import RequestRate, RequestRateExceeded
 from propfirm.customers.reserve import (
     Evaluations,
     MoveRefused,
@@ -412,6 +413,7 @@ class Deps:
     corrections: Corrections | None = None  # bad-price corrections (D-14.4)
     classes: ClassStore | None = None  # trader classes (D-14.5)
     daily_classes: Classes | None = None  # the daily classing job's view (D-14.28)
+    request_rate: RequestRate | None = None  # order request limit (D-14.31)
     scaling: Scaling | None = None  # scaling steps (D-14.8)
     client_ip_header: str | None = None  # set by a trusted proxy (X-Forwarded-For), else None
     didit_webhook_secret: str | None = None
@@ -1892,6 +1894,17 @@ def create_app(
                 "audit record not written for %s %s", request.method, route
             )
         return response
+
+    async def throttle(deps: Deps, account_id: str) -> None:
+        """Count an order request; 429 above the day's limit (D-14.31)."""
+        if deps.request_rate is None:
+            return
+        try:
+            await deps.request_rate.check(account_id, deps.clock())
+        except RequestRateExceeded as exc:
+            raise HTTPException(
+                status_code=429, detail={"code": "request_rate", "message": str(exc)}
+            ) from exc
 
     async def submit(deps: Deps, build: Callable[[int], Input]) -> JSONResponse:
         try:
@@ -3412,6 +3425,7 @@ def create_app(
     @app.post("/accounts/{account_id}/orders")
     async def place(deps: D, me: Trader, account_id: Ident, body: OrderBody) -> JSONResponse:
         await _owns(deps, me, account_id)
+        await throttle(deps, account_id)
         await no_payout_pending(deps, account_id)
 
         def build(ts: int) -> Input:
@@ -3437,6 +3451,7 @@ def create_app(
         """A trailing buy (follows the ask) or trailing sell (follows the bid);
         cancelled like any order (DELETE .../orders/{order_id})."""
         await _owns(deps, me, account_id)
+        await throttle(deps, account_id)
         await no_payout_pending(deps, account_id)
         order_id = body.order_id or deps.new_id()
         return await submit(
@@ -3460,6 +3475,7 @@ def create_app(
         """Set the position's trailing stop, replacing any it has; removed
         with DELETE .../orders/{order_id}."""
         await _owns(deps, me, account_id)
+        await throttle(deps, account_id)
         order_id = body.order_id or deps.new_id()
         return await submit(
             deps,
@@ -3471,6 +3487,7 @@ def create_app(
     @app.delete("/accounts/{account_id}/orders/{order_id}")
     async def cancel(deps: D, me: Trader, account_id: Ident, order_id: Ident) -> JSONResponse:
         await _owns(deps, me, account_id)
+        await throttle(deps, account_id)
         return await submit(deps, lambda ts: CancelOrder(account_id, order_id, ts))
 
     @app.post("/accounts/{account_id}/positions/{position_id}/close")
@@ -3478,6 +3495,7 @@ def create_app(
         deps: D, me: Trader, account_id: Ident, position_id: Ident, body: CloseBody
     ) -> JSONResponse:
         await _owns(deps, me, account_id)
+        await throttle(deps, account_id)
         return await submit(
             deps, lambda ts: ClosePosition(account_id, position_id, ts, body.volume)
         )
@@ -3487,6 +3505,7 @@ def create_app(
         deps: D, me: Trader, account_id: Ident, position_id: Ident, body: StopsBody
     ) -> JSONResponse:
         await _owns(deps, me, account_id)
+        await throttle(deps, account_id)
         return await submit(
             deps,
             lambda ts: ModifyStops(account_id, position_id, body.stop_loss, body.take_profit, ts),

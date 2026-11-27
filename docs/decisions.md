@@ -877,3 +877,33 @@ line 3; thresholds from strategic review v3, D6, as starting values in
   the gain to a gaming one. This applies only to rule sets that have the
   consistency rule, and only while the detector is on.
 - Remaining detectors: request rate and payment risk.
+
+D-14.31, request rate, and payment risk closed for now (build plan step 5,
+line 3, last part; review v3, D6; decided by the owner's rule of 20 Nov
+2026).
+- Request rate:
+  - every order request counts: placing an order, a trailing entry, a
+    cancel, a close, stops and a trailing stop;
+  - the count is per account per trading day (17:00 New York);
+  - the API refuses request 2,001 and every one after it that day with
+    429 `request_rate`; the portal shows the message;
+  - the first refusal of a day is recorded (`rate_days`, migration 29);
+  - the second throttled day within 30 days raises a medium integrity
+    alert, which opens a case.
+- The count is kept in memory in the API process. That is free and right
+  for the one API process at launch. With more than one process, the
+  limit applies per process: move the count to Valkey before scaling out.
+- Payment risk, part by part:
+  - chargebacks: already handled by D-14.22. A chargeback ends the
+    account, holds purchases, claws back commission and opens a case;
+  - declared country against IP country, and declared country against the
+    identity document: already gated at registration and KYC (country
+    gating);
+  - card country and one card on more than 2 identities: these need card
+    data, and there is no card processor at launch (D-14.25). They wait
+    for the card adapter, which must supply the card's country and a card
+    fingerprint;
+  - the same payout wallet on two identities: already a cluster link
+    (D-14.27).
+- Line 3 is done, except stale price (needs the second price source, step
+  8) and account sharing (needs device and sign in records).

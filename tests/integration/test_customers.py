@@ -48,6 +48,7 @@ from propfirm.customers.rails import Rails, SandboxRail
 from propfirm.customers.receipts import Receipts
 from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
+from propfirm.customers.request_rate import RequestRate
 from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore, migrate
@@ -127,6 +128,7 @@ class Platform:
     clusters: Clusters | None = None  # identity clusters (D-14.27)
     daily_classes: Classes | None = None  # the daily classing job (D-14.28)
     detectors: Detectors | None = None  # behaviour detectors (D-14.29)
+    request_rate: RequestRate | None = None  # order request limit (D-14.31)
 
     async def call(
         self,
@@ -275,6 +277,7 @@ async def platform(
     await staff.bootstrap(clock())
     desk = StaffDesk(pool, config.staff_schema, load_duties())
     clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
+    request_rate = RequestRate(pool, config.customer_schema, settings, cases)
     detectors = Detectors(
         pool, config.customer_schema, config.read_schema, settings, clusters, cases
     )
@@ -312,6 +315,7 @@ async def platform(
         transfers=Transfers(pool, config.customer_schema),
         clusters=clusters,
         daily_classes=daily_classes,
+        request_rate=request_rate,
         receipts=Receipts(pool, config.customer_schema, checkout, rails),
         vault=vault,
         reconciliations=Reconciliations(pool, config.customer_schema),
@@ -402,6 +406,7 @@ async def platform(
             books=books,
             daily_classes=daily_classes,
             detectors=detectors,
+            request_rate=request_rate,
         )
     finally:
         await stop_engine()
@@ -588,7 +593,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 29))
+            assert await migrate(conn, schema) == list(range(1, 30))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

@@ -267,7 +267,9 @@ class DetectorsPolicy:
     outsized volume. Consistency gaming (`reentry_*`): the same trade
     closed before a trading day boundary and opened again just after it;
     the payout's consistency check merges the two days whatever the
-    count."""
+    count. Request rate (`rate_*`): order requests on one account in one
+    trading day above the limit are refused; `rate_repeats` such days in
+    `rate_repeat_days` raise an alert."""
 
     hedging: bool = False
     hedging_window_seconds: int = 120
@@ -283,6 +285,10 @@ class DetectorsPolicy:
     reentry_seconds: int = 60
     reentry_matches: int = 3
     reentry_days: int = 30
+    rate: bool = False
+    rate_orders_per_day: int = 2_000
+    rate_repeats: int = 2
+    rate_repeat_days: int = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -751,6 +757,10 @@ def _detectors(t: _Table) -> DetectorsPolicy:
         reentry_seconds=t.integer("reentry_seconds", 1),
         reentry_matches=t.integer("reentry_matches", 1),
         reentry_days=t.integer("reentry_days", 1),
+        rate=t.boolean("rate"),
+        rate_orders_per_day=t.integer("rate_orders_per_day", 1),
+        rate_repeats=t.integer("rate_repeats", 1),
+        rate_repeat_days=t.integer("rate_repeat_days", 1),
     )
     t.done()
     if policy.hedging_overlap_percent > 100:
