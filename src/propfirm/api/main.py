@@ -81,6 +81,7 @@ from propfirm.customers.rails import NoDefaultRail, Rails, SandboxRail
 from propfirm.customers.receipts import Receipts
 from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
+from propfirm.customers.request_rate import RequestRate
 from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore
@@ -515,6 +516,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             transfers=Transfers(pool, config.customer_schema),
             clusters=clusters,
             daily_classes=daily_classes,
+            request_rate=RequestRate(pool, config.customer_schema, settings, cases),
             receipts=None
             if checkout is None
             else Receipts(pool, config.customer_schema, checkout, rails),

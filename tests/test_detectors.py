@@ -16,6 +16,7 @@ from propfirm.customers.detectors import (
     reentries,
 )
 from propfirm.customers.payouts import merged_day_pnl
+from propfirm.customers.request_rate import Counter
 from propfirm.policy import PolicyError, load_policy, parse_policy
 from propfirm.rules.clock import NEW_YORK_17
 from propfirm.trading.hours import new_york_ms
@@ -199,3 +200,21 @@ def test_the_policy_file_turns_gap_and_reentry_on() -> None:
 
     with pytest.raises(PolicyError, match="gap_size_multiple at least 1"):
         parse_policy(edited(change))
+
+
+# --- request rate (D-14.31) ------------------------------------------------------------
+
+
+def test_the_counter_resets_at_the_trading_day_boundary() -> None:
+    counter = Counter()
+    boundary = NEW_YORK_17.next_boundary(FRI_CLOSE - 10 * H)
+    assert counter.add("ACC1", boundary - 1) == (NEW_YORK_17.day_start(boundary - 1), 1)
+    assert counter.add("ACC1", boundary - 1)[1] == 2
+    assert counter.add("ACC2", boundary - 1)[1] == 1  # per account
+    assert counter.add("ACC1", boundary) == (boundary, 1)  # a new trading day
+
+
+def test_the_policy_file_turns_the_request_rate_on() -> None:
+    policy = load_policy().detectors
+    assert policy.rate and policy.rate_orders_per_day == 2_000
+    assert (policy.rate_repeats, policy.rate_repeat_days) == (2, 30)

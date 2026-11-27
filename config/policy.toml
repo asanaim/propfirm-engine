@@ -749,3 +749,7 @@ reentry = true                 # consistency gaming: one trade split by the day 
 reentry_seconds = 60           # reopened (symbol, side) this soon after a close, across 17:00 NY
 reentry_matches = 3            # this many re-entries ...
 reentry_days = 30              # ... in this many days raise an alert
+rate = true                    # request rate: throttle at the API
+rate_orders_per_day = 2000     # order requests per account per trading day, then 429
+rate_repeats = 2               # this many throttled days ...
+rate_repeat_days = 30          # ... in this many days raise an alert (a case)

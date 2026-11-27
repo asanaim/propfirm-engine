@@ -975,6 +975,20 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX ON {s}.cluster_links (b_cif);
         """,
     ),
+    (
+        29,
+        """
+        -- request rate (D-14.31): a trading day on which an account went over
+        -- the order request limit and was throttled; a repeat opens a case
+        CREATE TABLE {s}.rate_days (
+            acc text NOT NULL REFERENCES {s}.accounts (acc),
+            day bigint NOT NULL,
+            at bigint NOT NULL,
+            requests integer NOT NULL,
+            PRIMARY KEY (acc, day)
+        );
+        """,
+    ),
 )
 
 
