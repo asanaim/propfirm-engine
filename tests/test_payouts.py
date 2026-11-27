@@ -239,6 +239,15 @@ def test_consistency_reads_the_period_and_the_accounts_own_rule() -> None:
     assert statuses(consistency=half, day_pnl=old)["consistency"] == PASS
 
 
+def test_consistency_merges_days_joined_by_a_reentry() -> None:
+    half = Fraction(1, 2)
+    split = ((D1, 30_000), (D2, 30_000), (D3, 20_000))  # best day 37.5 %: passes
+    assert statuses(consistency=half, day_pnl=split)["consistency"] == PASS
+    # D1 and D2 are one trade split by the 17:00 boundary: 60,000 of 80,000
+    joined = statuses(consistency=half, day_pnl=split, day_links=((D1, D2),))
+    assert joined["consistency"] == FAIL
+
+
 def test_the_residence_gate_applies_when_switched_on() -> None:
     gated = replace(POLICY, access=AccessPolicy(True, frozenset({"BD", "IN"})))
     bd = eligibility(gated, funded(document_country="BD"), NOW)

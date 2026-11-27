@@ -23,6 +23,7 @@ Eligibility, all of which must hold (M18):
 - trading days in the period (`min_trading_days`, D22);
 - consistency (D19): when the account's rule set has the rule, its best
   day in the period is at most that share of the period's realized profit;
+  days joined by a re-entry across the boundary count as one (D-14.30);
 - minimum: the trader's amount reaches `minimum_cents`;
 - flat (D23, when `flat_required`): no open position or pending order;
 - identity: an approved Tier 2 check, and a customer not blocked (screening
@@ -49,7 +50,8 @@ first moment one may be requested.
 """
 
 import math
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from fractions import Fraction
@@ -70,6 +72,30 @@ class Check:
     name: str
     status: str  # pass, fail, or not_decided_here
     detail: str
+
+
+def merged_day_pnl(
+    day_pnl: Iterable[tuple[int, int]], links: Iterable[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """Day results with linked days added together, each group under its
+    earliest day (the payout's consistency check on merged days)."""
+    parent: dict[int, int] = {}
+
+    def root(x: int) -> int:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a, b in links:
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+    total: dict[int, int] = defaultdict(int)
+    for day, cents in day_pnl:
+        total[root(day)] += cents
+    return sorted(total.items())
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +138,9 @@ class FundedAccount:
     confirmed_cases: int = 0  # the customer's cases closed as actioned
     scaling_steps: int = 0  # scaling steps taken on this order's accounts
     addons: tuple[str, ...] = ()  # of the account's rule set (D-13.18)
+    # trading days joined by a re-entry across the boundary (D-14.30):
+    # the consistency check adds their results together
+    day_links: Sequence[tuple[int, int]] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,7 +265,8 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
     if share is None:
         check("consistency", True, "no consistency rule on this rule set")
     else:
-        period = [pnl for day, pnl in account.day_pnl if day >= first_day]
+        merged = merged_day_pnl(account.day_pnl, account.day_links)
+        period = [pnl for day, pnl in merged if day >= first_day]
         total, best = sum(period), max(period, default=0)
         check(
             "consistency",
