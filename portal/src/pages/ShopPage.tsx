@@ -311,31 +311,6 @@ export function ShopPage() {
           )}
         </Card>
       )}
-      {trial?.on === true ? (
-        <Card
-          title="Free trial"
-          actions={
-            trialAcc === null ? (
-              <Button busy={busy === "trial"} variant="secondary" onClick={() => void startTrial()}>
-                Start free trial
-              </Button>
-            ) : (
-              <Button
-                onClick={() => {
-                  navigate(`/accounts/${trialAcc}`);
-                }}
-              >
-                Open your trial
-              </Button>
-            )
-          }
-        >
-          <p>
-            {formatSize(trial.size_cents)} {(products ?? []).find((p) => p.id === trial.product_id)?.name ?? trial.product_id}, stage 1 rules, {trial.days} days. Free, one per
-            trader. Practice only: no payout and no next stage.
-          </p>
-        </Card>
-      ) : null}
       {retakes.map((r) => {
         const product = (products ?? []).find((p) => p.id === r.product_id);
         if (product === undefined) return null;
@@ -364,6 +339,32 @@ export function ShopPage() {
           ))}
         </div>
       )}
+      {/* the free trial under the products (owner, 28 Nov) */}
+      {trial?.on === true ? (
+        <Card
+          title="Free trial"
+          actions={
+            trialAcc === null ? (
+              <Button busy={busy === "trial"} variant="secondary" onClick={() => void startTrial()}>
+                Start free trial
+              </Button>
+            ) : (
+              <Button
+                onClick={() => {
+                  navigate(`/accounts/${trialAcc}`);
+                }}
+              >
+                Open your trial
+              </Button>
+            )
+          }
+        >
+          <p>
+            {formatSize(trial.size_cents)} {(products ?? []).find((p) => p.id === trial.product_id)?.name ?? trial.product_id}, stage 1 rules, {trial.days} days. Free, one per
+            trader. Practice only: no payout and no next stage.
+          </p>
+        </Card>
+      ) : null}
     </div>
   );
 }

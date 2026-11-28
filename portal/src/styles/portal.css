@@ -360,6 +360,7 @@ main:has(.page.shop) {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
   gap: var(--space-4);
   align-items: stretch;
+  margin-bottom: var(--space-4); /* room above the free trial under it */
 }
 
 .grid.products .card {
