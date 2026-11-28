@@ -1202,3 +1202,33 @@ D-15.4, deletion (owner, 28 Nov 2026: "go AC27"; rule AC27).
 - Hard deletion applies to personal data only, by owner proposal and
   second owner approval, after the retention period. It comes in the
   next change (D-15.5).
+
+D-15.5, erasure of personal data (owner, 28 Nov 2026: "go AC27"; rules
+AC00, AC01 and AC27; D35 retention; functional outline M03 and M20).
+- Hard deletion means one thing: a customer's personal data overwritten
+  in place. Rows are never deleted; the ledger, orders, payouts, cases and
+  the audit trail stay and no longer name a person.
+- One owner proposes, the other owner approves; the owners' stand-in
+  never acts. The erasure runs at approval, in the same transaction, and
+  records what it overwrote. A proposal can be rejected (other owner) or
+  cancelled (its proposer).
+- Refused, at proposal and again at approval, while the data must be
+  kept: less than `[retention] aml_years` (5, the FATF R.11 minimum, never
+  lower) after the last activity on record, counted in calendar years
+  and rounded up (29 February moves to 1 March); an account holding
+  capital; a payout not settled; an open case (the legal hold). Every
+  dated customer record and each account's last trading day count as
+  activity.
+- Overwritten: name, email, date of birth, login subject (the customer
+  is blocked); KYC session ids, links, names and vendor detail; screening
+  detail; sign-in devices and places; wallet addresses; copies of emails
+  sent; contract texts (hashes stay as proof); newsletter records of the
+  address. Kept: country of residence and of documents, which name
+  nobody alone and keep statistics and tax records true.
+- The append-only guard lets an UPDATE through only for the personal data
+  tables, inside an approved erasure's own transaction, before its run
+  is recorded. DELETE stays refused everywhere.
+- By hand, listed in the result: the identity provider's login
+  (Keycloak). Backups age out on their own schedule.
+- Counsel to confirm (outline M20): whether an offshore operator's AML
+  retention rests on GDPR Art. 17(3)(b) or (e).

@@ -272,4 +272,5 @@ the content security policy names the three providers' hosts.
 
 AC27, deletion (28 Nov 2026, D-15.4). In place: every table refuses
 DELETE and TRUNCATE, enforced by a test; remove actions are records.
-Erasure of personal data by two owners after retention: D-15.5.
+Erasure of personal data by two owners after retention (D-15.5): the
+Data erasure page; personal data overwritten, records kept.

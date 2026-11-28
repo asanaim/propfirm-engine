@@ -99,6 +99,7 @@ from propfirm.customers.directory import (
     export_rows,
 )
 from propfirm.customers.disputes import DisputeRefused, Disputes
+from propfirm.customers.erasure import ErasureRefused, Erasures
 from propfirm.customers.exposure import CLASSES_CUT, Exposure
 from propfirm.customers.exposure import percent_text as ratio_text
 from propfirm.customers.four_eyes import open_proposal, proposal_json
@@ -442,6 +443,7 @@ class Deps:
     subscribers: Subscribers | None = None  # newsletter consents (AC25)
     newsletter: Newsletter | None = None  # newsletter campaigns (D-15.2)
     captcha: Verifier = turnstile  # captcha verification (AC22)
+    erasures: Erasures | None = None  # erasure of personal data (AC27, D-15.5)
     vault: Vault = field(default_factory=Vault.from_env)  # method secrets (AC14)
     clock: Callable[[], int] = now_ms
     today: Callable[[], date] = _today
@@ -549,6 +551,16 @@ class ExtensionBody(_Body):
 class CampaignBody(_Body):
     subject: Annotated[str, StringConstraints(min_length=3, max_length=200)]
     body: Annotated[str, StringConstraints(min_length=10, max_length=50_000)]
+
+
+class ErasureBody(_Body):
+    cif: Annotated[str, StringConstraints(pattern=r"^CIF[0-9]{8}$")]
+    reason: Annotated[str, StringConstraints(min_length=3, max_length=500)]
+
+
+class ErasureDecisionBody(_Body):
+    decision: Literal["approve", "reject", "cancel"]
+    reason: Annotated[str, StringConstraints(min_length=3, max_length=500)]
 
 
 class CampaignDecisionBody(_Body):
@@ -4774,6 +4786,54 @@ def create_app(
         if deps.newsletter is None:
             raise HTTPException(status_code=503, detail="the newsletter is not configured")
         return deps.newsletter
+
+    async def _erasures(deps: Deps, me: Principal) -> Erasures:
+        """Erasure is the owners' alone (rule AC27): one proposes, the other
+        decides. The owners' stand-in never acts here."""
+        if deps.erasures is None:
+            raise HTTPException(status_code=503, detail="erasure is not configured")
+        if (await _access(deps, me)).tier != Tier.OWNER:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "owners_only", "message": "only the owners erase personal data"},
+            )
+        return deps.erasures
+
+    def _erasure_refused(exc: ErasureRefused) -> HTTPException:
+        status = {"unknown": 404, "not_maker": 403}.get(exc.code, 409)
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    @app.get("/admin/erasures")
+    async def erasure_list(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        """Erasures proposed, their decision and what each overwrote (D-15.5)."""
+        return [asdict(e) for e in await (await _erasures(deps, me)).erasures()]
+
+    @app.post("/admin/erasures", status_code=201)
+    async def erasure_propose(deps: D, me: SettingsChanger, body: ErasureBody) -> dict[str, Any]:
+        """Propose erasing a customer's personal data; refused while it must
+        be kept (retention, open money, open case). The other owner decides."""
+        try:
+            eid = await (await _erasures(deps, me)).propose(
+                body.cif, me.subject, body.reason, deps.clock()
+            )
+        except ErasureRefused as exc:
+            raise _erasure_refused(exc) from exc
+        return {"id": eid, "state": "proposed"}
+
+    @app.post("/admin/erasures/{eid}/decision")
+    async def erasure_decide(
+        deps: D, me: SettingsChanger, eid: int, body: ErasureDecisionBody
+    ) -> dict[str, Any]:
+        """Approve (the other owner: the erasure runs at once), reject (the
+        other owner) or cancel (its proposer)."""
+        kind = {"approve": "approved", "reject": "rejected", "cancel": "cancelled"}[body.decision]
+        try:
+            erased = await (await _erasures(deps, me)).decide(
+                eid, kind, me.subject, body.reason, deps.clock()
+            )
+        except ErasureRefused as exc:
+            raise _erasure_refused(exc) from exc
+        return {"id": eid, "state": kind, "erased": erased}
 
     @app.get("/staff/campaigns")
     async def campaign_list(deps: D, me: SettingsReader) -> list[dict[str, Any]]:

@@ -272,6 +272,15 @@ class SubscribersPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class RetentionPolicy:
+    """How long records are kept (D35; rule AC27, D-15.5). `aml_years`:
+    personal data stays at least this long after the relationship ends;
+    never below five (FATF R.11), longer where local law asks."""
+
+    aml_years: int = 5
+
+
+@dataclass(frozen=True, slots=True)
 class SharingPolicy:
     """The account sharing detector (D-14.35). Off when the policy file
     has no [sharing]."""
@@ -490,6 +499,7 @@ class Policy:
     cohorts: CohortsPolicy = field(default_factory=CohortsPolicy)
     sharing: SharingPolicy = field(default_factory=SharingPolicy)
     subscribers: SubscribersPolicy = field(default_factory=SubscribersPolicy)
+    retention: RetentionPolicy = field(default_factory=RetentionPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -769,6 +779,9 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
                 if root.has("subscribers")
                 else SubscribersPolicy()
             ),
+            retention=(
+                _retention(root.table("retention")) if root.has("retention") else RetentionPolicy()
+            ),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -829,6 +842,12 @@ def _referrals(t: _Table) -> ReferralsPolicy:
     t.done()
     if not 0 < policy.commission < 1:
         raise PolicyError("referrals: commission_percent between 0 and 100")
+    return policy
+
+
+def _retention(t: _Table) -> RetentionPolicy:
+    policy = RetentionPolicy(aml_years=t.integer("aml_years", 5))
+    t.done()
     return policy
 
 

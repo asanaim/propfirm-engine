@@ -57,6 +57,7 @@ from propfirm.customers.corrections import Corrections
 from propfirm.customers.detectors import Detectors
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.disputes import Disputes
+from propfirm.customers.erasure import Erasures
 from propfirm.customers.exposure import Exposure
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowScreening
@@ -491,6 +492,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             config.public_url,
             SiteContact(settings),
         )
+        erasures = Erasures(pool, config.customer_schema, settings, live)
         stale = StalePrice(
             pool,
             config.customer_schema,
@@ -647,6 +649,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             stale=stale,
             subscribers=subscribers,
             newsletter=newsletter,
+            erasures=erasures,
             audit=AuditStore(pool, config.audit_schema),
             client_ip_header=config.client_ip_header,
             price_source=config.price_source,

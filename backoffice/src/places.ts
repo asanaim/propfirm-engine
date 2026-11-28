@@ -61,6 +61,7 @@ export const PLACES: readonly Place[] = [
   { group: "risk", screen: "cases", label: "Cohort alarm", path: "/cohorts", icon: "cohorts", keywords: "cohort pass rate zero edge bound affiliate exploit binomial hold" },
   { group: "risk", screen: "cases", label: "Price corrections", path: "/corrections", icon: "corrections", keywords: "bad price spike tick reverse reinstate breach correction" },
   { group: "risk", screen: "anomalies", label: "Anomaly report", path: "/anomalies", icon: "anomalies", keywords: "anomalies report unusual" },
+  { group: "risk", screen: "settings", label: "Data erasure", path: "/erasures", icon: "erasures", keywords: "erasure erase gdpr personal data privacy forget retention owner delete" },
   { group: "risk", screen: "audit", label: "Security log", path: "/audit", icon: "audit", keywords: "audit trail log entries" },
   { group: "team", screen: "members", label: "Staff", path: "/members", icon: "members", keywords: "members people team employees" },
   { group: "team", screen: "grants", label: "Access requests", path: "/grants", icon: "grants", keywords: "grants permissions access" },
