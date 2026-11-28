@@ -819,3 +819,11 @@ max_devices = 3       # more devices in the window
 max_countries = 3     # more countries in the window
 travel_km = 500       # two sign ins further apart than this ...
 travel_minutes = 60   # ... within this time
+
+[subscribers]
+# The newsletter (rule AC25, D-15.1): double opt-in, and each consent keeps
+# the time, the place on the site and this exact wording (a new wording is
+# a new version; earlier consents keep theirs).
+on = true
+wording = "Send me Pipridge news, new products and offers by email. One click unsubscribes."
+max_per_hour = 200    # confirmation emails a public form may send each hour

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
 import { useAuth } from "./auth/AuthProvider";
+import { linkToken, SubscriptionLinkPage } from "./components/Newsletter";
 import { Layout } from "./components/Layout";
 import { Loading, Notice } from "./components/ui";
 import { OverviewPage } from "./pages/OverviewPage";
@@ -171,6 +172,17 @@ export function App() {
   const legal = LEGAL.exec(path)?.[1];
   const invoice = INVOICE.exec(path)?.[1];
   const certificate = CERTIFICATE.exec(path)?.[1];
+  if (path === "/subscribe/confirm" || path === "/unsubscribe") {
+    // the newsletter's emailed links are public (rule AC25)
+    return (
+      <Layout>
+        <SubscriptionLinkPage
+          action={path === "/unsubscribe" ? "unsubscribe" : "confirm"}
+          token={linkToken(window.location.search)}
+        />
+      </Layout>
+    );
+  }
   if (legal !== undefined) {
     // policy pages are public: shown signed in or not
     return (

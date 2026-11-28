@@ -1109,6 +1109,23 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.stale_fills FOR EACH ROW EXECUTE FUNCTION {s}.no_update();
         """,
     ),
+    (
+        35,
+        """
+        -- subscribers (rule AC25, D-15.1): each subscribe, confirm and
+        -- unsubscribe with its consent record (append-only)
+        CREATE TABLE {s}.subscriber_events (
+            seq bigserial PRIMARY KEY,
+            email text NOT NULL,
+            kind text NOT NULL CHECK (kind IN ('subscribed', 'confirmed', 'unsubscribed')),
+            at bigint NOT NULL,
+            detail jsonb NOT NULL
+        );
+        CREATE INDEX ON {s}.subscriber_events (email, seq);
+        CREATE TRIGGER subscriber_events_append_only BEFORE UPDATE OR DELETE
+            ON {s}.subscriber_events FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

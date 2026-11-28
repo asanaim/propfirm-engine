@@ -259,6 +259,17 @@ class ClassesPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class SubscribersPolicy:
+    """The newsletter (rule AC25, D-15.1). Off when the policy file has no
+    [subscribers]. `wording`: shown beside the button and kept with each
+    consent."""
+
+    on: bool = False
+    wording: str = ""
+    max_per_hour: int = 200
+
+
+@dataclass(frozen=True, slots=True)
 class SharingPolicy:
     """The account sharing detector (D-14.35). Off when the policy file
     has no [sharing]."""
@@ -476,6 +487,7 @@ class Policy:
     exposure: ExposurePolicy = field(default_factory=ExposurePolicy)
     cohorts: CohortsPolicy = field(default_factory=CohortsPolicy)
     sharing: SharingPolicy = field(default_factory=SharingPolicy)
+    subscribers: SubscribersPolicy = field(default_factory=SubscribersPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -750,6 +762,11 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             ),
             cohorts=_cohorts(root.table("cohorts")) if root.has("cohorts") else CohortsPolicy(),
             sharing=_sharing(root.table("sharing")) if root.has("sharing") else SharingPolicy(),
+            subscribers=(
+                _subscribers(root.table("subscribers"))
+                if root.has("subscribers")
+                else SubscribersPolicy()
+            ),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -810,6 +827,18 @@ def _referrals(t: _Table) -> ReferralsPolicy:
     t.done()
     if not 0 < policy.commission < 1:
         raise PolicyError("referrals: commission_percent between 0 and 100")
+    return policy
+
+
+def _subscribers(t: _Table) -> SubscribersPolicy:
+    policy = SubscribersPolicy(
+        on=t.boolean("on"),
+        wording=t.text("wording"),
+        max_per_hour=t.integer("max_per_hour", 1),
+    )
+    t.done()
+    if policy.on and len(policy.wording) < 20:
+        raise PolicyError("subscribers: the wording shown must say what is sent")
     return policy
 
 

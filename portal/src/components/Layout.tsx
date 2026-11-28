@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { config } from "../config";
 import { PolicyGate, PolicyLinks } from "../pages/PolicyPages";
 import { Link, usePath } from "../router";
+import { NewsletterForm } from "./Newsletter";
 import { FooterContact, MaintenanceBanner, useSiteStatus } from "./SiteStatus";
 
 type Theme = "light" | "dark";
@@ -136,6 +137,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <footer className="footer">
         <p>Trading on this platform is simulated. Nothing here is investment advice.</p>
         <FooterContact contact={site.contact} />
+        <NewsletterForm />
         <p>
           <PolicyLinks />
           <Link href="/notices">Open-source notices</Link>
