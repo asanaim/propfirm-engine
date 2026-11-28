@@ -5,6 +5,7 @@
  */
 import {
   Activity,
+  Eraser,
   Banknote,
   Building2,
   FileSearch,
@@ -127,6 +128,7 @@ export const ICONS = {
   exposure: Gauge,
   subscribers: MailCheck,
   newsletter: Megaphone,
+  erasures: Eraser,
   reconciliation: ListChecks,
   disputes: ReceiptText,
   receipts: Landmark,

@@ -829,3 +829,9 @@ wording = "Send me Pipridge news, new products and offers by email. One click un
 max_per_hour = 200    # confirmation emails a public form may send each hour
 per_minute = 60       # newsletter emails sent each minute, within the mail provider's limits
 attempts = 3          # tries per address before a send is given up
+
+[retention]
+# Erasure of personal data (rule AC27, D-15.5): refused until this many
+# years after the relationship ends (D35; FATF R.11 minimum: five). Raise it
+# where a local law asks for longer.
+aml_years = 5

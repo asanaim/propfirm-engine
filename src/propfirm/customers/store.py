@@ -1203,6 +1203,65 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         """
         + GUARD_DELETES,
     ),
+    (
+        38,
+        """
+        -- erasure of personal data (rule AC27; D-15.5): one owner proposes,
+        -- the other decides; an approval runs the erasure at once
+        CREATE TABLE {s}.erasures (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            reason text NOT NULL CHECK (length(reason) > 0),
+            proposed_by text NOT NULL,
+            proposed_at bigint NOT NULL
+        );
+        CREATE INDEX ON {s}.erasures (cif);
+        CREATE TABLE {s}.erasure_decisions (
+            erasure bigint PRIMARY KEY REFERENCES {s}.erasures (id),
+            kind text NOT NULL CHECK (kind IN ('approved', 'rejected', 'cancelled')),
+            decided_by text NOT NULL,
+            decided_at bigint NOT NULL,
+            reason text NOT NULL
+        );
+        CREATE TABLE {s}.erasure_runs (
+            erasure bigint PRIMARY KEY REFERENCES {s}.erasure_decisions (erasure),
+            ran_at bigint NOT NULL,
+            erased jsonb NOT NULL
+        );
+        CREATE TRIGGER erasures_append_only BEFORE UPDATE OR DELETE ON {s}.erasures
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER erasure_decisions_append_only BEFORE UPDATE OR DELETE
+            ON {s}.erasure_decisions FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER erasure_runs_append_only BEFORE UPDATE OR DELETE ON {s}.erasure_runs
+            FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        -- an append-only row holding personal data may be overwritten only
+        -- inside an approved erasure's own transaction, before its run is
+        -- recorded; never deleted
+        CREATE OR REPLACE FUNCTION {s}.append_only() RETURNS trigger LANGUAGE plpgsql AS $fn$
+        DECLARE
+            e text := current_setting('propfirm.erasure', true);
+        BEGIN
+            IF TG_OP = 'UPDATE'
+                AND TG_TABLE_NAME IN ('sign_ins', 'wallets', 'contracts', 'subscriber_events',
+                    'campaign_audience', 'campaign_results')
+                AND e ~ '^[0-9]{{1,18}}$'
+                AND EXISTS (SELECT 1 FROM {s}.erasure_decisions
+                    WHERE erasure = e::bigint AND kind = 'approved')
+                AND NOT EXISTS (SELECT 1 FROM {s}.erasure_runs WHERE erasure = e::bigint)
+            THEN
+                RETURN NEW;
+            END IF;
+            RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+        END $fn$;
+        ALTER TABLE {s}.wallets DROP CONSTRAINT wallets_network_address;
+        ALTER TABLE {s}.wallets ADD CONSTRAINT wallets_network_address CHECK (
+            (network = 'TRC20' AND address ~ '^T[1-9A-HJ-NP-Za-km-z]{{33}}$')
+            OR (network IN ('ERC20', 'BEP20', 'POLYGON') AND address ~ '^0x[0-9a-fA-F]{{40}}$')
+            OR address = 'erased'
+        );
+        """
+        + GUARD_DELETES,
+    ),
 )
 
 

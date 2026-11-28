@@ -95,7 +95,7 @@ def test_existing_opt_outs_carry_over(database_url: str, pg_schema: str) -> None
                     cif,
                 )
             await conn.execute(f"INSERT INTO {s}.leaderboard_hidden VALUES ('C1', 7)")
-            assert await customers_migrate(conn, s) == [37]
+            assert await customers_migrate(conn, s) == [37, 38]
             rows = await conn.fetch(f"SELECT cif, visible, ts FROM {s}.leaderboard_choices")
             assert [tuple(r) for r in rows] == [("C1", False, 7)]
             shown = f"SELECT {s}.leaderboard_shown($1)"

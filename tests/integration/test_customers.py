@@ -30,6 +30,7 @@ from propfirm.customers.corrections import Corrections
 from propfirm.customers.detectors import Detectors
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.disputes import Disputes
+from propfirm.customers.erasure import Erasures
 from propfirm.customers.exposure import Exposure
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycProvider, SandboxKyc
@@ -307,6 +308,7 @@ async def platform(
         "https://pipridge.test",
         SiteContact(settings),
     )
+    erasures = Erasures(pool, config.customer_schema, settings, live)
     stale = StalePrice(
         pool,
         config.customer_schema,
@@ -372,6 +374,7 @@ async def platform(
         stale=stale,
         newsletter=newsletter,
         captcha=fake_captcha,
+        erasures=erasures,
         subscribers=Subscribers(
             pool, config.customer_schema, settings, mailer, "https://pipridge.test"
         ),
@@ -659,7 +662,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 38))
+            assert await migrate(conn, schema) == list(range(1, 39))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

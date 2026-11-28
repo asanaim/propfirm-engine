@@ -34,6 +34,7 @@ ALLOWED = {
     "self._tx": "the transaction union, built from a constant and the checked schema",
     "_SETTLED": "a constant condition: which transactions count as settled",
     "_TOTALS": "a constant select list of the transaction totals",
+    "biggest": "max() over timestamp columns from the constant erasure.DATED",
 }
 
 
