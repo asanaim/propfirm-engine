@@ -237,7 +237,9 @@ def test_a_payout_from_request_to_paid(database_url: str, valkey_url: str, pg_sc
             assert (await p.call("POST", url, "u2")).status_code == 404  # not registered/owner
 
             # cancelled by the trader before approval
-            first = (await p.call("POST", url, login_age_s=299)).json()  # within 5 minutes
+            # within 5 minutes, with room: the token's sign-in time is in whole
+            # seconds, so 299 s could read as just over 300 on a slow runner
+            first = (await p.call("POST", url, login_age_s=290)).json()
             assert (first["po"], first["status"], first["debit_cents"]) == (
                 "PO00000001",
                 "requested",
