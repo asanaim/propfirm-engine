@@ -65,6 +65,7 @@ from propfirm.journal.inputs import (
     RuleSetAdded,
     ScaleAccount,
     ScheduleNews,
+    SetRiskLimits,
     SetTrailingStop,
     StateCheckpointed,
     UpdateTrading,
@@ -117,6 +118,7 @@ from propfirm.trading.events import (
     PriceHeld,
     PriceReleased,
     RejectReason,
+    RiskLimitsSet,
     StaleUpdate,
     StopsModified,
     SwapCharged,
@@ -138,6 +140,7 @@ from propfirm.trading.orders import (
     TrailingKind,
     TrailingOrder,
 )
+from propfirm.trading.risk import RiskCut, RiskLimits
 from propfirm.trading.swaps import SwapTerms
 
 CHAIN_VERSION = "propfirm-journal-v2"  # v2: keyed price digests, checkpoints
@@ -300,6 +303,11 @@ CODEC = Codec(
         # free trial (15 Nov 2026)
         ExpireAccount,
         AccountExpired,
+        # automatic risk limits (28 Nov 2026, D-14.34)
+        SetRiskLimits,
+        RiskLimits,
+        RiskCut,
+        RiskLimitsSet,
     )
 )
 

@@ -999,3 +999,30 @@ flag").
 - Clearing an alarm needs two people. One asks with a reason; a second,
   different person confirms (409 `same_person` otherwise). Requests are
   append-only (migration 32). Payouts stay held until the confirmation.
+D-14.34, automatic risk limits journaled and replayed (build plan step 5,
+line 6; decided by the owner's rule of 20 Nov 2026).
+- One engine input, `SetRiskLimits`, carries the whole set: each account
+  not in class B with its class, the percent of lot caps each class keeps
+  (C 50 %, D 0 %, meaning close only), and every exposure cut (symbol,
+  side, percent, classes). It also carries the settings version it was
+  decided under. Each set replaces the last. The engine records
+  `RiskLimitsSet`, and the set is part of its state snapshot, so replay
+  and restart give the same refusals.
+- The engine applies the set to new exposure only: market, pending and
+  trailing entries at placement.
+  - The lot caps are scaled to the smallest percent that applies (a class
+    percent, or a cut listing the account's class), rounded down to whole
+    hundredths of a lot. Two reasons do not compound.
+  - Refusals: `risk_limit` (within the normal caps, above the cut) and
+    `close_only` (percent 0).
+  - Closes, stop changes and open positions are never limited.
+  - A working order placed before a cut fills as placed, because the
+    normal caps are rechecked at the trigger but the cut is not.
+- The API loop builds the set every minute from the classes in force
+  (D-14.5, D-14.28, staff or system) and the exposure cuts in force
+  (D-14.32: halve leaves 50 % for B and C, quarter 25 % for all). It
+  sends the set only when it changed, and once after start.
+- This resolves the flags of D-14.28 (lot caps for C, close only for D)
+  and D-14.32 (cuts not applied). The portal explains both refusals.
+- Step 5 is complete except stale price (needs the second price source,
+  step 8) and account sharing (needs device and sign in records).

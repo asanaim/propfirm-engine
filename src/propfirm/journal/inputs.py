@@ -26,6 +26,7 @@ from propfirm.rules.products import RuleSet
 from propfirm.rules.supervisor import Event, RuleSupervisor
 from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest, Side
+from propfirm.trading.risk import RiskLimits
 
 
 def _ts(value: int) -> None:
@@ -370,6 +371,21 @@ class ScaleAccount:
 
 
 @dataclass(frozen=True, slots=True)
+class SetRiskLimits:
+    """The automatic risk limits in force from now on (D-14.34): the whole
+    set, decided by the platform from trader classes and exposure cuts,
+    with the settings version it was decided under. Replaces the last set."""
+
+    limits: RiskLimits
+    ts: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.limits, RiskLimits):
+            raise TypeError("limits must be RiskLimits")
+        _ts(self.ts)
+
+
+@dataclass(frozen=True, slots=True)
 class Checkpoint:
     """Record a digest of the whole engine state in the chain and store a
     snapshot of it, so start-up can resume from here (sent by the scheduler)."""
@@ -403,6 +419,7 @@ type Input = (
     | ReinstateAccount
     | ScaleAccount
     | ExpireAccount
+    | SetRiskLimits
 )
 
 INPUT_TYPES = (
@@ -428,6 +445,7 @@ INPUT_TYPES = (
     ReinstateAccount,
     ScaleAccount,
     ExpireAccount,
+    SetRiskLimits,
 )
 
 
@@ -624,6 +642,8 @@ def apply(
             if sup.status(item.account_id) is not AccountStatus.ACTIVE:
                 return reject(item.account_id, InputRejectReason.ACCOUNT_NOT_ACTIVE)
             return list(sup.expire_account(item.account_id, item.ts))
+        case SetRiskLimits():
+            return list(sup.set_risk_limits(item.limits, item.ts))
         case Checkpoint():
             raise TypeError("Checkpoint is applied by the journal machine")
         case Malformed():

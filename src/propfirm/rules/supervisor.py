@@ -70,6 +70,7 @@ from propfirm.trading.events import (
 )
 from propfirm.trading.instruments import InstrumentSpec
 from propfirm.trading.orders import OrderRequest, Side
+from propfirm.trading.risk import RiskLimits
 
 type Event = EngineEvent | RuleEvent
 
@@ -253,6 +254,10 @@ class RuleSupervisor:
         return self._run(
             ts, lambda: self._engine.reconfigure(config_version, instruments, guard, ts)
         )
+
+    def set_risk_limits(self, limits: RiskLimits, ts: int) -> list[Event]:
+        """Automatic risk limits (D-14.34), applied by the engine."""
+        return self._run(ts, lambda: self._engine.set_risk_limits(limits, ts))
 
     # --- state --------------------------------------------------------------
 

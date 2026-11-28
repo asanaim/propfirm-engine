@@ -252,6 +252,10 @@ class ClassesPolicy:
     c_short_percent: int = 50
     short_seconds: int = 60
     d_case_days: int = 90
+    # lot caps the engine allows each class for new exposure (D-14.34);
+    # 0 = close only
+    c_lot_percent: int = 50
+    d_lot_percent: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +296,8 @@ class ExposurePolicy:
     quarter_percent: int = 150
     restore_percent: int = 60
     restore_hours: int = 24
+    halve_lot_percent: int = 50  # the lot caps a "halve" cut leaves (D-14.34)
+    quarter_lot_percent: int = 25  # and a "quarter" cut
 
 
 @dataclass(frozen=True, slots=True)
@@ -830,10 +836,14 @@ def _exposure(t: _Table) -> ExposurePolicy:
         quarter_percent=t.integer("quarter_percent", 1),
         restore_percent=t.integer("restore_percent", 1),
         restore_hours=t.integer("restore_hours", 1),
+        halve_lot_percent=t.integer("halve_lot_percent", 1),
+        quarter_lot_percent=t.integer("quarter_lot_percent", 0),
     )
     t.done()
     if policy.min_days > policy.sigma_days:
         raise PolicyError("exposure: min_days <= sigma_days")
+    if not 0 <= policy.quarter_lot_percent < policy.halve_lot_percent < 100:
+        raise PolicyError("exposure: 0 <= quarter_lot_percent < halve_lot_percent < 100")
     if not (
         policy.restore_percent
         < policy.alert_percent
@@ -887,8 +897,12 @@ def _classes(t: _Table) -> ClassesPolicy:
         c_short_percent=t.integer("c_short_percent", 1),
         short_seconds=t.integer("short_seconds", 1),
         d_case_days=t.integer("d_case_days", 1),
+        c_lot_percent=t.integer("c_lot_percent"),
+        d_lot_percent=t.integer("d_lot_percent"),
     )
     t.done()
+    if not 0 <= policy.d_lot_percent <= policy.c_lot_percent <= 100:
+        raise PolicyError("classes: 0 <= d_lot_percent <= c_lot_percent <= 100")
     if not 0 <= policy.a_max_short_percent < policy.c_short_percent <= 100:
         raise PolicyError("classes: 0 <= a_max_short_percent < c_short_percent <= 100")
     if policy.a_min_profit_factor <= 1 or policy.a_min_t_stat <= 0:

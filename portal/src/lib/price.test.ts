@@ -25,6 +25,8 @@ it("reads lots in hundredths", () => {
 it("explains an engine refusal", () => {
   expect(rejection("insufficient_margin")).toBe("Not enough free margin for this order.");
   expect(rejection("stale_quote")).toMatch(/Try again on the next price/);
+  expect(rejection("risk_limit")).toMatch(/smaller volume/);
+  expect(rejection("close_only")).toMatch(/close positions but not open/);
   expect(rejection("something_new")).toBe("Refused: something_new.");
   expect(rejection(undefined)).toBe("Refused.");
 });

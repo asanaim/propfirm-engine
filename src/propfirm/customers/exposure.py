@@ -27,9 +27,7 @@ in the scenario (a rise: buy).
 
 Cut levels are recorded in `exposure_moves` (append-only), each with the
 settings version it was decided under, and read back by replaying them.
-Applying a cut to orders needs an engine input journaled with its risk
-policy version (build plan step 5, line 6): until then the
-levels are published to staff and nothing in the engine changes.
+The engine applies the cuts in force to new orders (`risk_sync`, D-14.34).
 """
 
 import logging

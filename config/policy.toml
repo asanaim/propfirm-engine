@@ -730,6 +730,8 @@ a_max_short_percent = 20       # A: under this share of profit from short holds
 c_short_percent = 50           # C: over this share of profit from short holds
 short_seconds = 60             # a short hold: closed by the trader within this
 d_case_days = 90
+c_lot_percent = 50             # class C: lot caps halved for new exposure (D-14.34)
+d_lot_percent = 0              # class D: close only
 
 [detectors]
 # Behaviour detectors (D-14.29; strategic review v3, D6): starting values
@@ -757,8 +759,8 @@ rate_repeat_days = 30          # ... in this many days raise an alert (a case)
 [exposure]
 # The exposure desk (D-14.32; strategic review v3, D4): scenario liability
 # of funded accounts by exact revaluation, against the free reserve. Cut
-# levels are recorded and shown to staff; the engine applies them once
-# step 5, line 6 adds the lot cap input.
+# levels are recorded, shown to staff and applied by the engine to new
+# orders within a minute (D-14.34).
 on = true
 every_minutes = 5
 sigma_days = 60           # daily returns for each symbol's standard deviation
@@ -774,6 +776,8 @@ halve_percent = 100       # lot caps halved for classes B and C, that symbol and
 quarter_percent = 150     # lot caps quartered for all classes
 restore_percent = 60      # back to baseline after restore_hours under this
 restore_hours = 24
+halve_lot_percent = 50    # the lot caps a halving cut leaves (D-14.34)
+quarter_lot_percent = 25  # and a quartering cut
 
 [exposure.stress_bp]      # one stress move per asset class, both ways
 forex = 150
