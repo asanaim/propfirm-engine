@@ -60,16 +60,16 @@ def test_extensions(database_url: str, valkey_url: str, pg_schema: str) -> None:
 
             version = (await p.api.get("/subscribe")).json()["version"]
             body = {"email": "ada@example.com", "source": "footer", "version": version}
-            # captcha on without its secret: the form still works, and the
-            # back office warns
+            # the captcha is switched on only with its secret in force
             captcha = {"enabled": True, "public_id": SITE_KEY, "reason": "bots"}
-            done = await two_admins(p, "/admin/extensions/captcha", captcha)
-            assert done.status_code == 200, done.text
+            early = await p.call("PUT", "/admin/extensions/captcha", "admin-1", captcha, ADMIN)
+            assert early.status_code == 409
+            assert early.json()["detail"]["code"] == "secret_first"
             slots = (await p.call("GET", "/admin/extensions", "admin-1", None, ADMIN)).json()
             assert slots["captcha"] == {
                 "provider": "turnstile",
-                "enabled": True,
-                "public_id": SITE_KEY,
+                "enabled": False,
+                "public_id": "",
                 "secret": False,
             }
             assert slots["chat"]["secret"] is None
@@ -81,8 +81,11 @@ def test_extensions(database_url: str, valkey_url: str, pg_schema: str) -> None:
             assert by_admins.status_code == 403
             done = await two_owners(p, "/admin/extensions/captcha/secret", secret)
             assert done.status_code == 200, done.text
+            done = await two_admins(p, "/admin/extensions/captcha", captcha)
+            assert done.status_code == 200, done.text
             slots = (await p.call("GET", "/admin/extensions", "admin-1", None, ADMIN)).json()
             assert slots["captcha"]["secret"] is True
+            assert slots["captcha"]["enabled"] is True
             site = (await p.api.get("/site/extensions")).json()
             assert site["captcha"] == {"provider": "turnstile", "public_id": SITE_KEY}
             assert "s3" not in str(site) and "s3" not in str(slots)

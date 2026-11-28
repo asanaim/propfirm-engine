@@ -73,8 +73,34 @@ declare global {
   }
 }
 
+// each provider's script hosts; the server's policy allows all three
+const SCRIPT_HOSTS: Record<keyof Extensions, string[]> = {
+  chat: ["https://client.crisp.chat", "https://settings.crisp.chat"],
+  captcha: ["https://challenges.cloudflare.com"],
+  analytics: ["https://static.cloudflareinsights.com"],
+};
+
+/** The script policy for the slots switched on: own scripts plus only
+those providers' hosts. */
+export function scriptPolicy(found: Extensions): string {
+  const hosts = (Object.keys(SCRIPT_HOSTS) as (keyof Extensions)[]).filter((k) => found[k] !== null).flatMap((k) => SCRIPT_HOSTS[k]);
+  return ["script-src 'self'", ...hosts].join(" ");
+}
+
+/** Narrow the page's script policy to the slots switched on (rule AC22).
+The server's policy names all three providers; a second policy can only
+narrow it, and browsers apply both. Set once, before any provider loads. */
+export function narrow(found: Extensions): void {
+  if (document.querySelector('meta[http-equiv="Content-Security-Policy"]') !== null) return;
+  const meta = document.createElement("meta");
+  meta.httpEquiv = "Content-Security-Policy";
+  meta.content = scriptPolicy(found);
+  document.head.prepend(meta);
+}
+
 /** Load live chat and analytics when switched on (rule AC22). */
 export function install(found: Extensions): void {
+  narrow(found);
   if (found.chat !== null) {
     window.$crisp ??= [];
     window.CRISP_WEBSITE_ID = found.chat.public_id;

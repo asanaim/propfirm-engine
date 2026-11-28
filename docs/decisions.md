@@ -1168,3 +1168,18 @@ AC14 and AC22; universal rule of 20 Nov 2026, lowest cost).
   slot is on.
 - The content security policy names the three providers' fixed hosts.
   Another provider would need that policy changed in code, by design.
+
+D-15.3a, extensions flags closed (owner, 28 Nov 2026: "fix those flags").
+- The captcha is switched on only when its secret key is already in force:
+  a proposal to switch it on before then is refused (`secret_first`). If
+  the secret were ever missing while the captcha is on, forms are refused,
+  not passed (fail closed). This replaces the D-15.3 line that let forms
+  pass unchecked.
+- The server's content security policy still names all three providers
+  (Caddy's header is fixed). The portal adds a second policy at start,
+  naming only the slots switched on; browsers apply both, so a provider
+  whose slot is off cannot run a script.
+- Crisp branding stays: every free hosted chat (Crisp, Tawk.to) shows
+  its brand, and removing it costs a paid plan; self-hosting an open
+  source chat (Chatwoot) costs a server. Lowest cost wins (universal rule
+  of 20 Nov 2026) until revenue justifies an upgrade.

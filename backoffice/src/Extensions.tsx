@@ -20,7 +20,7 @@ const ABOUT: Record<string, { title: string; id: string; help: string }> = {
   captcha: {
     title: "Captcha",
     id: "Turnstile site key",
-    help: "Cloudflare Turnstile on public forms (the newsletter form). Free. Needs its secret key too; the form stays unchecked until both are in force.",
+    help: "Cloudflare Turnstile on public forms (the newsletter form). Free. Its secret key is approved first, then the captcha is switched on.",
   },
   analytics: { title: "Analytics", id: "Web Analytics token", help: "Cloudflare Web Analytics: page views without cookies. Free." },
 };
@@ -45,7 +45,7 @@ export function ExtensionsPage() {
 
 /** The warning a slot needs, if any. */
 export function warning(s: SlotState): string | null {
-  return s.enabled && s.secret === false ? "On without its secret key: forms are not checked until a secret is approved." : null;
+  return s.secret === false ? "Propose its secret key first; an owner approves it. Then it can be switched on." : null;
 }
 
 function SlotCard({ slot, state, done }: { slot: string; state: SlotState; done: () => void }) {
@@ -121,7 +121,7 @@ function SlotCard({ slot, state, done }: { slot: string; state: SlotState; done:
           <Stack direction="row" spacing={1}>
             <Button
               variant="contained"
-              disabled={!changed || reason.trim() === "" || (enabled && publicId.trim() === "")}
+              disabled={!changed || reason.trim() === "" || (enabled && (publicId.trim() === "" || state.secret === false))}
               onClick={() => {
                 void put(`/admin/extensions/${slot}`, { enabled, public_id: publicId.trim(), reason: reason.trim() }, () => {
                   setReason("");
