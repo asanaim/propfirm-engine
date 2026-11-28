@@ -263,6 +263,22 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             'notice_wrapper', 'offering'));
         """,
     ),
+    (
+        14,
+        """
+        -- rule AC22 (28 Nov 2026, D-15.3): live chat, captcha and analytics
+        ALTER TABLE {s}.changes DROP CONSTRAINT changes_kind_check;
+        ALTER TABLE {s}.changes ADD CONSTRAINT changes_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret', 'site_mode', 'notice_template',
+            'notice_wrapper', 'offering', 'extension'));
+        ALTER TABLE {s}.proposals DROP CONSTRAINT proposals_kind_check;
+        ALTER TABLE {s}.proposals ADD CONSTRAINT proposals_kind_check CHECK (kind IN (
+            'country_gating', 'stage_limits', 'stand_in', 'policy_page', 'site_section',
+            'payment_method', 'method_secret', 'site_mode', 'notice_template',
+            'notice_wrapper', 'offering', 'extension'));
+        """,
+    ),
 )
 
 

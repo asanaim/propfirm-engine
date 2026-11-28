@@ -17,6 +17,7 @@ sale [decided 12 Nov 2026] stay with admins: an admin (or an owner)
 proposes, another admin or owner approves.
 """
 
+from propfirm.settings.extensions import Extension
 from propfirm.settings.methods import MethodSecret, PaymentMethod
 from propfirm.settings.notices import NoticeTemplate, NoticeWrapper
 from propfirm.settings.offering import Offering
@@ -57,7 +58,8 @@ def check_proposer(setting: Setting, tier: Tier | None) -> None:
         | NoticeWrapper
         | PaymentMethod
         | MethodSecret
-        | Offering,
+        | Offering
+        | Extension,
     )
     if tier is None or tier < Tier.ADMIN:
         raise Refused("forbidden", "an admin or owner proposes this change")
@@ -87,7 +89,7 @@ def check_approver(
     if isinstance(setting, OWNER_APPROVES):
         if tier == Tier.OWNER:
             return "owner"
-        raise Refused("owners_only", "an owner approves a payment method change (rule AC02)")
+        raise Refused("owners_only", "an owner approves a payment method or a secret (rule AC02)")
     if tier is None or tier < Tier.ADMIN:
         raise Refused("forbidden", "a second admin (T4) or an owner approves settings")
     return "admin"
