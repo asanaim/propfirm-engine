@@ -34,6 +34,8 @@ class RejectReason(StrEnum):
     STALE_QUOTE = "stale_quote"  # the last applied price is older than the quote age limit
     MARKET_CLOSED = "market_closed"  # outside the symbol's trading hours
     MARKET_BREAK = "market_break"  # flat-before-break account, minutes before a long break
+    CLOSE_ONLY = "close_only"  # an automatic risk limit allows closes only (D-14.34)
+    RISK_LIMIT = "risk_limit"  # within the lot caps, above an automatic cut of them
 
 
 class CloseReason(StrEnum):
@@ -294,6 +296,18 @@ class TradingConfigChanged:
     guard_changed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class RiskLimitsSet:
+    """A new set of automatic risk limits applies from `ts` (D-14.34),
+    decided under settings `policy_version`: `accounts` with a class other
+    than B, `cuts` symbol and side cuts."""
+
+    ts: int
+    policy_version: int
+    accounts: int
+    cuts: int
+
+
 type EngineEvent = (
     AccountOpened
     | OrderRejected
@@ -317,4 +331,5 @@ type EngineEvent = (
     | NewsScheduled
     | NewsCancelled
     | TradingConfigChanged
+    | RiskLimitsSet
 )

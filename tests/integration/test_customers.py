@@ -52,6 +52,7 @@ from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
 from propfirm.customers.request_rate import RequestRate
 from propfirm.customers.reserve import Evaluations, Reserve, limits
+from propfirm.customers.risk_sync import RiskSync
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.customers.transfers import Transfers, WithdrawalRails
@@ -133,6 +134,7 @@ class Platform:
     request_rate: RequestRate | None = None  # order request limit (D-14.31)
     exposure: Exposure | None = None  # the exposure desk (D-14.32)
     cohorts: Cohorts | None = None  # the cohort alarm (D-14.33)
+    risk: RiskSync | None = None  # automatic risk limits to the engine (D-14.34)
 
     async def call(
         self,
@@ -427,6 +429,7 @@ async def platform(
             request_rate=request_rate,
             exposure=exposure,
             cohorts=cohorts,
+            risk=RiskSync(pool, config.customer_schema, settings, exposure, gateway),
         )
     finally:
         await stop_engine()

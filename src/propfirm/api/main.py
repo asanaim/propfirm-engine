@@ -85,6 +85,7 @@ from propfirm.customers.reconciliation import Reconciliations
 from propfirm.customers.referrals import Referrals
 from propfirm.customers.request_rate import RequestRate
 from propfirm.customers.reserve import Evaluations, Reserve, limits
+from propfirm.customers.risk_sync import RiskSync
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.store import CustomerStore
 from propfirm.customers.transfers import NoPayoutRail, Transfers, WithdrawalRails
@@ -185,6 +186,7 @@ async def _lifecycle_forever(
     detectors: Detectors | None = None,
     exposure: Exposure | None = None,
     cohorts: Cohorts | None = None,
+    risk: RiskSync | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -226,6 +228,11 @@ async def _lifecycle_forever(
                 await cohorts.watch(now_ms())
             except Exception:
                 log.exception("cohort watch failed")
+        if risk is not None:
+            try:  # automatic risk limits to the engine, when they change (D-14.34)
+                await risk.sync(now_ms())
+            except Exception:
+                log.exception("risk limit sync failed")
         if classes is not None:
             try:  # classes every funded account, once a day (D-14.28)
                 await classes.run(now_ms())
@@ -526,6 +533,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     detectors,
                     exposure,
                     cohorts,
+                    RiskSync(pool, config.customer_schema, settings, exposure, gateway),
                 )
             )
         )

@@ -132,7 +132,7 @@ function DeskView({ desk }: { desk: ExposureDesk }) {
         </CardContent>
       </Card>
       <Card>
-        <CardHeader title="Lot cap cuts" subheader="New orders only; open positions are untouched. Back to baseline after 24 hours under 60 %. Applied by the engine from step 5, line 6." />
+        <CardHeader title="Lot cap cuts" subheader="New orders only; open positions are untouched. Back to baseline after 24 hours under 60 %. The engine applies them within a minute." />
         <CardContent>
           {desk.cuts.length === 0 ? (
             <Typography color="text.secondary">No cut in force.</Typography>

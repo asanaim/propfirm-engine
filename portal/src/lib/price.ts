@@ -51,6 +51,8 @@ export const REJECTIONS: Record<string, string> = {
     "The market closes for 2 hours or more in a few minutes, so funded accounts open no new trades until it reopens.",
   market_closed: "The market for this symbol is closed now. Orders, stops and cancellations wait for it to open.",
   stale_quote: "The last price is a few seconds old, so the order was not filled on it. Try again on the next price.",
+  risk_limit: "Lot limits on this symbol and side are reduced for now. Try a smaller volume.",
+  close_only: "This account may close positions but not open new ones for now. Contact support for details.",
 };
 
 export function rejection(reason: unknown): string {

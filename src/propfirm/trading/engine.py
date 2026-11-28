@@ -122,6 +122,7 @@ from propfirm.trading.events import (
     PriceHeld,
     PriceReleased,
     RejectReason,
+    RiskLimitsSet,
     StaleUpdate,
     StopsModified,
     SwapCharged,
@@ -145,6 +146,7 @@ from propfirm.trading.orders import (
     trailing_move,
     trailing_reached,
 )
+from propfirm.trading.risk import NO_LIMITS, RiskLimits, limited_cap
 from propfirm.trading.swaps import YEAR_DAYS
 
 FIRM_CAPITAL = "firm:capital"
@@ -209,6 +211,9 @@ class EngineState:
     # accounts were made flat for (configured order); added after records
     # existed: none before
     flattened: tuple[tuple[str, int], ...] = added_field(())
+    # automatic risk limits in force (D-14.34); added after records existed:
+    # none before
+    risk: RiskLimits = added_field(NO_LIMITS)  # noqa: RUF009 a frozen value, shared safely
 
 
 class _NoRate(Exception):
@@ -256,6 +261,7 @@ class TradingEngine:
         self._positions = PositionBook()  # open, in opening order (indexed)
         self._used_ids: set[str] = set()
         self._locked: set[str] = set()
+        self._risk: RiskLimits = NO_LIMITS
         self._calendar: dict[str, NewsWindow] = {}  # event id -> window, both uses
         self._calendar_ids: set[str] = set()
         self._held: dict[str, PriceUpdate] = {}  # sanity filter: one update per symbol
@@ -492,7 +498,7 @@ class TradingEngine:
     ) -> list[EngineEvent]:
         """A trailing buy (follows the ask) or trailing sell (follows the bid)."""
         events = self._advance(ts)
-        reason = self._check_trailing_entry(order_id, account_id, symbol, volume)
+        reason = self._check_trailing_entry(order_id, account_id, symbol, side, volume)
         if reason is None:
             reason = _trailing_params(distance, step)
         if reason is not None:
@@ -751,6 +757,22 @@ class TradingEngine:
         self._guards.reconfigure(guard)
         self._breaks.clear()  # the hours may have changed: look again
 
+    def set_risk_limits(self, limits: RiskLimits, ts: int) -> list[EngineEvent]:
+        """Replace the automatic risk limits from now on (D-14.34). They bind
+        new exposure only; open positions and working orders are untouched."""
+        if not isinstance(limits, RiskLimits):
+            raise TypeError("limits must be RiskLimits")
+        events = self._advance(ts)
+        self._risk = limits
+        events.append(
+            RiskLimitsSet(self._now, limits.policy_version, len(limits.classes), len(limits.cuts))
+        )
+        return events
+
+    @property
+    def risk_limits(self) -> RiskLimits:
+        return self._risk
+
     def debit_payout(self, account_id: str, amount_cents: int, payout: str, ts: int) -> None:
         """Take a payout's amount out of the account's balance (ledger entry
         `payout:<payout>`). The rules supervisor checks it first."""
@@ -889,6 +911,7 @@ class TradingEngine:
             flattened=tuple(
                 (s, at) for s in self._instruments if (at := self._flattened.get(s)) is not None
             ),
+            risk=self._risk,
         )
 
     def restore(self, state: EngineState) -> None:
@@ -931,6 +954,9 @@ class TradingEngine:
         if len(flattened) != len(state.flattened) or not set(flattened) <= known:
             raise ValueError("bad market break state")
         self._flattened = flattened
+        if not isinstance(state.risk, RiskLimits):
+            raise ValueError("bad risk limits state")
+        self._risk = state.risk
         if not set(self._calendar) <= self._calendar_ids:
             raise ValueError("scheduled event without an id record")
 
@@ -1271,11 +1297,9 @@ class TradingEngine:
             return RejectReason.NEWS_WINDOW
         if request.volume < 1:
             return RejectReason.INVALID_VOLUME
-        if request.volume > scaled_cap(spec.max_order_volume_per_100k, account.initial_balance):
-            return RejectReason.ORDER_VOLUME_CAP
-        exposure = request.volume + self._symbol_volume(request.account_id, request.symbol)
-        if exposure > scaled_cap(spec.max_symbol_volume_per_100k, account.initial_balance):
-            return RejectReason.SYMBOL_VOLUME_CAP
+        cap = self._cap_reason(account, request.symbol, request.side, request.volume)
+        if cap is not None:
+            return cap
         quote = self._quotes[request.symbol]
         if request.order_type is OrderType.MARKET:
             if self._stale(quote):
@@ -1292,7 +1316,7 @@ class TradingEngine:
         return None
 
     def _check_trailing_entry(
-        self, order_id: str, account_id: str, symbol: str, volume: int
+        self, order_id: str, account_id: str, symbol: str, side: Side, volume: int
     ) -> RejectReason | None:
         """The checks of a new pending order, except news blocks (a trailing
         entry may be placed inside one and is held) and the level."""
@@ -1313,16 +1337,31 @@ class TradingEngine:
             return RejectReason.SYMBOL_FROZEN
         if not is_int(volume) or volume < 1:
             return RejectReason.INVALID_VOLUME
-        return self._cap_reason(account, symbol, volume)
+        return self._cap_reason(account, symbol, side, volume)
 
-    def _cap_reason(self, account: _Account, symbol: str, volume: int) -> RejectReason | None:
-        """Lot caps for `volume` more on `symbol` (besides open and working volume)."""
+    def _cap_reason(
+        self, account: _Account, symbol: str, side: Side, volume: int, *, risk: bool = True
+    ) -> RejectReason | None:
+        """Lot caps for `volume` more on `symbol` (besides open and working
+        volume), then, with `risk`, the same caps cut by the automatic risk
+        limits (D-14.34): a cut alone gives RISK_LIMIT, a cut to 0
+        CLOSE_ONLY. Limits bind new orders: a working order placed before
+        them fills as placed."""
         spec = self._instruments[symbol]
-        if volume > scaled_cap(spec.max_order_volume_per_100k, account.initial_balance):
+        order_cap = scaled_cap(spec.max_order_volume_per_100k, account.initial_balance)
+        symbol_cap = scaled_cap(spec.max_symbol_volume_per_100k, account.initial_balance)
+        if volume > order_cap:
             return RejectReason.ORDER_VOLUME_CAP
         exposure = volume + self._symbol_volume(account.account_id, symbol)
-        if exposure > scaled_cap(spec.max_symbol_volume_per_100k, account.initial_balance):
+        if exposure > symbol_cap:
             return RejectReason.SYMBOL_VOLUME_CAP
+        if not risk:
+            return None
+        percent = self._risk.percent(account.account_id, symbol, side)
+        if percent == 0:
+            return RejectReason.CLOSE_ONLY
+        if volume > limited_cap(order_cap, percent) or exposure > limited_cap(symbol_cap, percent):
+            return RejectReason.RISK_LIMIT
         return None
 
     def _symbol_volume(self, account_id: str, symbol: str) -> int:
@@ -1474,7 +1513,8 @@ class TradingEngine:
         from the working orders): caps, then margin, at the trigger."""
         assert order.volume is not None
         account = self._accounts[order.account_id]
-        reason = self._cap_reason(account, order.symbol, order.volume)
+        # caps again at the trigger; the risk limits bind at placement only
+        reason = self._cap_reason(account, order.symbol, order.side, order.volume, risk=False)
         if reason is None:
             request = OrderRequest(
                 order_id=order.order_id,
