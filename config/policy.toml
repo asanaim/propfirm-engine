@@ -780,3 +780,20 @@ forex = 150
 metal = 300
 oil = 600
 crypto = 1000
+
+[cohorts]
+# The cohort alarm (D-14.33; strategic review v3, D3 and D6). A cohort whose
+# pass rate is above its product's zero edge bound at this significance, on
+# an exact one sided binomial test, holds its payouts until staff clear it;
+# an affiliate's cohort also pauses the affiliate's commission.
+on = true
+every_hours = 6
+significance = "0.01"
+min_resolved = 10                  # results before a cohort can alarm, and again after a clear
+instant_products = ["instant"]     # success: the trailing floor locked at the start
+
+[cohorts.bounds]                   # the pass rate of a trader with zero edge
+lite = "0.25"                      # pricing study: 6 % target against 6 % loss, twice
+classic = "0.2735"                 # 8/18 times 8/13 (static loss, no daily limit): an upper bound
+one-step = "0.375"                 # pricing study
+instant = "0.368"                  # pricing study: the floor locks before it is hit

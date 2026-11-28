@@ -93,6 +93,7 @@ def test_a_funded_accounts_payable_profit_and_checks(
                 "identity": "pass",
                 "residence": "pass",
                 "cases": "pass",
+                "cohort": "pass",
                 "no_pending_payout": "pass",
                 "wallet": "fail",  # none yet
             }

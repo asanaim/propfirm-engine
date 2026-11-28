@@ -73,9 +73,16 @@ def test_payable_profit_and_the_split() -> None:
         "identity": PASS,
         "residence": PASS,
         "cases": PASS,
+        "cohort": PASS,
         "no_pending_payout": PASS,
         "wallet": PASS,
     }
+
+
+def test_an_alarmed_cohort_holds_the_payout() -> None:
+    e = eligibility(POLICY, funded(cohort_held=True), NOW)
+    assert not e.eligible
+    assert {c.name: c.status for c in e.checks}["cohort"] == FAIL
 
 
 def test_no_profit_below_the_baseline_and_equity_basis() -> None:

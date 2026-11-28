@@ -255,6 +255,20 @@ class ClassesPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class CohortsPolicy:
+    """The cohort alarm (D-14.33). Off when the policy file has no
+    [cohorts]. `bounds`: the zero edge pass rate per product; a product
+    without one is not watched."""
+
+    on: bool = False
+    every_hours: int = 6
+    significance: Fraction = Fraction(1, 100)
+    min_resolved: int = 10
+    instant_products: tuple[str, ...] = ("instant",)
+    bounds: Mapping[str, Fraction] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class ExposurePolicy:
     """The exposure desk (D-14.32; strategic review v3, D4). Off when the
     policy file has no [exposure]. Moves in basis points; limits in
@@ -436,6 +450,7 @@ class Policy:
     classes: ClassesPolicy = field(default_factory=ClassesPolicy)
     detectors: DetectorsPolicy = field(default_factory=DetectorsPolicy)
     exposure: ExposurePolicy = field(default_factory=ExposurePolicy)
+    cohorts: CohortsPolicy = field(default_factory=CohortsPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -708,6 +723,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             exposure=(
                 _exposure(root.table("exposure")) if root.has("exposure") else ExposurePolicy()
             ),
+            cohorts=_cohorts(root.table("cohorts")) if root.has("cohorts") else CohortsPolicy(),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -768,6 +784,28 @@ def _referrals(t: _Table) -> ReferralsPolicy:
     t.done()
     if not 0 < policy.commission < 1:
         raise PolicyError("referrals: commission_percent between 0 and 100")
+    return policy
+
+
+def _cohorts(t: _Table) -> CohortsPolicy:
+    raw = t.mapping("bounds")
+    table = _Table(raw, t.name("bounds"))
+    bounds = {name: table.ratio(name) for name in sorted(raw)}
+    table.done()
+    policy = CohortsPolicy(
+        on=t.boolean("on"),
+        every_hours=t.integer("every_hours", 1),
+        significance=t.ratio("significance"),
+        min_resolved=t.integer("min_resolved", 1),
+        instant_products=t.texts("instant_products"),
+        bounds=bounds,
+    )
+    t.done()
+    if not 0 < policy.significance < 1:
+        raise PolicyError("cohorts: significance between 0 and 1")
+    for name, bound in bounds.items():
+        if not 0 < bound < 1:
+            raise PolicyError(f"cohorts: bound of {name} between 0 and 1")
     return policy
 
 

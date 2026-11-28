@@ -140,6 +140,11 @@ class Referrals:
             f"WHERE o.status IN ('paid', 'provisioned') AND o.rsv_id NOT LIKE '%-trial' "
             f"AND NOT EXISTS (SELECT 1 FROM {s}.referral_entries e "
             f"WHERE e.referred_cif = o.cif AND e.kind = 'accrued') "
+            # an affiliate whose cohort is alarmed accrues nothing until it is
+            # cleared; the orders left out accrue then (D-14.33)
+            f"AND NOT EXISTS (SELECT 1 FROM {s}.cohort_alarms al WHERE al.kind = 'affiliate' "
+            f"AND al.key LIKE r.referrer_cif || ':%' AND NOT EXISTS "
+            f"(SELECT 1 FROM {s}.cohort_clears c WHERE c.alarm = al.id)) "
             f"ORDER BY o.cif, o.created_at, o.ord"
         )
         made = 0

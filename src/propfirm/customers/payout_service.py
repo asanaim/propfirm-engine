@@ -41,6 +41,10 @@ SEND_RETRY_MS = 60_000  # a failed send is tried again after this
 DEBIT_RETRY_MS = 60_000  # an unanswered debit is published again after this
 
 
+class CohortHolds(Protocol):
+    async def held(self, acc: str) -> bool: ...
+
+
 class StepCount(Protocol):
     async def steps_taken(self, ord_id: str) -> int: ...
 
@@ -79,8 +83,10 @@ class Payouts:
         history: TradeHistory | None = None,  # projected account events (short holds)
         scaling: StepCount | None = None,  # scaling steps taken (the split ladder)
         withdrawals: WithdrawalRails | None = None,  # withdrawal methods (D-14.25)
+        cohorts: CohortHolds | None = None,  # cohort alarm holds (D-14.33)
         wait_s: float = 5.0,
     ) -> None:
+        self.cohorts = cohorts
         self._store = store
         self._customers = customers
         self._live = live
@@ -145,6 +151,7 @@ class Payouts:
             residence_country=cif.residence_country,
             document_country=tier2.document_country if tier2 else None,
             open_case=await self._cases.has_open_case(cif.cif) if self._cases else False,
+            cohort_held=await self.cohorts.held(acc) if self.cohorts else False,
             violations_cents=violations,
             confirmed_cases=await self._cases.confirmed_cases(cif.cif) if self._cases else 0,
             scaling_steps=await self._scaling.steps_taken(record.ord) if self._scaling else 0,

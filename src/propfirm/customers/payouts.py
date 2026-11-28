@@ -127,6 +127,7 @@ class FundedAccount:
     document_country: str | None
     # cases (M16, M17, M20)
     open_case: bool = False  # the customer has a case not closed
+    cohort_held: bool = False  # its cohort is alarmed, not yet cleared (D-14.33)
     violations_cents: int = 0  # profit removed by confirmed decisions (V)
     # payouts (3d)
     pending_payout: bool = False  # a payout of this account requested, not yet debited
@@ -303,6 +304,11 @@ def eligibility(policy: Policy, account: FundedAccount, now: int) -> Eligibility
     )
     check("residence", gate.allowed, ", ".join(gate.reasons) or "not restricted")
     check("cases", not account.open_case, "held for review" if account.open_case else "none open")
+    check(
+        "cohort",
+        not account.cohort_held,
+        "held: its cohort's pass rate is under review" if account.cohort_held else "not held",
+    )
     check(
         "no_pending_payout",
         not account.pending_payout,
