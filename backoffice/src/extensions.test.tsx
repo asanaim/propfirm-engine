@@ -7,7 +7,7 @@ import { BackOfficeContext } from "./context";
 import { ExtensionsPage, type Slots, warning } from "./Extensions";
 
 const CHAT = { provider: "crisp", enabled: false, public_id: "", secret: null };
-const CAPTCHA = { provider: "turnstile", enabled: true, public_id: "0x4AAAAAAAAAAAAAAA", secret: false };
+const CAPTCHA = { provider: "turnstile", enabled: false, public_id: "", secret: false };
 const SLOTS: Slots = { chat: CHAT, captcha: CAPTCHA, analytics: { provider: "cloudflare", enabled: false, public_id: "", secret: null } };
 
 function nth<T>(found: T[], i: number): T {
@@ -17,8 +17,8 @@ function nth<T>(found: T[], i: number): T {
 }
 
 describe("extensions (rule AC22)", () => {
-  it("warns when the captcha is on without its secret", () => {
-    expect(warning(CAPTCHA)).toMatch(/without its secret/);
+  it("asks for the captcha's secret before it is switched on", () => {
+    expect(warning(CAPTCHA)).toMatch(/secret key first/);
     expect(warning({ ...CAPTCHA, secret: true })).toBeNull();
     expect(warning(CHAT)).toBeNull();
   });

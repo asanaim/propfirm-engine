@@ -4615,7 +4615,12 @@ def create_app(
             return
         sealed = (await deps.settings.secrets()).get((secret_owner("captcha"), "secret_key"))
         if sealed is None:
-            return  # switched on without its secret: the proposal screen warns
+            # cannot happen through the API (the captcha is switched on only
+            # with its secret in force); if it does, refuse rather than pass
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "captcha_unset", "message": "this form is closed; try again later"},
+            )
         ip = client_ip(
             request.headers.get(deps.client_ip_header) if deps.client_ip_header else None,
             request.client.host if request.client else None,
@@ -4664,6 +4669,16 @@ def create_app(
             setting = Extension(slot, body.enabled, body.public_id)
         except PolicyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if body.enabled and slot in EXTENSION_SECRETS:
+            sealed = await _settings(deps).secrets()
+            if (secret_owner(slot), EXTENSION_SECRETS[slot]) not in sealed:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "secret_first",
+                        "message": "approve this slot's secret key first, then switch it on",
+                    },
+                )
         return await propose_setting(deps, me, setting, body.reason)
 
     @app.put("/admin/extensions/{slot}/secret")
