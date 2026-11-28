@@ -794,6 +794,6 @@ instant_products = ["instant"]     # success: the trailing floor locked at the s
 
 [cohorts.bounds]                   # the pass rate of a trader with zero edge
 lite = "0.25"                      # pricing study: 6 % target against 6 % loss, twice
-classic = "0.2735"                 # 8/18 times 8/13 (static loss, no daily limit): an upper bound
+classic = "0.2735"                 # 8/18 times 8/13: exact (no time limit, so the daily limit lowers no bound)
 one-step = "0.375"                 # pricing study
 instant = "0.368"                  # pricing study: the floor locks before it is hit

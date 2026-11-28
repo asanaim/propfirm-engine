@@ -12,6 +12,7 @@ import pytest
 
 from propfirm.customers.cohorts import month_of
 from propfirm.service.feeder import now_ms
+from tests.integration.test_cases import funded_instant
 from tests.integration.test_corrections import project
 from tests.integration.test_customers import ADULT, LITE_10K, platform
 from tests.integration.test_progression import Market, quick_lite
@@ -96,11 +97,37 @@ def test_cohort_alarm(database_url: str, valkey_url: str, pg_schema: str) -> Non
             for a in seen["alarms"]:
                 url = f"/staff/cohorts/{a['id']}/clear"
                 body = {"reason": "a strong trader; reviewed"}
-                done = await p.call("POST", url, "admin-1", body, ADMIN)
-                assert done.status_code == 200, done.text
-                again = await p.call("POST", url, "admin-1", body, ADMIN)
+                asked = await p.call("POST", url, "admin-1", body, ADMIN)
+                assert asked.json() == {"alarm": a["id"], "status": "requested"}, asked.text
+                assert await alarms.held(s1)  # one person is not enough
+                same = await p.call("POST", url, "admin-1", body, ADMIN)
+                assert (same.status_code, same.json()["detail"]["code"]) == (409, "same_person")
+                done = await p.call("POST", url, "admin-2", {"reason": "agreed"}, ADMIN)
+                assert done.json() == {"alarm": a["id"], "status": "cleared"}, done.text
+                again = await p.call("POST", url, "admin-2", body, ADMIN)
                 assert again.status_code == 404
+            listed = (await p.call("GET", "/staff/cohorts", "admin-1", None, ADMIN)).json()
+            assert {(a["requested_by"], a["cleared_by"]) for a in listed["alarms"]} == {
+                ("admin-1", "admin-2")
+            }
             assert not await alarms.held(s1)
             assert await p.referrals.accrue(p.clock(), every_ms=0) == 1  # resumes
+
+    asyncio.run(scenario())
+
+
+def test_an_instant_lock_inside_the_day_counts_at_once(
+    database_url: str, valkey_url: str, pg_schema: str
+) -> None:
+    async def scenario() -> None:
+        async with platform(database_url, valkey_url, pg_schema, funded=True) as p:
+            alarms = p.cohorts
+            assert alarms is not None
+            acc = await funded_instant(p)  # +300 USD on 5,000: the 5 % trail locks
+            await project(p, database_url)
+            view = await p.live.account(acc)
+            assert view is not None and view["max_floor_cents"] >= 500_000
+            (result,) = await alarms.results()  # no daily reset since: the view says so
+            assert (result.product_id, result.passed) == ("instant", True)
 
     asyncio.run(scenario())
