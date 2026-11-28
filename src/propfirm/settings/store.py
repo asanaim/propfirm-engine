@@ -21,7 +21,7 @@ from typing import Self
 
 import asyncpg
 
-from propfirm.pgschema import Conn, check_schema
+from propfirm.pgschema import GUARD_DELETES, Conn, check_schema
 from propfirm.pgschema import migrate as _migrate
 from propfirm.policy import Policy
 from propfirm.settings.overlay import Setting, SettingChange, apply_changes, from_json, to_json
@@ -278,6 +278,12 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             'payment_method', 'method_secret', 'site_mode', 'notice_template',
             'notice_wrapper', 'offering', 'extension'));
         """,
+    ),
+    (
+        15,
+        # deletion (rule AC27; D-15.4): every table guarded against DELETE
+        # and TRUNCATE
+        GUARD_DELETES,
     ),
 )
 

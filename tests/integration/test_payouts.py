@@ -507,11 +507,10 @@ def test_the_pay_day_check_fails_a_payout_that_changed(
                 ):
                     with pytest.raises(asyncpg.RaiseError):
                         await pool.execute(sql)
-                # emails are personal data: erasable, with their send records
-                erased = await pool.execute(
-                    f"DELETE FROM {s}.notifications WHERE cif = 'CIF00000001'"
-                )
-                assert erased == "DELETE 2"
+                # emails are personal data, but never deleted directly: erasure
+                # runs through the two owner workflow (rule AC27; D-15.4)
+                with pytest.raises(asyncpg.RaiseError):
+                    await pool.execute(f"DELETE FROM {s}.notifications WHERE cif = 'CIF00000001'")
                 await pool.execute(f"UPDATE {s}.payouts SET status = 'paid' WHERE po = $1", po)
             finally:
                 await pool.close()

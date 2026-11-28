@@ -14,7 +14,7 @@ from typing import Any, Self
 
 import asyncpg
 
-from propfirm.pgschema import Conn, check_schema
+from propfirm.pgschema import GUARD_DELETES, Conn, check_schema
 from propfirm.pgschema import migrate as _migrate
 from propfirm.staff.records import (
     GRANT_KINDS,
@@ -323,6 +323,12 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE TRIGGER notes_done_append_only BEFORE UPDATE OR DELETE
             ON {s}.notes_done FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
+    ),
+    (
+        9,
+        # deletion (rule AC27; D-15.4): every table guarded against DELETE
+        # and TRUNCATE
+        GUARD_DELETES,
     ),
 )
 

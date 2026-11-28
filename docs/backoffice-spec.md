@@ -254,7 +254,7 @@ only add restrictions; cancelling a news window still needs an admin.
 
 AC09 evidence for claims, AC18 language
 manager, AC21 tickets, AC24 price feed
-failover, AC26 social login, AC27 soft delete,
+failover, AC26 social login,
 AC29 list pattern, AC30 brand tokens.
 
 
@@ -269,3 +269,7 @@ Analytics), each switched and configured by a settings proposal; the
 captcha's secret key is sealed and approved by an owner; Turnstile checks
 the newsletter form; the portal loads the scripts only when a slot is on;
 the content security policy names the three providers' hosts.
+
+AC27, deletion (28 Nov 2026, D-15.4). In place: every table refuses
+DELETE and TRUNCATE, enforced by a test; remove actions are records.
+Erasure of personal data by two owners after retention: D-15.5.

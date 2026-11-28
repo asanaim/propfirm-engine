@@ -36,7 +36,7 @@ from propfirm.customers.history import (
     order_state,
     placeholder_ref,
 )
-from propfirm.pgschema import Conn, check_schema
+from propfirm.pgschema import GUARD_DELETES, Conn, check_schema
 from propfirm.pgschema import migrate as _migrate
 from propfirm.policy import stage_of
 
@@ -1174,6 +1174,35 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.campaign_results FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        37,
+        """
+        -- deletion (rule AC27; D-15.4): the leaderboard opt-out becomes a
+        -- record of each choice, latest wins, instead of a row deleted on
+        -- opting back in; then every table is guarded against DELETE and
+        -- TRUNCATE
+        CREATE TABLE {s}.leaderboard_choices (
+            id bigserial PRIMARY KEY,
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            visible boolean NOT NULL,
+            ts bigint NOT NULL
+        );
+        CREATE INDEX ON {s}.leaderboard_choices (cif, id);
+        CREATE TRIGGER leaderboard_choices_append_only BEFORE UPDATE OR DELETE
+            ON {s}.leaderboard_choices FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        INSERT INTO {s}.leaderboard_choices (cif, visible, ts)
+            SELECT cif, false, hidden_at FROM {s}.leaderboard_hidden ORDER BY hidden_at, cif;
+        DROP TABLE {s}.leaderboard_hidden;
+        COMMENT ON TABLE {s}.stale_fills IS
+            'licensed: OANDA reference prices, purgeable (D-14.36)';
+        CREATE FUNCTION {s}.leaderboard_shown(who text) RETURNS boolean
+            LANGUAGE sql STABLE AS $fn$
+            SELECT coalesce((SELECT visible FROM {s}.leaderboard_choices
+                WHERE cif = who ORDER BY id DESC LIMIT 1), true)
+        $fn$;
+        """
+        + GUARD_DELETES,
+    ),
 )
 
 
@@ -1876,7 +1905,7 @@ class CustomerStore:
         rows = await self._pool.fetch(
             f"SELECT a.*, c.full_name AS owner_name, c.residence_country AS owner_country "
             f"FROM {s}.accounts a JOIN {s}.cif c USING (cif) WHERE a.stage = 'funded' "
-            f"AND NOT EXISTS (SELECT 1 FROM {s}.leaderboard_hidden h WHERE h.cif = a.cif) "
+            f"AND {s}.leaderboard_shown(a.cif) "
             f"ORDER BY a.acc"
         )
         out = []
@@ -1887,23 +1916,19 @@ class CustomerStore:
         return out
 
     async def leaderboard_visible(self, cif: str) -> bool:
-        hidden = await self._pool.fetchval(
-            f"SELECT 1 FROM {self._s}.leaderboard_hidden WHERE cif = $1", cif
-        )
-        return hidden is None
+        shown: bool = await self._pool.fetchval(f"SELECT {self._s}.leaderboard_shown($1)", cif)
+        return shown
 
     async def set_leaderboard_visible(self, cif: str, visible: bool, ts: int) -> None:
-        if visible:
-            await self._pool.execute(
-                f"DELETE FROM {self._s}.leaderboard_hidden WHERE cif = $1", cif
-            )
-        else:
-            await self._pool.execute(
-                f"INSERT INTO {self._s}.leaderboard_hidden (cif, hidden_at) VALUES ($1, $2) "
-                f"ON CONFLICT (cif) DO NOTHING",
-                cif,
-                ts,
-            )
+        """Record the trader's choice (rule AC27: a record, not a deletion);
+        a choice equal to the current one adds nothing."""
+        await self._pool.execute(
+            f"INSERT INTO {self._s}.leaderboard_choices (cif, visible, ts) "
+            f"SELECT $1, $2, $3 WHERE {self._s}.leaderboard_shown($1) <> $2",
+            cif,
+            visible,
+            ts,
+        )
 
     async def accounts_for(self, cif: str) -> list[AccountRecord]:
         rows = await self._pool.fetch(
