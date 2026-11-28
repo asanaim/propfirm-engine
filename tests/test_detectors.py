@@ -95,6 +95,10 @@ def test_legs_from_events() -> None:
         ev("PositionClosed", "ACC1", "P1", 30, remaining_volume=0, pnl_cents=-100),
         ev("PositionOpened", "ACC2", "P2", 15, symbol="EUR/USD", side="sell", volume=50),
         ev("PositionOpened", "ACC9", "P9", 15, symbol="EUR/USD", side="sell"),  # no owner
+        # every other event of an account's history is skipped (it has no
+        # position id: reading it broke payout eligibility after D-14.30)
+        {"type": "OrderAccepted", "account_id": "ACC1", "ts": 12},
+        {"type": "CommissionCharged", "account_id": "ACC1", "ts": 13, "amount_cents": 5},
     ]
     legs = legs_from(events, {"ACC1": "CIF1", "ACC2": "CIF2"}, now=99)
     assert legs == [

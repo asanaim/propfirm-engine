@@ -162,12 +162,15 @@ def findings(pairs: Iterable[Hedge], matches: int) -> list[Finding]:
 
 
 def legs_from(rows: Iterable[Mapping[str, Any]], cif_of: Mapping[str, str], now: int) -> list[Leg]:
-    """Positions from projected PositionOpened and PositionClosed events;
-    a position is closed by the close that leaves no volume."""
+    """Positions from projected PositionOpened and PositionClosed events
+    (any other event is skipped); a position is closed by the close that
+    leaves no volume."""
     opened: dict[tuple[str, str], Mapping[str, Any]] = {}
     closed: dict[tuple[str, str], int] = {}
     pnl: dict[tuple[str, str], int] = defaultdict(int)
     for e in rows:
+        if e.get("type") not in ("PositionOpened", "PositionClosed"):
+            continue
         key = (str(e["account_id"]), str(e["position_id"]))
         if e["type"] == "PositionOpened":
             opened[key] = e
