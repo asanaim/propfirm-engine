@@ -3,6 +3,7 @@ gain; the trader can hide it."""
 
 import asyncio
 
+import asyncpg
 import pytest
 
 from tests.integration.test_cases import funded_instant
@@ -32,5 +33,17 @@ def test_a_funded_account_is_ranked_and_its_trader_can_opt_out(
             assert (await p.call("GET", "/me/leaderboard")).json() == {"visible": False}
             shown = await p.call("PUT", "/me/leaderboard", body={"visible": True})
             assert shown.json() == {"visible": True}
+            again = await p.call("PUT", "/me/leaderboard", body={"visible": True})
+            assert again.json() == {"visible": True}
+            # each change of mind is a record, never a deletion (rule AC27);
+            # repeating the current choice adds nothing
+            conn = await asyncpg.connect(database_url)
+            try:
+                choices = await conn.fetch(
+                    f"SELECT visible FROM {pg_schema}_c.leaderboard_choices ORDER BY id"
+                )
+            finally:
+                await conn.close()
+            assert [r["visible"] for r in choices] == [False, True]
 
     asyncio.run(scenario())

@@ -1183,3 +1183,22 @@ D-15.3a, extensions flags closed (owner, 28 Nov 2026: "fix those flags").
   its brand, and removing it costs a paid plan; self-hosting an open
   source chat (Chatwoot) costs a server. Lowest cost wins (universal rule
   of 20 Nov 2026) until revenue justifies an upgrade.
+
+D-15.4, deletion (owner, 28 Nov 2026: "go AC27"; rule AC27).
+- Records are never deleted. Every table of the customer, settings,
+  staff and audit stores refuses DELETE and TRUNCATE at the database
+  (a trigger per table). A test fails while any table, including one
+  added later, lacks its guard.
+- Exceptions: licensed price tables, which the data licence requires to
+  be purgeable within 30 days of cancelling. Each carries a table comment
+  starting "licensed:"; today only `stale_fills` (OANDA reference
+  prices, D-14.36) in the customer store, and the journal's own price
+  tables. The test pins this list.
+- Existing direct erasure of notification emails by DELETE is withdrawn;
+  erasure runs through the two owner workflow (D-15.5).
+- A remove action is a new record. The leaderboard opt-out, the only
+  delete in the code, is now a record of each choice, latest wins
+  (customers migration 37); existing opt-outs carry over.
+- Hard deletion applies to personal data only, by owner proposal and
+  second owner approval, after the retention period. It comes in the
+  next change (D-15.5).

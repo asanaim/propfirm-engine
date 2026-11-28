@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import asyncpg
 
 from propfirm.audit.chain import GENESIS, AuditEvent, AuditRecord, link
-from propfirm.pgschema import Conn, check_schema
+from propfirm.pgschema import GUARD_DELETES, Conn, check_schema
 from propfirm.pgschema import migrate as _migrate
 
 _LOCK_CLASS = 0x61756474  # "audt"
@@ -98,6 +98,12 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             seq bigint NOT NULL CHECK (seq >= 0)
         );
         """.replace("{genesis}", GENESIS),
+    ),
+    (
+        2,
+        # deletion (rule AC27; D-15.4): every table guarded against DELETE
+        # and TRUNCATE
+        GUARD_DELETES,
     ),
 )
 
