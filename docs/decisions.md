@@ -1121,3 +1121,27 @@ rule AC25; decided by the owner's rule of 20 Nov 2026).
 - Staff with settings rights read the consents and export the confirmed
   list as CSV (back office, Subscribers).
 - Sending campaigns is out of scope: the CSV goes to any mailing tool.
+
+D-15.2, newsletter sending (owner, 28 Nov 2026: "build newsletter sending
+engine"; rules AC00 and AC25).
+- A campaign is a subject and a plain text body. Sending is publishing, so
+  one person with settings rights proposes it and a different one
+  approves or rejects it. Its maker alone may cancel it before a
+  decision.
+- On approval the audience is fixed: every address confirmed at that
+  moment. Unconfirmed addresses never receive a campaign.
+- The API loop sends 60 emails a minute (`[subscribers] per_minute`),
+  within common mail provider limits. A failed send is tried again, up
+  to 3 attempts per address. An address that left the list before its
+  turn is skipped.
+- Every email ends with its own unsubscribe link (a random token, stored
+  as a hash and honoured by the same unsubscribe endpoint) and with the
+  firm's name and postal address from the website's contact section, as
+  US and EU anti-spam law requires.
+- Records: campaigns, decisions, audience and every attempt are
+  append-only (migration 36).
+- Back office: a Newsletter page to propose, approve, reject or cancel,
+  with each campaign's progress.
+- Plain text only, which is the lowest cost and has no HTML injection
+  risk. A rich template can come later through the notification
+  wrapper (AC12).

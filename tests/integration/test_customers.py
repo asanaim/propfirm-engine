@@ -36,6 +36,7 @@ from propfirm.customers.kyc import KycProvider, SandboxKyc
 from propfirm.customers.liability import Liabilities
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
+from propfirm.customers.newsletter import Newsletter, SiteContact
 from propfirm.customers.notifications import Notifications, NotificationStore, SandboxMailer
 from propfirm.customers.onboarding_store import OnboardingStore
 from propfirm.customers.payout_service import Payouts
@@ -140,6 +141,7 @@ class Platform:
     cohorts: Cohorts | None = None  # the cohort alarm (D-14.33)
     risk: RiskSync | None = None  # automatic risk limits to the engine (D-14.34)
     stale: StalePrice | None = None  # the stale price detector (D-14.36)
+    newsletter: Newsletter | None = None  # newsletter campaigns (D-15.2)
 
     async def call(
         self,
@@ -292,6 +294,14 @@ async def platform(
     payouts.cohorts = cohorts
     sign_ins = SignIns(pool, config.customer_schema, settings, store, cases)
     payouts.step_ups = sign_ins
+    newsletter = Newsletter(
+        pool,
+        config.customer_schema,
+        settings,
+        mailer,
+        "https://pipridge.test",
+        SiteContact(settings),
+    )
     stale = StalePrice(
         pool,
         config.customer_schema,
@@ -355,6 +365,7 @@ async def platform(
         cohorts=cohorts,
         sign_ins=sign_ins,
         stale=stale,
+        newsletter=newsletter,
         subscribers=Subscribers(
             pool, config.customer_schema, settings, mailer, "https://pipridge.test"
         ),
@@ -455,6 +466,7 @@ async def platform(
             cohorts=cohorts,
             risk=RiskSync(pool, config.customer_schema, settings, exposure, gateway),
             stale=stale,
+            newsletter=newsletter,
         )
     finally:
         await stop_engine()
@@ -641,7 +653,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 36))
+            assert await migrate(conn, schema) == list(range(1, 37))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

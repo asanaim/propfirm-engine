@@ -71,6 +71,7 @@ export const PLACES: readonly Place[] = [
   { group: "settings", screen: "changes", label: "Setting changes", path: "/changes", icon: "changes", keywords: "history settings log" },
   { group: "settings", screen: "site", label: "Website", path: "/site", icon: "site", keywords: "website content frontend sections hero" },
   { group: "settings", screen: "settings", label: "Subscribers", path: "/subscribers", icon: "subscribers", keywords: "newsletter subscribers consent email list marketing export" },
+  { group: "settings", screen: "settings", label: "Newsletter", path: "/newsletter", icon: "newsletter", keywords: "newsletter campaign email send marketing broadcast" },
   { group: "settings", screen: "templates", label: "Notification templates", path: "/notices", icon: "templates", keywords: "email templates wording wrapper messages" },
   { group: "settings", screen: "policies", label: "Policy pages", path: "/policies", icon: "policies", keywords: "terms privacy policy legal" },
 ];
