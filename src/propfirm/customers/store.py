@@ -1052,6 +1052,33 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.cohort_clear_requests FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        33,
+        """
+        -- account sharing (D-14.35): each sign in once (no IP address; the
+        -- device as a hash; the place in tenths of a degree), and each time a
+        -- customer is asked to step up (both append-only)
+        CREATE TABLE {s}.sign_ins (
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            at bigint NOT NULL,
+            device text NOT NULL,
+            country text,
+            lat integer CHECK (lat BETWEEN -900 AND 900),
+            lon integer CHECK (lon BETWEEN -1800 AND 1800),
+            PRIMARY KEY (cif, at, device)
+        );
+        CREATE TABLE {s}.step_ups (
+            cif text NOT NULL REFERENCES {s}.cif (cif),
+            at bigint NOT NULL,
+            reason text NOT NULL,
+            PRIMARY KEY (cif, at)
+        );
+        CREATE TRIGGER sign_ins_append_only BEFORE UPDATE OR DELETE
+            ON {s}.sign_ins FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER step_ups_append_only BEFORE UPDATE OR DELETE
+            ON {s}.step_ups FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

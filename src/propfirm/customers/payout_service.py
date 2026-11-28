@@ -41,6 +41,10 @@ SEND_RETRY_MS = 60_000  # a failed send is tried again after this
 DEBIT_RETRY_MS = 60_000  # an unanswered debit is published again after this
 
 
+class StepUps(Protocol):
+    async def step_up_since(self, cif: str) -> int | None: ...
+
+
 class CohortHolds(Protocol):
     async def held(self, acc: str) -> bool: ...
 
@@ -87,6 +91,7 @@ class Payouts:
         wait_s: float = 5.0,
     ) -> None:
         self.cohorts = cohorts
+        self.step_ups: StepUps | None = None  # account sharing step ups (D-14.35)
         self._store = store
         self._customers = customers
         self._live = live
@@ -169,9 +174,24 @@ class Payouts:
 
     # --- the trader -----------------------------------------------------------------
 
-    async def _mfa(self, mfa: bool, auth_time: int | None, now: int) -> None:
-        """MFA by policy, entered at most `step_up_minutes` ago (step-up)."""
+    async def _mfa(
+        self, mfa: bool, auth_time: int | None, now: int, cif: str | None = None
+    ) -> None:
+        """MFA by policy, entered at most `step_up_minutes` ago (step-up).
+        A customer asked to step up (account sharing, D-14.35) needs a
+        second factor entered after that, whatever the policy."""
         payouts = (await self._policy.current()).payouts
+        since = (
+            await self.step_ups.step_up_since(cif)
+            if self.step_ups is not None and cif is not None
+            else None
+        )
+        if since is not None and (not mfa or auth_time is None or auth_time < since):
+            raise PayoutRefused(
+                "reauth_required",
+                "we saw an unusual sign in: confirm it is you with your second factor",
+                max_age_s=0,
+            )
         if not payouts.require_mfa:
             return
         if not mfa:
@@ -198,7 +218,7 @@ class Payouts:
         period, if one is set); the customer is emailed at the registered
         address. The network must be open (D-14.26) and the address valid
         for it."""
-        await self._mfa(mfa, auth_time, ts)
+        await self._mfa(mfa, auth_time, ts, cif.cif)
         found = NETWORKS.get(network)
         if found is None or network not in (await self._policy.current()).payouts.networks:
             raise PayoutRefused("invalid", f"payouts are not sent on {network}")
@@ -303,7 +323,7 @@ class Payouts:
         auth_time: int | None = None,
         method: str | None = None,
     ) -> PayoutRecord:
-        await self._mfa(mfa, auth_time, ts)
+        await self._mfa(mfa, auth_time, ts, cif.cif)
         policy = await self._policy.current()
         await self._hold_short_holds(acc, cif, ts)
         e = await self.eligibility(acc, ts)

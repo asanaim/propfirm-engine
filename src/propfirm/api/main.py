@@ -87,6 +87,7 @@ from propfirm.customers.request_rate import RequestRate
 from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.risk_sync import RiskSync
 from propfirm.customers.scaling import Scaling
+from propfirm.customers.sign_ins import SignIns
 from propfirm.customers.store import CustomerStore
 from propfirm.customers.transfers import NoPayoutRail, Transfers, WithdrawalRails
 from propfirm.customers.trials import Trials
@@ -458,8 +459,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cohorts = Cohorts(
             pool, config.customer_schema, config.read_schema, settings, cases, desk, live
         )
+        sign_ins = SignIns(pool, config.customer_schema, settings, customers, cases)
         if payouts is not None:
             payouts.cohorts = cohorts
+            payouts.step_ups = sign_ins
         liabilities = (
             None
             if payouts is None
@@ -596,6 +599,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             didit_webhook_secret=config.didit_webhook_secret,
             sandbox=config.sandbox,
             country_header=config.country_header,
+            latitude_header=config.latitude_header,
+            longitude_header=config.longitude_header,
+            sign_ins=sign_ins,
             audit=AuditStore(pool, config.audit_schema),
             client_ip_header=config.client_ip_header,
             price_source=config.price_source,

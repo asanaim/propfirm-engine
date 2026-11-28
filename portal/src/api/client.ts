@@ -77,11 +77,39 @@ export function parseStepUp(header: string | null): { maxAge: number | null } | 
   return { maxAge: age?.[1] === undefined ? null : Number(age[1]) };
 }
 
+const DEVICE_KEY = "pipridge.device";
+
+/** This browser's own random id, kept across visits (D-14.35): the API
+stores only its hash, to tell one trader's devices apart. Without storage
+(private mode) the API falls back to the browser's user agent. */
+export function deviceId(store: Pick<Storage, "getItem" | "setItem"> | null = safeStorage()): string | null {
+  if (store === null) return null;
+  try {
+    const known = store.getItem(DEVICE_KEY);
+    if (known !== null && /^[0-9a-f-]{36}$/.test(known)) return known;
+    const fresh = crypto.randomUUID();
+    store.setItem(DEVICE_KEY, fresh);
+    return fresh;
+  } catch {
+    return null;
+  }
+}
+
+function safeStorage(): Storage | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
 export function createApi(base: string, token: TokenSource, fetcher: typeof fetch = fetch): Api {
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" };
     const bearer = await token();
     if (bearer !== null) headers.Authorization = `Bearer ${bearer}`;
+    const device = bearer === null ? null : deviceId();
+    if (device !== null) headers["X-Device-Id"] = device;
     const init: RequestInit = { method, headers };
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";

@@ -54,6 +54,7 @@ from propfirm.customers.request_rate import RequestRate
 from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.risk_sync import RiskSync
 from propfirm.customers.scaling import Scaling
+from propfirm.customers.sign_ins import SignIns
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.customers.transfers import Transfers, WithdrawalRails
 from propfirm.journal.stream import InputStreamWriter
@@ -146,10 +147,11 @@ class Platform:
         *,
         mfa: bool = True,
         login_age_s: int = 0,
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         auth_time = self.clock() // 1000 - login_age_s
-        headers = bearer(user, roles, mfa=mfa, auth_time=auth_time)
-        return await self.api.request(method, url, json=body, headers=headers)
+        sent = bearer(user, roles, mfa=mfa, auth_time=auth_time) | (headers or {})
+        return await self.api.request(method, url, json=body, headers=sent)
 
 
 @asynccontextmanager
@@ -284,6 +286,8 @@ async def platform(
     desk = StaffDesk(pool, config.staff_schema, load_duties())
     cohorts = Cohorts(pool, config.customer_schema, config.read_schema, settings, cases, desk, live)
     payouts.cohorts = cohorts
+    sign_ins = SignIns(pool, config.customer_schema, settings, store, cases)
+    payouts.step_ups = sign_ins
     clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
     request_rate = RequestRate(pool, config.customer_schema, settings, cases)
     detectors = Detectors(
@@ -336,6 +340,9 @@ async def platform(
         request_rate=request_rate,
         exposure=exposure,
         cohorts=cohorts,
+        sign_ins=sign_ins,
+        latitude_header="X-Latitude",
+        longitude_header="X-Longitude",
         receipts=Receipts(pool, config.customer_schema, checkout, rails),
         vault=vault,
         reconciliations=Reconciliations(pool, config.customer_schema),
@@ -616,7 +623,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 33))
+            assert await migrate(conn, schema) == list(range(1, 34))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

@@ -1026,3 +1026,33 @@ line 6; decided by the owner's rule of 20 Nov 2026).
   and D-14.32 (cuts not applied). The portal explains both refusals.
 - Step 5 is complete except stale price (needs the second price source,
   step 8) and account sharing (needs device and sign in records).
+
+D-14.35, account sharing detector (build plan step 5, line 3; strategic
+review v3, D6; decided by the owner's rule of 20 Nov 2026 and the request
+of 28 Nov 2026, "complete all of step 5").
+- Sign ins: a trader's sign in is one authentication of their login (the
+  token's `auth_time`) on one device. The API records it the first time
+  it sees it (migration 33, append-only):
+  - the device: a 32 character hash of the portal's random id (header
+    `X-Device-Id`, kept in local storage), or of the user agent when the
+    browser keeps no storage;
+  - the country (`PROPFIRM_COUNTRY_HEADER`) and the rough place
+    (`PROPFIRM_LATITUDE_HEADER`, `PROPFIRM_LONGITUDE_HEADER`, rounded to
+    0.1 degree, about 11 km) set by the proxy. On Cloudflare these are
+    `cf-ipcountry`, `cf-iplatitude` and `cf-iplongitude`, from the free
+    "Add visitor location headers" managed transform;
+  - never the IP address. Recording never fails a request.
+- Rules over the last 7 days, checked at each new sign in:
+  - more than 3 devices, or more than 3 countries: a medium fraud alert;
+  - two sign ins over 500 km apart within an hour (great circle): a high
+    fraud alert.
+- One alert per rule per 7 days. The alert opens a case, which holds
+  payouts.
+- Each alert also records a step up: the customer's next payout request
+  or wallet change needs a second factor entered after it (401
+  `reauth_required` with max_age=0, which the portal turns into a fresh
+  sign in).
+- Staff with case rights read a customer's sign ins and last step up:
+  `GET /staff/customers/{cif}/sign-ins`.
+- Without the location headers the travel rule cannot fire; the device
+  and country rules still work.

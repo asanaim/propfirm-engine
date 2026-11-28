@@ -801,3 +801,16 @@ lite = "0.25"                      # pricing study: 6 % target against 6 % loss,
 classic = "0.2735"                 # 8/18 times 8/13: exact (no time limit, so the daily limit lowers no bound)
 one-step = "0.375"                 # pricing study
 instant = "0.368"                  # pricing study: the floor locks before it is hit
+
+[sharing]
+# Account sharing (D-14.35; strategic review v3, D6). A trader's sign ins:
+# the device (a hash), the country and the rough place from the proxy's
+# GeoIP headers, never the IP address. Either rule raises an alert (a case
+# holds payouts) and asks for a step up before the next payout or wallet
+# change.
+on = true
+window_days = 7
+max_devices = 3       # more devices in the window
+max_countries = 3     # more countries in the window
+travel_km = 500       # two sign ins further apart than this ...
+travel_minutes = 60   # ... within this time

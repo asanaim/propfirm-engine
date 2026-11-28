@@ -130,6 +130,7 @@ from propfirm.customers.reserve import (
     limits,
 )
 from propfirm.customers.scaling import Scaling, ScalingRefused
+from propfirm.customers.sign_ins import SignIns, device_hash, tenths
 from propfirm.customers.store import (
     AccountRecord,
     AlreadyRegisteredError,
@@ -427,6 +428,9 @@ class Deps:
     didit_webhook_secret: str | None = None
     sandbox: bool = False  # sandbox payments endpoint; never in production
     country_header: str | None = None  # set by a trusted proxy (GeoIP), else None
+    latitude_header: str | None = None  # the client's rough place, by the proxy (D-14.35)
+    longitude_header: str | None = None
+    sign_ins: SignIns | None = None  # account sharing (D-14.35)
     vault: Vault = field(default_factory=Vault.from_env)  # method secrets (AC14)
     clock: Callable[[], int] = now_ms
     today: Callable[[], date] = _today
@@ -1428,7 +1432,7 @@ def _bound(deps: Deps, me: Principal, side: str) -> None:
         raise _wrong_app("trader portal")
 
 
-async def _trader(deps: D, me: Me) -> Principal:
+async def _trader(request: Request, deps: D, me: Me) -> Principal:
     """A trader, never staff: staff and apprentices do not buy or trade
     (`staff.staff_may_trade`, decided 6 Nov 2026)."""
     _bound(deps, me, "portal")
@@ -1442,7 +1446,29 @@ async def _trader(deps: D, me: Me) -> Principal:
                 "message": "staff do not hold challenges or trade",
             },
         )
+    await _note_sign_in(request, deps, me)
     return me
+
+
+async def _note_sign_in(request: Request, deps: Deps, me: Principal) -> None:
+    """Record the trader's sign in the first time it is seen (D-14.35): the
+    device as a hash, the country and rough place from the proxy. Never
+    fails the request."""
+    if deps.sign_ins is None:
+        return
+    headers = request.headers
+    try:
+        await deps.sign_ins.record(
+            me.subject,
+            me.auth_time,
+            device_hash(headers.get("x-device-id"), headers.get("user-agent")),
+            headers.get(deps.country_header) if deps.country_header else None,
+            tenths(headers.get(deps.latitude_header), 90) if deps.latitude_header else None,
+            tenths(headers.get(deps.longitude_header), 180) if deps.longitude_header else None,
+            deps.clock(),
+        )
+    except Exception:  # a record lost is better than a refused request
+        log.exception("sign in not recorded")
 
 
 def _actor(me: Principal) -> Actor:
@@ -2298,6 +2324,17 @@ def create_app(
         """An account's class in force (B when none) and every change."""
         history = await _classes(deps).history(acc)
         return {"class": history[-1]["class"] if history else "B", "history": history}
+
+    @app.get("/staff/customers/{cif}/sign-ins")
+    async def customer_sign_ins(deps: D, me: CaseWorker, cif: Ident) -> dict[str, Any]:
+        """A customer's recent sign ins (device hash, country, rough place)
+        and when they were last asked to step up (D-14.35)."""
+        if deps.sign_ins is None:
+            raise HTTPException(status_code=503, detail="sign ins are not recorded")
+        return {
+            "step_up_since": await deps.sign_ins.step_up_since(cif),
+            "sign_ins": await deps.sign_ins.of(cif),
+        }
 
     def _cohorts(deps: Deps) -> Cohorts:
         if deps.cohorts is None:
