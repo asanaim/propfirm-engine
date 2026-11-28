@@ -347,108 +347,66 @@ main:focus {
   gap: var(--space-5);
 }
 
-/* the challenges: one per row on a wide screen (below), two on a tablet,
-   one on a phone; the shop takes more of a wide screen than other pages */
+/* the challenges side by side, one column each (owner, 28 Nov: full-width
+   rows left most of the screen empty; this replaces the 19 Nov one per
+   row): one on a phone, two on a tablet, as many as fit on a wide screen
+   (four at 1440 px). Each column reads top to bottom: what to choose, the
+   stages, the add-ons; the buy buttons line up at the foot. */
 main:has(.page.shop) {
   max-width: 1440px;
 }
 
 .grid.products {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
   gap: var(--space-4);
+  align-items: stretch;
 }
 
+.grid.products .card {
+  padding: var(--space-5);
+}
+
+.grid.products .card > .product-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.grid.products .card-actions .button {
+  width: 100%;
+}
+
+.product-detail > .stages {
+  gap: var(--space-3);
+}
+
+/* stages one under another in a column, a hairline between them */
+.product-detail .stage + .stage {
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  padding-top: var(--space-3);
+}
+
+/* the add-ons as a list under the rules */
 .product-detail > .product-addons {
-  margin: var(--space-4) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
 }
 
-@media (min-width: 640px) {
-  .grid.products {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.products .facts {
+  font-size: 0.875rem;
+  gap: var(--space-1) var(--space-3);
 }
 
-@media (min-width: 1100px) {
-  /* one product per row, the full width (owner, 19 Nov: the narrow cards
-     ran long while the screen stood empty): what to choose and the buy
-     button on the left, the stages side by side on the right */
-  .grid.products {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .grid.products .card {
-    display: grid;
-    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-    grid-template-areas:
-      "title detail"
-      "choose detail"
-      "actions detail";
-    grid-template-rows: auto 1fr auto;
-    column-gap: var(--space-6);
-    padding: var(--space-5) var(--space-6);
-  }
-
-  .grid.products .card > .card-title {
-    grid-area: title;
-  }
-
-  .grid.products .card > .product-choose {
-    grid-area: choose;
-  }
-
-  .grid.products .card > .card-actions {
-    grid-area: actions;
-    align-self: end;
-  }
-
-  /* the rules and, straight under them, the add-ons */
-  .grid.products .card > .product-detail {
-    grid-area: detail;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-    border-left: 1px solid var(--border);
-    padding-left: var(--space-6);
-  }
-
-  .product-detail > .stages {
-    border-top: 0;
-    padding-top: 0;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); /* a lone stage keeps a column width */
-    gap: var(--space-5);
-  }
-
-  /* the add-ons in one row */
-  .product-detail > .product-addons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2) var(--space-5);
-    margin: 0;
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--border);
-  }
-
-  .product-detail > .product-addons legend {
-    float: left; /* a fieldset legend joins the flex row only when floated */
-    width: 100%;
-    margin-bottom: var(--space-1);
-  }
-
-  .product-detail > .product-addons .addon {
-    flex: 1 1 220px;
-  }
-
-  .products .facts {
-    font-size: 0.875rem;
-    gap: var(--space-1) var(--space-3);
-  }
-
-  .products .segment span {
-    min-width: 52px;
-    min-height: 34px;
-    padding: 0 var(--space-2);
-    font-size: 0.875rem;
-  }
+.products .segment span {
+  min-width: 48px;
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  font-size: 0.875rem;
 }
 
 /* --- components --------------------------------------------------------- */
@@ -2713,4 +2671,8 @@ a soft fade and a slight scale, on the system's spring-like curve */
 .newsletter-row input {
   flex: 1;
   min-width: 0;
+}
+
+.nowrap {
+  white-space: nowrap;
 }

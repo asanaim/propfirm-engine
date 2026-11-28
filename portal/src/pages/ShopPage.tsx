@@ -53,13 +53,19 @@ function StageRules({ stage }: { stage: Stage }) {
         <dd>{formatPercent(stage.daily_loss_percent)}</dd>
         <dt>Maximum loss</dt>
         <dd>
-          {formatPercent(stage.max_loss_percent)} ({lossKindLabel(stage.max_loss_kind)})
+          <span className="nowrap">{formatPercent(stage.max_loss_percent)}</span> ({lossKindLabel(stage.max_loss_kind)})
         </dd>
         <dt>Minimum trading days</dt>
         <dd>{stage.min_trading_days}</dd>
         <dt>Consistency</dt>
         <dd>
-          {stage.consistency_percent === null ? "none" : `best day at most ${formatPercent(stage.consistency_percent)}`}
+          {stage.consistency_percent === null ? (
+            "none"
+          ) : (
+            <>
+              best day at most <span className="nowrap">{formatPercent(stage.consistency_percent)}</span>
+            </>
+          )}
         </dd>
       </dl>
     </div>
@@ -149,7 +155,7 @@ function ProductCard({ product, onBuy, busy }: { product: Product; onBuy: (size:
                   }}
                 />
                 <span>
-                  {ADDON_TEXT[a.id] ?? a.id} <span className="muted">+{a.price_percent} %</span>
+                  {ADDON_TEXT[a.id] ?? a.id} <span className="muted nowrap">+{a.price_percent} %</span>
                 </span>
               </label>
             ))}
