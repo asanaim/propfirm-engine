@@ -827,3 +827,5 @@ travel_minutes = 60   # ... within this time
 on = true
 wording = "Send me Pipridge news, new products and offers by email. One click unsubscribes."
 max_per_hour = 200    # confirmation emails a public form may send each hour
+per_minute = 60       # newsletter emails sent each minute, within the mail provider's limits
+attempts = 3          # tries per address before a send is given up

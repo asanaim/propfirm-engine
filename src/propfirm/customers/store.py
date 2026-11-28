@@ -1126,6 +1126,54 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.subscriber_events FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        36,
+        """
+        -- newsletter (D-15.2): campaigns, their two person decisions, the
+        -- audience fixed at approval and each send attempt (all append-only)
+        CREATE TABLE {s}.campaigns (
+            id bigserial PRIMARY KEY,
+            subject text NOT NULL CHECK (length(subject) BETWEEN 3 AND 200),
+            body text NOT NULL CHECK (length(body) BETWEEN 10 AND 50000),
+            created_by text NOT NULL,
+            created_at bigint NOT NULL
+        );
+        CREATE TABLE {s}.campaign_events (
+            seq bigserial PRIMARY KEY,
+            campaign bigint NOT NULL REFERENCES {s}.campaigns (id),
+            kind text NOT NULL CHECK (kind IN ('proposed', 'approved', 'rejected', 'cancelled')),
+            by_whom text NOT NULL,
+            at bigint NOT NULL,
+            reason text
+        );
+        CREATE TABLE {s}.campaign_audience (
+            campaign bigint NOT NULL REFERENCES {s}.campaigns (id),
+            email text NOT NULL,
+            PRIMARY KEY (campaign, email)
+        );
+        CREATE TABLE {s}.campaign_results (
+            seq bigserial PRIMARY KEY,
+            campaign bigint NOT NULL,
+            email text NOT NULL,
+            at bigint NOT NULL,
+            outcome text NOT NULL CHECK (outcome IN ('sent', 'failed', 'skipped')),
+            message_id text,
+            unsubscribe_sha text,
+            error text,
+            FOREIGN KEY (campaign, email) REFERENCES {s}.campaign_audience (campaign, email)
+        );
+        CREATE INDEX ON {s}.campaign_results (campaign, email);
+        CREATE INDEX ON {s}.campaign_results (unsubscribe_sha);
+        CREATE TRIGGER campaigns_append_only BEFORE UPDATE OR DELETE
+            ON {s}.campaigns FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER campaign_events_append_only BEFORE UPDATE OR DELETE
+            ON {s}.campaign_events FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER campaign_audience_append_only BEFORE UPDATE OR DELETE
+            ON {s}.campaign_audience FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER campaign_results_append_only BEFORE UPDATE OR DELETE
+            ON {s}.campaign_results FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

@@ -151,10 +151,20 @@ class Subscribers:
         return True
 
     async def unsubscribe(self, token: str, now: int) -> bool:
+        """By the sign-up email's link or any newsletter's (D-15.2)."""
         found = await self._by_token("unsubscribe_sha", token)
-        if found is None:
+        if found is not None:
+            address = str(found["email"])
+        elif token and len(token) <= 100:
+            sent_to = await self._pool.fetchval(
+                f"SELECT email FROM {self._s}.campaign_results WHERE unsubscribe_sha = $1 LIMIT 1",
+                sha(token),
+            )
+            if sent_to is None:
+                return False
+            address = str(sent_to)
+        else:
             return False
-        address = str(found["email"])
         last = await self._last(address)
         if last is None or last["kind"] == "unsubscribed":
             return True  # already off the list

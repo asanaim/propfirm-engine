@@ -63,6 +63,7 @@ from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowSc
 from propfirm.customers.liability import Liabilities
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import ProgressionStore
+from propfirm.customers.newsletter import Newsletter, SiteContact
 from propfirm.customers.notifications import (
     Mailer,
     Notifications,
@@ -192,6 +193,7 @@ async def _lifecycle_forever(
     cohorts: Cohorts | None = None,
     risk: RiskSync | None = None,
     stale: StalePrice | None = None,
+    newsletter: Newsletter | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -243,6 +245,11 @@ async def _lifecycle_forever(
                 await stale.check(now_ms())
             except Exception:
                 log.exception("stale price check failed")
+        if newsletter is not None:
+            try:  # newsletter emails, a batch a minute (D-15.2)
+                await newsletter.send_due(now_ms())
+            except Exception:
+                log.exception("newsletter sending failed")
         if classes is not None:
             try:  # classes every funded account, once a day (D-14.28)
                 await classes.run(now_ms())
@@ -476,6 +483,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             mailer,
             config.public_url,
         )
+        newsletter = Newsletter(
+            pool,
+            config.customer_schema,
+            settings,
+            mailer,
+            config.public_url,
+            SiteContact(settings),
+        )
         stale = StalePrice(
             pool,
             config.customer_schema,
@@ -563,6 +578,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     cohorts,
                     RiskSync(pool, config.customer_schema, settings, exposure, gateway),
                     stale,
+                    newsletter,
                 )
             )
         )
@@ -630,6 +646,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             sign_ins=sign_ins,
             stale=stale,
             subscribers=subscribers,
+            newsletter=newsletter,
             audit=AuditStore(pool, config.audit_schema),
             client_ip_header=config.client_ip_header,
             price_source=config.price_source,

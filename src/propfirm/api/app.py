@@ -109,6 +109,7 @@ from propfirm.customers.liability import Claim, Liabilities
 from propfirm.customers.lifecycle import Lifecycle
 from propfirm.customers.lifecycle_store import DecisionError, ProgressionRecord
 from propfirm.customers.networks import NETWORKS
+from propfirm.customers.newsletter import CampaignRefused, Newsletter
 from propfirm.customers.onboarding_store import OnboardingRecord, OnboardingStateError
 from propfirm.customers.payout_flow import payout_state
 from propfirm.customers.payout_service import Payouts
@@ -435,6 +436,7 @@ class Deps:
     sign_ins: SignIns | None = None  # account sharing (D-14.35)
     stale: StalePrice | None = None  # stale price detector (D-14.36)
     subscribers: Subscribers | None = None  # newsletter consents (AC25)
+    newsletter: Newsletter | None = None  # newsletter campaigns (D-15.2)
     vault: Vault = field(default_factory=Vault.from_env)  # method secrets (AC14)
     clock: Callable[[], int] = now_ms
     today: Callable[[], date] = _today
@@ -530,6 +532,16 @@ class SubscribeBody(_Body):
     email: Annotated[str, StringConstraints(min_length=3, max_length=320)]
     source: Annotated[str, StringConstraints(min_length=1, max_length=20)]
     version: Annotated[str, StringConstraints(min_length=12, max_length=12)]
+
+
+class CampaignBody(_Body):
+    subject: Annotated[str, StringConstraints(min_length=3, max_length=200)]
+    body: Annotated[str, StringConstraints(min_length=10, max_length=50_000)]
+
+
+class CampaignDecisionBody(_Body):
+    decision: Literal["approve", "reject", "cancel"]
+    reason: Annotated[str, StringConstraints(max_length=500)] | None = None
 
 
 class TokenBody(_Body):
@@ -4650,6 +4662,40 @@ def create_app(
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="subscribers.csv"'},
         )
+
+    def _newsletter(deps: Deps) -> Newsletter:
+        if deps.newsletter is None:
+            raise HTTPException(status_code=503, detail="the newsletter is not configured")
+        return deps.newsletter
+
+    @app.get("/staff/campaigns")
+    async def campaign_list(deps: D, me: SettingsReader) -> list[dict[str, Any]]:
+        """Newsletter campaigns, their decision and progress (D-15.2)."""
+        return [asdict(c) for c in await _newsletter(deps).campaigns()]
+
+    @app.post("/staff/campaigns", status_code=201)
+    async def campaign_propose(deps: D, me: SettingsChanger, body: CampaignBody) -> dict[str, Any]:
+        """Propose a campaign; a second person approves it before it is sent."""
+        cid = await _newsletter(deps).propose(body.subject, body.body, me.subject, deps.clock())
+        return {"id": cid, "state": "proposed"}
+
+    @app.post("/staff/campaigns/{cid}/decision")
+    async def campaign_decide(
+        deps: D, me: SettingsChanger, cid: int, body: CampaignDecisionBody
+    ) -> dict[str, Any]:
+        """Approve (a second person: the confirmed list is fixed and sending
+        starts), reject (a second person) or cancel (its maker)."""
+        kind = {"approve": "approved", "reject": "rejected", "cancel": "cancelled"}[body.decision]
+        try:
+            audience = await _newsletter(deps).decide(
+                cid, kind, me.subject, body.reason, deps.clock()
+            )
+        except CampaignRefused as exc:
+            status = {"unknown": 404, "same_person": 409, "not_maker": 403}.get(exc.code, 409)
+            raise HTTPException(
+                status_code=status, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
+        return {"id": cid, "state": kind, "audience": audience}
 
     @app.get("/site/status")
     async def site_status(deps: D) -> dict[str, Any]:

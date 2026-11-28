@@ -267,6 +267,8 @@ class SubscribersPolicy:
     on: bool = False
     wording: str = ""
     max_per_hour: int = 200
+    per_minute: int = 60  # newsletter emails sent each minute (D-15.2)
+    attempts: int = 3  # tries per address before giving up
 
 
 @dataclass(frozen=True, slots=True)
@@ -835,6 +837,8 @@ def _subscribers(t: _Table) -> SubscribersPolicy:
         on=t.boolean("on"),
         wording=t.text("wording"),
         max_per_hour=t.integer("max_per_hour", 1),
+        per_minute=t.integer("per_minute", 1),
+        attempts=t.integer("attempts", 1),
     )
     t.done()
     if policy.on and len(policy.wording) < 20:
