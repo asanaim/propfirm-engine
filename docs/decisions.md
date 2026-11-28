@@ -1145,3 +1145,26 @@ engine"; rules AC00 and AC25).
 - Plain text only, which is the lowest cost and has no HTML injection
   risk. A rich template can come later through the notification
   wrapper (AC12).
+
+D-15.3, extensions (owner, 28 Nov 2026: "next ac22"; rules AC00, AC02,
+AC14 and AC22; universal rule of 20 Nov 2026, lowest cost).
+- Three slots, one provider each, all free: live chat Crisp (free plan),
+  captcha Cloudflare Turnstile (free; most visitors see no puzzle),
+  analytics Cloudflare Web Analytics (free, no cookies, so no consent
+  banner).
+- A slot is switched on or off and given its public id (Crisp website id,
+  Turnstile site key, analytics token) by a settings proposal; a second
+  admin or owner approves. Ids are checked against each provider's shape
+  on the API and again in the portal before any script loads.
+- The captcha's secret key is write only, encrypted like a payment
+  method's secret, and approved by an owner (AC02, AC14). It is never
+  returned; the back office shows only whether it is set.
+- With the captcha on and its secret in force, the newsletter form needs
+  a good Turnstile token; a network failure at Cloudflare refuses the
+  form (fail closed). On without its secret, forms pass unchecked and the
+  back office warns.
+- `GET /site/extensions` (public) lists the slots switched on with their
+  public ids only. The portal loads a provider's script only when its
+  slot is on.
+- The content security policy names the three providers' fixed hosts.
+  Another provider would need that policy changed in code, by design.

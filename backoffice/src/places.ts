@@ -188,12 +188,12 @@ export const AREAS: readonly Area[] = [
   {
     key: "extensions",
     title: "Extensions",
-    explains: "Live chat, captcha and analytics, each with sealed keys.",
+    explains: "Live chat (Crisp), captcha (Cloudflare Turnstile) and analytics (Cloudflare Web Analytics), all free. Secrets are encrypted at once. A second person approves; an owner approves a secret.",
     icon: "extensions",
-    state: "planned",
-    path: null,
-    screen: null,
-    rule: "AC22",
+    state: "open",
+    path: "/extensions",
+    screen: "settings",
+    rule: null,
     keywords: "extensions plugins chat captcha analytics",
   },
   {

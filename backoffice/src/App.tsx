@@ -36,6 +36,7 @@ const ClassesPage = lazyPage(() => import("./Classes"), "ClassesPage");
 const CohortsPage = lazyPage(() => import("./Cohorts"), "CohortsPage");
 const SubscribersPage = lazyPage(() => import("./Subscribers"), "SubscribersPage");
 const NewsletterPage = lazyPage(() => import("./Newsletter"), "NewsletterPage");
+const ExtensionsPage = lazyPage(() => import("./Extensions"), "ExtensionsPage");
 const ScalingPage = lazyPage(() => import("./Scaling"), "ScalingPage");
 const CouponsPage = lazyPage(() => import("./Coupons"), "CouponsPage");
 const ReferralsPage = lazyPage(() => import("./Referrals"), "ReferralsPage");
@@ -122,6 +123,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
                 {screens.has("settings") ? <Route path="/exposure" element={<ExposurePage />} /> : null}
                 {screens.has("settings") ? <Route path="/subscribers" element={<SubscribersPage />} /> : null}
                 {screens.has("settings") ? <Route path="/newsletter" element={<NewsletterPage />} /> : null}
+                {screens.has("settings") ? <Route path="/extensions" element={<ExtensionsPage />} /> : null}
                 <Route path="/profile" element={<StaffProfilePage />} />
                 {screens.has("policies") ? <Route path="/policies" element={<PolicyPages />} /> : null}
                 {screens.has("site") ? <Route path="/site" element={<SiteEditorPage />} /> : null}

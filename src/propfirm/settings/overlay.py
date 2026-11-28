@@ -39,6 +39,12 @@ from propfirm.policy import (
     percent_text,
 )
 from propfirm.rules.products import MaxLossKind, RuleSet, Stage
+from propfirm.settings.extensions import (
+    EXTENSION,
+    Extension,
+    extension_from_json,
+    extension_json,
+)
 from propfirm.settings.methods import (
     METHOD_SECRET,
     PAYMENT_METHOD,
@@ -154,6 +160,7 @@ type Setting = (
     | PaymentMethod
     | MethodSecret
     | Offering
+    | Extension
 )
 
 
@@ -219,6 +226,7 @@ def apply_changes(base: Policy, changes: Iterable[SettingChange]) -> Policy:
                 | SiteMode()
                 | PaymentMethod()
                 | MethodSecret()
+                | Extension()
             ):
                 pass  # not part of the policy: `stand_in_in_force`, `policy_pages`
     access = base.access
@@ -374,6 +382,8 @@ def to_json(setting: Setting) -> tuple[str, dict[str, Any]]:
             return METHOD_SECRET, secret_json(setting)
         case Offering():
             return OFFERING, offering_json(setting)
+        case Extension():
+            return EXTENSION, extension_json(setting)
         case PolicyPage():
             return POLICY_PAGE, {"slug": setting.slug, "title": setting.title, "body": setting.body}
 
@@ -418,6 +428,8 @@ def from_json(kind: str, value: Mapping[str, Any]) -> Setting:
         return secret_from_json(value)
     if kind == OFFERING:
         return offering_from_json(value)
+    if kind == EXTENSION:
+        return extension_from_json(value)
     if kind == POLICY_PAGE:
         slug, title, body = value["slug"], value["title"], value["body"]
         if not all(isinstance(v, str) for v in (slug, title, body)):

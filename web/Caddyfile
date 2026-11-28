@@ -52,7 +52,10 @@ Disallow: /
 	}
 
 	header {
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' {$OIDC_ORIGIN}; frame-src 'self' {$OIDC_ORIGIN}; form-action 'self' {$OIDC_ORIGIN}; frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
+		# the fixed hosts of the three extension slots (rule AC22; D-15.3):
+		# Crisp chat, Cloudflare Turnstile, Cloudflare Web Analytics; their
+		# scripts load only when a slot is switched on
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://client.crisp.chat https://settings.crisp.chat https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://client.crisp.chat; img-src 'self' data: https://client.crisp.chat https://image.crisp.chat https://storage.crisp.chat; font-src 'self' data: https://client.crisp.chat; media-src 'self' https://client.crisp.chat; connect-src 'self' {$OIDC_ORIGIN} https://client.crisp.chat https://storage.crisp.chat wss://client.relay.crisp.chat wss://stream.relay.crisp.chat https://cloudflareinsights.com; frame-src 'self' {$OIDC_ORIGIN} https://challenges.cloudflare.com; form-action 'self' {$OIDC_ORIGIN}; frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
 		# rule AC16: browsers keep to HTTPS once they have seen the site over it
 		# (ignored over plain HTTP, so local development is unaffected)
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

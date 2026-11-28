@@ -7,6 +7,8 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { ShopPage } from "./pages/ShopPage";
 import { PolicyPage } from "./pages/PolicyPages";
 import { setPrepare, usePath } from "./router";
+import { useApi } from "./api/ApiProvider";
+import { extensions, install } from "./lib/extensions";
 
 /** A page loaded when first opened (kept light, 12 Nov 2026): the public
 home and shop come with the first download; the trading screens and their
@@ -161,9 +163,14 @@ function Waiting() {
 export function App() {
   const auth = useAuth();
   const path = usePath();
+  const api = useApi();
   useEffect(() => {
     preloadPages();
   }, []);
+  useEffect(() => {
+    // live chat and analytics, when switched on (rule AC22)
+    void extensions(api).then(install);
+  }, [api]);
   const Page = PAGES[path];
   const found = ACCOUNT.exec(path);
   const account = found?.[1];

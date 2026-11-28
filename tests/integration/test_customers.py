@@ -160,6 +160,11 @@ class Platform:
         return await self.api.request(method, url, json=body, headers=sent)
 
 
+async def fake_captcha(secret: str, token: str, remote_ip: str | None) -> bool:
+    """Turnstile in tests (AC22): the token "good" passes with secret "s3"."""
+    return secret == "s3" and token == "good"  # pragma: allowlist secret
+
+
 @asynccontextmanager
 async def platform(
     database_url: str,
@@ -366,6 +371,7 @@ async def platform(
         sign_ins=sign_ins,
         stale=stale,
         newsletter=newsletter,
+        captcha=fake_captcha,
         subscribers=Subscribers(
             pool, config.customer_schema, settings, mailer, "https://pipridge.test"
         ),

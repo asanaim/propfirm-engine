@@ -253,7 +253,7 @@ only add restrictions; cancelling a news window still needs an admin.
 ## Not started
 
 AC09 evidence for claims, AC18 language
-manager, AC21 and AC22 (tickets, extensions), AC24 price feed
+manager, AC21 tickets, AC24 price feed
 failover, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.
 
@@ -262,3 +262,10 @@ AC25, subscribers with a consent record (28 Nov 2026, D-15.1). In place:
 double opt-in from the portal footer; each consent keeps time, source, the
 exact wording shown and its version, and the country; append-only events;
 staff list and CSV export of confirmed addresses.
+
+AC22, extensions (28 Nov 2026, D-15.3). In place: three slots, live chat
+(Crisp), captcha (Cloudflare Turnstile) and analytics (Cloudflare Web
+Analytics), each switched and configured by a settings proposal; the
+captcha's secret key is sealed and approved by an owner; Turnstile checks
+the newsletter form; the portal loads the scripts only when a slot is on;
+the content security policy names the three providers' hosts.

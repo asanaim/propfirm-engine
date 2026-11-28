@@ -33,6 +33,7 @@ from propfirm.policy import Policy
 from propfirm.rules.products import RuleSet
 from propfirm.service.gateway import Outcome
 from propfirm.settings.authority import Refused, check_approver, check_proposer
+from propfirm.settings.extensions import Extension, extensions_in_force
 from propfirm.settings.methods import (
     MethodSecret,
     PaymentMethod,
@@ -208,6 +209,12 @@ class Settings:
     async def methods(self) -> dict[str, PaymentMethod]:
         """Payment and withdrawal methods in force (rule AC13)."""
         return methods_in_force(
+            c.setting for c in sorted(await self._records.applied_changes(), key=lambda c: c.id)
+        )
+
+    async def extensions(self) -> dict[str, Extension]:
+        """Live chat, captcha and analytics in force (rule AC22)."""
+        return extensions_in_force(
             c.setting for c in sorted(await self._records.applied_changes(), key=lambda c: c.id)
         )
 

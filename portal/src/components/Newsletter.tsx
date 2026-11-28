@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
 import { useApi } from "../api/ApiProvider";
+import { extensions, type Slot } from "../lib/extensions";
+import { Captcha } from "./Captcha";
 
 interface Wording {
   on: boolean;
@@ -16,8 +18,14 @@ export function NewsletterForm() {
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState("");
+  const [captcha, setCaptcha] = useState<Slot | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [round, setRound] = useState(0); // a token is good once: a new check after each try
   useEffect(() => {
     let live = true;
+    void extensions(api).then((found) => {
+      if (live) setCaptcha(found.captcha);
+    });
     api.get<Wording>("/subscribe").then(
       (w) => {
         if (live) setShown(w);
@@ -34,11 +42,18 @@ export function NewsletterForm() {
     event.preventDefault();
     setState("sending");
     try {
-      await api.post("/subscribers", { email, source: "footer", version: wording.version });
+      await api.post("/subscribers", {
+        email,
+        source: "footer",
+        version: wording.version,
+        ...(token !== null ? { captcha: token } : {}),
+      });
       setState("sent");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not send. Try again later.");
       setState("error");
+      setToken(null);
+      setRound((r) => r + 1);
     }
   }
   if (state === "sent") {
@@ -59,10 +74,11 @@ export function NewsletterForm() {
             setEmail(e.target.value);
           }}
         />
-        <button type="submit" disabled={state === "sending"}>
+        <button type="submit" disabled={state === "sending" || (captcha !== null && token === null)}>
           Subscribe
         </button>
       </div>
+      {captcha !== null ? <Captcha key={round} siteKey={captcha.public_id} onToken={setToken} /> : null}
       {state === "error" ? <p role="alert">{error}</p> : null}
     </form>
   );

@@ -78,6 +78,7 @@ from propfirm.audit.http import UNMATCHED, audited, clean, client_ip
 from propfirm.audit.http import target as audit_target
 from propfirm.audit.store import AuditStore
 from propfirm.customers.books import Books, ExpenseRefused, statement_csv
+from propfirm.customers.captcha import Verifier, turnstile
 from propfirm.customers.cases import needs_authorisation
 from propfirm.customers.cases_store import CaseRecord, CaseRefused
 from propfirm.customers.casework import Casework
@@ -190,6 +191,9 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Outcome
 from propfirm.service.projector import INTERVALS
 from propfirm.settings.authority import OWNER_APPROVES, Refused, check_appointment, owner_level
+from propfirm.settings.extensions import PROVIDERS as EXTENSION_PROVIDERS
+from propfirm.settings.extensions import SECRETS as EXTENSION_SECRETS
+from propfirm.settings.extensions import Extension, public_view, secret_owner
 from propfirm.settings.methods import (
     ADAPTERS,
     METHOD_ID,
@@ -437,6 +441,7 @@ class Deps:
     stale: StalePrice | None = None  # stale price detector (D-14.36)
     subscribers: Subscribers | None = None  # newsletter consents (AC25)
     newsletter: Newsletter | None = None  # newsletter campaigns (D-15.2)
+    captcha: Verifier = turnstile  # captcha verification (AC22)
     vault: Vault = field(default_factory=Vault.from_env)  # method secrets (AC14)
     clock: Callable[[], int] = now_ms
     today: Callable[[], date] = _today
@@ -532,6 +537,13 @@ class SubscribeBody(_Body):
     email: Annotated[str, StringConstraints(min_length=3, max_length=320)]
     source: Annotated[str, StringConstraints(min_length=1, max_length=20)]
     version: Annotated[str, StringConstraints(min_length=12, max_length=12)]
+    captcha: Annotated[str, StringConstraints(max_length=2_048)] | None = None
+
+
+class ExtensionBody(_Body):
+    enabled: bool
+    public_id: Annotated[str, StringConstraints(max_length=100)]
+    reason: Reason
 
 
 class CampaignBody(_Body):
@@ -4594,6 +4606,85 @@ def create_app(
             raise HTTPException(status_code=503, detail="the newsletter is not configured")
         return deps.subscribers
 
+    async def _captcha(deps: Deps, request: Request, token: str | None) -> None:
+        """When the captcha is on, a public form needs a good token (AC22)."""
+        if deps.settings is None:
+            return
+        ext = (await deps.settings.extensions()).get("captcha")
+        if ext is None or not ext.enabled:
+            return
+        sealed = (await deps.settings.secrets()).get((secret_owner("captcha"), "secret_key"))
+        if sealed is None:
+            return  # switched on without its secret: the proposal screen warns
+        ip = client_ip(
+            request.headers.get(deps.client_ip_header) if deps.client_ip_header else None,
+            request.client.host if request.client else None,
+        )
+        if not token or not await deps.captcha(deps.vault.open(sealed), token, ip or None):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "captcha", "message": "confirm you are not a robot and try again"},
+            )
+
+    @app.get("/site/extensions")
+    async def site_extensions(deps: D) -> dict[str, Any]:
+        """Live chat, captcha and analytics switched on, with their public
+        ids (public; rule AC22). Never a secret."""
+        found = {} if deps.settings is None else await deps.settings.extensions()
+        return public_view(found)
+
+    @app.get("/admin/extensions")
+    async def admin_extensions(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """Each slot: its provider, whether on, its public id and whether its
+        secret is set (never the secret; rules AC14, AC22)."""
+        found = await _settings(deps).extensions()
+        sealed = await _settings(deps).secrets()
+        return {
+            slot: {
+                "provider": provider,
+                "enabled": (e := found.get(slot)) is not None and e.enabled,
+                "public_id": "" if e is None else e.public_id,
+                "secret": None
+                if slot not in EXTENSION_SECRETS
+                else (secret_owner(slot), EXTENSION_SECRETS[slot]) in sealed,
+            }
+            for slot, provider in EXTENSION_PROVIDERS.items()
+        }
+
+    @app.put("/admin/extensions/{slot}")
+    async def propose_extension(
+        deps: D,
+        me: SettingsChanger,
+        slot: Annotated[str, Path(pattern="^(chat|captcha|analytics)$")],
+        body: ExtensionBody,
+    ) -> dict[str, Any]:
+        """Switch a slot on or off, or change its public id: a proposal a
+        second admin or owner approves (AC00, AC22)."""
+        try:
+            setting = Extension(slot, body.enabled, body.public_id)
+        except PolicyError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await propose_setting(deps, me, setting, body.reason)
+
+    @app.put("/admin/extensions/{slot}/secret")
+    async def propose_extension_secret(
+        deps: D,
+        me: SettingsChanger,
+        slot: Annotated[str, Path(pattern="^captcha$")],
+        body: SecretBody,
+    ) -> dict[str, Any]:
+        """Set or replace a slot's secret: encrypted at once, never shown
+        again, in force when an owner approves (AC02, AC14, AC22)."""
+        try:
+            sealed = deps.vault.seal(
+                secret_owner(slot), EXTENSION_SECRETS[slot], body.value, os.urandom(12)
+            )
+        except SecretsUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail={"code": "no_secrets_key", "message": str(exc)}
+            ) from exc
+        return await propose_setting(deps, me, sealed, body.reason)
+
     @app.get("/subscribe")
     async def subscribe_wording(deps: D) -> dict[str, Any]:
         """The wording shown beside the newsletter button and its version
@@ -4604,6 +4695,7 @@ def create_app(
     async def subscribe(deps: D, request: Request, body: SubscribeBody) -> dict[str, Any]:
         """Ask for the newsletter (public): a confirmation email follows.
         The answer is the same whether or not the address is known."""
+        await _captcha(deps, request, body.captcha)
         country = request.headers.get(deps.country_header) if deps.country_header else None
         try:
             await _subscribers(deps).subscribe(
