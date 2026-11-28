@@ -29,6 +29,7 @@ from propfirm.customers.corrections import Corrections
 from propfirm.customers.detectors import Detectors
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.disputes import Disputes
+from propfirm.customers.exposure import Exposure
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import KycProvider, SandboxKyc
 from propfirm.customers.liability import Liabilities
@@ -129,6 +130,7 @@ class Platform:
     daily_classes: Classes | None = None  # the daily classing job (D-14.28)
     detectors: Detectors | None = None  # behaviour detectors (D-14.29)
     request_rate: RequestRate | None = None  # order request limit (D-14.31)
+    exposure: Exposure | None = None  # the exposure desk (D-14.32)
 
     async def call(
         self,
@@ -285,6 +287,16 @@ async def platform(
     liabilities = Liabilities(pool, config.customer_schema, payouts, live, clusters)
     evaluations = Evaluations(pool, config.customer_schema, live)
     reserve = Reserve(pool, config.customer_schema, settings, books, liabilities, evaluations, desk)
+    exposure = Exposure(
+        pool,
+        config.customer_schema,
+        settings,
+        live,
+        HistoryReader(pool, config.read_schema),
+        payouts,
+        reserve,
+        desk,
+    )
     reserve_box.append(reserve)
     vault = Vault(bytes(range(32)))  # a fixed test key
     rails = Rails(
@@ -316,6 +328,7 @@ async def platform(
         clusters=clusters,
         daily_classes=daily_classes,
         request_rate=request_rate,
+        exposure=exposure,
         receipts=Receipts(pool, config.customer_schema, checkout, rails),
         vault=vault,
         reconciliations=Reconciliations(pool, config.customer_schema),
@@ -407,6 +420,7 @@ async def platform(
             daily_classes=daily_classes,
             detectors=detectors,
             request_rate=request_rate,
+            exposure=exposure,
         )
     finally:
         await stop_engine()
@@ -593,7 +607,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 30))
+            assert await migrate(conn, schema) == list(range(1, 31))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

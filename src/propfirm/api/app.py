@@ -94,6 +94,8 @@ from propfirm.customers.directory import (
     export_rows,
 )
 from propfirm.customers.disputes import DisputeRefused, Disputes
+from propfirm.customers.exposure import CLASSES_CUT, Exposure
+from propfirm.customers.exposure import percent_text as ratio_text
 from propfirm.customers.four_eyes import open_proposal, proposal_json
 from propfirm.customers.funding import Onboarding, Signature
 from propfirm.customers.kyc import KycDecision, KycError, SandboxKyc, alpha2, didit_webhook_valid
@@ -402,6 +404,7 @@ class Deps:
     books: Books | None = None  # the operator ledger (D-14.16)
     app_clients: AppClients | None = None  # token-to-app binding (D-14.19); None: off
     liabilities: Liabilities | None = None  # the liability desk (D-14.18)
+    exposure: Exposure | None = None  # the exposure desk (D-14.32)
     evaluations: Evaluations | None = None  # reserve coverage: evaluations (D-14.20)
     reconciliations: Reconciliations | None = None  # processor statements (D-14.21)
     disputes: Disputes | None = None  # refunds and chargebacks (D-14.22)
@@ -2050,6 +2053,44 @@ def create_app(
             "expected_cents": c.expected_cents,
             "total_cents": c.total_cents,
             "open_profit_cents": c.open_profit_cents,
+        }
+
+    @app.get("/staff/exposure")
+    async def exposure_desk(deps: D, me: SettingsReader) -> dict[str, Any]:
+        """Scenario liability per symbol and bloc against the free reserve,
+        the lot cap cuts in force and their record (D-14.32)."""
+        if deps.exposure is None:
+            raise HTTPException(status_code=503, detail="the exposure desk is not configured")
+        d = await deps.exposure.desk(deps.clock())
+        return {
+            "as_of": d.as_of,
+            "free_reserve_cents": d.free_reserve_cents,
+            "accounts": d.accounts,
+            "unread": list(d.unread),
+            "groups": [
+                {
+                    "kind": g.kind,
+                    "name": g.name,
+                    "scenario": g.worst.scenario.name,
+                    "loss_cents": g.worst.loss_cents,
+                    "limit_cents": g.limit_cents,
+                    "ratio": None if g.ratio is None else ratio_text(g.ratio),
+                    "level": level,
+                }
+                for g, level in zip(d.groups, d.levels, strict=True)
+            ],
+            "cuts": [
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "level": c.level,
+                    "classes": list(CLASSES_CUT[c.level]),
+                    "since": c.since,
+                    "under_since": c.under_since,
+                }
+                for (symbol, side), c in sorted(d.cuts.items())
+            ],
+            "moves": await deps.exposure.moves(50),
         }
 
     @app.get("/staff/liabilities")

@@ -56,6 +56,7 @@ from propfirm.customers.corrections import Corrections
 from propfirm.customers.detectors import Detectors
 from propfirm.customers.directory import Reports, TraderDirectory
 from propfirm.customers.disputes import Disputes
+from propfirm.customers.exposure import Exposure
 from propfirm.customers.funding import Onboarding
 from propfirm.customers.kyc import DiditKyc, KycProvider, SandboxKyc, WorkflowScreening
 from propfirm.customers.liability import Liabilities
@@ -181,6 +182,7 @@ async def _lifecycle_forever(
     clusters: Clusters | None = None,
     classes: Classes | None = None,
     detectors: Detectors | None = None,
+    exposure: Exposure | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -212,6 +214,11 @@ async def _lifecycle_forever(
                 await detectors.run(now_ms())
             except Exception:
                 log.exception("detectors failed")
+        if exposure is not None:
+            try:  # the exposure desk, every few minutes (D-14.32)
+                await exposure.watch(now_ms())
+            except Exception:
+                log.exception("exposure watch failed")
         if classes is not None:
             try:  # classes every funded account, once a day (D-14.28)
                 await classes.run(now_ms())
@@ -449,6 +456,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         if reserve is not None:
             reserve_box.append(reserve)
+        exposure = (
+            None
+            if payouts is None
+            else Exposure(
+                pool,
+                config.customer_schema,
+                settings,
+                live,
+                HistoryReader(pool, config.read_schema),
+                payouts,
+                reserve,
+                desk,
+            )
+        )
         tasks.append(asyncio.create_task(_reconcile_forever(checkout, settings)))
         tasks.append(asyncio.create_task(_publish_calendars(news, live)))
         if config.news_collector:
@@ -491,6 +512,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     clusters,
                     daily_classes,
                     detectors,
+                    exposure,
                 )
             )
         )
@@ -516,6 +538,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             transfers=Transfers(pool, config.customer_schema),
             clusters=clusters,
             daily_classes=daily_classes,
+            exposure=exposure,
             request_rate=RequestRate(pool, config.customer_schema, settings, cases),
             receipts=None
             if checkout is None

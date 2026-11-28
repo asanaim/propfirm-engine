@@ -907,3 +907,44 @@ line 3, last part; review v3, D6; decided by the owner's rule of 20 Nov
     (D-14.27).
 - Line 3 is done, except stale price (needs the second price source, step
   8) and account sharing (needs device and sign in records).
+
+D-14.32, exposure desk (build plan step 5, line 4; strategic review v3,
+D4, starting values in `[exposure]`; decided by the owner's rule of 20 Nov
+2026).
+- Every 5 minutes the API loop revalues each active funded account with
+  open positions, exactly as the engine values them: P&L in the quote
+  currency converted to USD, with the conversion rate moved too when the
+  scenario moves its symbol. Equity is floored where the account's loss
+  limit would close it.
+- The firm's added liability in a scenario is
+  sum s x [(E^k - I - V)+ - (E - I - V)+], using the payout rules' own
+  split, baseline and violations. The worst case is rounded up to the
+  cent.
+- Scenarios:
+  - each held symbol at plus and minus 1 and 3 standard deviations of
+    the last 60 daily returns (from the projected daily bars; rounded up
+    to a basis point, exactly);
+  - with under 20 days of history, plus and minus the asset class stress
+    move (forex 1.5 %, metal 3 %, oil 6 %, crypto 10 %);
+  - blocs: USD 1.5 % with gold 3 % the same way as CUR/USD; crypto 10 %;
+    oil 6 %; each both ways.
+- Limits, on the free reserve (reserve less certain liability): one
+  symbol 25 %, a bloc 50 %.
+  - At 80 %: the risk desk is alerted (settings change audience).
+  - At 100 %: lot caps halved for classes B and C on that symbol and the
+    side that wins.
+  - At 150 %: lot caps quartered for all classes.
+  - Restored after 24 hours continuously under 60 %.
+  - Open positions are never touched. Class D is already close only.
+- With the reserve off, scenarios are shown and nothing is limited.
+- Records: `exposure_moves` (migration 30, append-only) holds every
+  raise, under, over and restore, with the settings version it was
+  decided under. The cuts in force are a replay of it. Settings gain
+  `version()`.
+- Not yet: the engine does not apply the cut levels. That needs a lot cap
+  input journaled with its policy version (step 5, line 6). Until then
+  the levels are shown to staff on the Exposure page, and staff can lower
+  caps by a settings change.
+- Simplification: a symbol's scenario moves only that symbol, plus the
+  conversion rate it is itself the route for. Correlation between symbols
+  is captured only through the blocs.

@@ -753,3 +753,30 @@ rate = true                    # request rate: throttle at the API
 rate_orders_per_day = 2000     # order requests per account per trading day, then 429
 rate_repeats = 2               # this many throttled days ...
 rate_repeat_days = 30          # ... in this many days raise an alert (a case)
+
+[exposure]
+# The exposure desk (D-14.32; strategic review v3, D4): scenario liability
+# of funded accounts by exact revaluation, against the free reserve. Cut
+# levels are recorded and shown to staff; the engine applies them once
+# step 5, line 6 adds the lot cap input.
+on = true
+every_minutes = 5
+sigma_days = 60           # daily returns for each symbol's standard deviation
+min_days = 20             # fewer days of history: the class stress move instead
+bloc_usd_bp = 150         # every USD pair 1.5 % ...
+bloc_gold_bp = 300        # ... with gold 3 % the same way as CUR/USD
+bloc_crypto_bp = 1000     # all crypto 10 %
+bloc_oil_bp = 600         # all oil 6 %
+symbol_limit_percent = 25 # one symbol's worst case, of the free reserve
+bloc_limit_percent = 50   # a bloc's worst case, of the free reserve
+alert_percent = 80        # of a limit: alert the risk desk
+halve_percent = 100       # lot caps halved for classes B and C, that symbol and side
+quarter_percent = 150     # lot caps quartered for all classes
+restore_percent = 60      # back to baseline after restore_hours under this
+restore_hours = 24
+
+[exposure.stress_bp]      # one stress move per asset class, both ways
+forex = 150
+metal = 300
+oil = 600
+crypto = 1000

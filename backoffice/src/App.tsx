@@ -42,6 +42,7 @@ const DisputesPage = lazyPage(() => import("./Disputes"), "DisputesPage");
 const ReceiptsPage = lazyPage(() => import("./Receipts"), "ReceiptsPage");
 const TransfersPage = lazyPage(() => import("./Transfers"), "TransfersPage");
 const LiabilitiesPage = lazyPage(() => import("./Liabilities"), "LiabilitiesPage");
+const ExposurePage = lazyPage(() => import("./Exposure"), "ExposurePage");
 const StaffProfilePage = lazyPage(() => import("./StaffProfile"), "StaffProfilePage");
 const CaseList = lazyPage(() => import("./resources/cases"), "CaseList");
 const CaseShow = lazyPage(() => import("./resources/cases"), "CaseShow");
@@ -114,6 +115,7 @@ export function App({ api, manager }: { api: Api; manager: UserManager }) {
                 {screens.has("settings") ? <Route path="/receipts" element={<ReceiptsPage />} /> : null}
                 {screens.has("settings") ? <Route path="/transfers" element={<TransfersPage />} /> : null}
                 {screens.has("settings") ? <Route path="/liabilities" element={<LiabilitiesPage />} /> : null}
+                {screens.has("settings") ? <Route path="/exposure" element={<ExposurePage />} /> : null}
                 <Route path="/profile" element={<StaffProfilePage />} />
                 {screens.has("policies") ? <Route path="/policies" element={<PolicyPages />} /> : null}
                 {screens.has("site") ? <Route path="/site" element={<SiteEditorPage />} /> : null}

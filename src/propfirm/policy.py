@@ -255,6 +255,32 @@ class ClassesPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class ExposurePolicy:
+    """The exposure desk (D-14.32; strategic review v3, D4). Off when the
+    policy file has no [exposure]. Moves in basis points; limits in
+    percent of the free reserve (the reserve less certain liability)."""
+
+    on: bool = False
+    every_minutes: int = 5
+    sigma_days: int = 60  # daily returns for the symbol's standard deviation
+    min_days: int = 20  # fewer: the asset class's stress move instead
+    stress_bp: Mapping[str, int] = field(
+        default_factory=lambda: {"forex": 150, "metal": 300, "oil": 600, "crypto": 1_000}
+    )
+    bloc_usd_bp: int = 150
+    bloc_gold_bp: int = 300
+    bloc_crypto_bp: int = 1_000
+    bloc_oil_bp: int = 600
+    symbol_limit_percent: int = 25
+    bloc_limit_percent: int = 50
+    alert_percent: int = 80
+    halve_percent: int = 100
+    quarter_percent: int = 150
+    restore_percent: int = 60
+    restore_hours: int = 24
+
+
+@dataclass(frozen=True, slots=True)
 class DetectorsPolicy:
     """Behaviour detectors (D-14.29; strategic review v3, D6). Off when
     the policy file has no [detectors]. Hedging across accounts: opposite
@@ -409,6 +435,7 @@ class Policy:
     reserve: ReservePolicy = field(default_factory=ReservePolicy)
     classes: ClassesPolicy = field(default_factory=ClassesPolicy)
     detectors: DetectorsPolicy = field(default_factory=DetectorsPolicy)
+    exposure: ExposurePolicy = field(default_factory=ExposurePolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -678,6 +705,9 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
             detectors=(
                 _detectors(root.table("detectors")) if root.has("detectors") else DetectorsPolicy()
             ),
+            exposure=(
+                _exposure(root.table("exposure")) if root.has("exposure") else ExposurePolicy()
+            ),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -738,6 +768,43 @@ def _referrals(t: _Table) -> ReferralsPolicy:
     t.done()
     if not 0 < policy.commission < 1:
         raise PolicyError("referrals: commission_percent between 0 and 100")
+    return policy
+
+
+def _exposure(t: _Table) -> ExposurePolicy:
+    stress = t.table("stress_bp")
+    classes = {c.value: stress.integer(c.value, 1) for c in AssetClass}
+    stress.done()
+    policy = ExposurePolicy(
+        on=t.boolean("on"),
+        every_minutes=t.integer("every_minutes", 1),
+        sigma_days=t.integer("sigma_days", 2),
+        min_days=t.integer("min_days", 2),
+        stress_bp=classes,
+        bloc_usd_bp=t.integer("bloc_usd_bp", 1),
+        bloc_gold_bp=t.integer("bloc_gold_bp", 1),
+        bloc_crypto_bp=t.integer("bloc_crypto_bp", 1),
+        bloc_oil_bp=t.integer("bloc_oil_bp", 1),
+        symbol_limit_percent=t.integer("symbol_limit_percent", 1),
+        bloc_limit_percent=t.integer("bloc_limit_percent", 1),
+        alert_percent=t.integer("alert_percent", 1),
+        halve_percent=t.integer("halve_percent", 1),
+        quarter_percent=t.integer("quarter_percent", 1),
+        restore_percent=t.integer("restore_percent", 1),
+        restore_hours=t.integer("restore_hours", 1),
+    )
+    t.done()
+    if policy.min_days > policy.sigma_days:
+        raise PolicyError("exposure: min_days <= sigma_days")
+    if not (
+        policy.restore_percent
+        < policy.alert_percent
+        <= policy.halve_percent
+        < policy.quarter_percent
+    ):
+        raise PolicyError(
+            "exposure: restore_percent < alert_percent <= halve_percent < quarter_percent"
+        )
     return policy
 
 
