@@ -254,6 +254,11 @@ only add restrictions; cancelling a news window still needs an admin.
 
 AC09 evidence for claims, AC18 language
 manager, AC21 and AC22 (tickets, extensions), AC24 price feed
-failover, AC25 subscriber consent, AC26 social login, AC27 soft delete,
+failover, AC26 social login, AC27 soft delete,
 AC29 list pattern, AC30 brand tokens.
 
+
+AC25, subscribers with a consent record (28 Nov 2026, D-15.1). In place:
+double opt-in from the portal footer; each consent keeps time, source, the
+exact wording shown and its version, and the country; append-only events;
+staff list and CSV export of confirmed addresses.

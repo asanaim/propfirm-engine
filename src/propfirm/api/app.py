@@ -60,7 +60,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from fractions import Fraction
@@ -140,6 +140,7 @@ from propfirm.customers.store import (
     OrderRecord,
     share_of,
 )
+from propfirm.customers.subscribers import SubscribeRefused, Subscribers
 from propfirm.customers.transfers import TransferRefused, Transfers
 from propfirm.journal.inputs import (
     CancelOrder,
@@ -433,6 +434,7 @@ class Deps:
     longitude_header: str | None = None
     sign_ins: SignIns | None = None  # account sharing (D-14.35)
     stale: StalePrice | None = None  # stale price detector (D-14.36)
+    subscribers: Subscribers | None = None  # newsletter consents (AC25)
     vault: Vault = field(default_factory=Vault.from_env)  # method secrets (AC14)
     clock: Callable[[], int] = now_ms
     today: Callable[[], date] = _today
@@ -522,6 +524,16 @@ class PublishedNewsBody(NewsReasonBody):
 class ClassBody(_Body):
     cls: Annotated[Literal["A", "B", "C", "D"], Field(alias="class")]
     reason: Annotated[str, StringConstraints(min_length=3, max_length=500)]
+
+
+class SubscribeBody(_Body):
+    email: Annotated[str, StringConstraints(min_length=3, max_length=320)]
+    source: Annotated[str, StringConstraints(min_length=1, max_length=20)]
+    version: Annotated[str, StringConstraints(min_length=12, max_length=12)]
+
+
+class TokenBody(_Body):
+    token: Annotated[str, StringConstraints(min_length=10, max_length=100)]
 
 
 class ClearBody(_Body):
@@ -4562,6 +4574,82 @@ def create_app(
         except PolicyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return await propose_setting(deps, me, setting, body.reason)
+
+    # --- subscribers (rule AC25) -----------------------------------------------------
+
+    def _subscribers(deps: Deps) -> Subscribers:
+        if deps.subscribers is None:
+            raise HTTPException(status_code=503, detail="the newsletter is not configured")
+        return deps.subscribers
+
+    @app.get("/subscribe")
+    async def subscribe_wording(deps: D) -> dict[str, Any]:
+        """The wording shown beside the newsletter button and its version
+        (public): a subscription names the version the visitor saw."""
+        return await _subscribers(deps).wording()
+
+    @app.post("/subscribers", status_code=202)
+    async def subscribe(deps: D, request: Request, body: SubscribeBody) -> dict[str, Any]:
+        """Ask for the newsletter (public): a confirmation email follows.
+        The answer is the same whether or not the address is known."""
+        country = request.headers.get(deps.country_header) if deps.country_header else None
+        try:
+            await _subscribers(deps).subscribe(
+                body.email, body.source, body.version, country, deps.clock()
+            )
+        except SubscribeRefused as exc:
+            status = {"closed": 409, "no_mail": 503, "busy": 429}.get(exc.code, 400)
+            raise HTTPException(
+                status_code=status, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
+        return {"status": "check_email"}
+
+    @app.post("/subscribers/confirm")
+    async def subscribe_confirm(deps: D, body: TokenBody) -> dict[str, Any]:
+        """Follow the emailed link: the address joins the list (public)."""
+        return {"confirmed": await _subscribers(deps).confirm(body.token, deps.clock())}
+
+    @app.post("/subscribers/unsubscribe")
+    async def subscribe_leave(deps: D, body: TokenBody) -> dict[str, Any]:
+        """Leave the list by the emailed link (public)."""
+        return {"unsubscribed": await _subscribers(deps).unsubscribe(body.token, deps.clock())}
+
+    @app.get("/staff/subscribers")
+    async def subscriber_list(
+        deps: D, me: SettingsReader, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Each address with its consent record (time, source, wording
+        shown, country) and its state; `status` filters."""
+        if status not in (None, "pending", "confirmed", "unsubscribed"):
+            raise HTTPException(
+                status_code=400, detail="status: pending, confirmed or unsubscribed"
+            )
+        return [asdict(c) for c in await _subscribers(deps).consents(status)]
+
+    @app.get("/staff/subscribers.csv")
+    async def subscriber_export(deps: D, me: SettingsReader) -> Response:
+        """The confirmed list with consent records, for a mailing tool."""
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(
+            ["email", "subscribed_at", "confirmed_at", "source", "wording_version", "country"]
+        )
+        for c in await _subscribers(deps).consents("confirmed"):
+            w.writerow(
+                [
+                    c.email,
+                    c.subscribed_at,
+                    c.confirmed_at,
+                    c.source,
+                    c.wording_version,
+                    c.country or "",
+                ]
+            )
+        return Response(
+            out.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="subscribers.csv"'},
+        )
 
     @app.get("/site/status")
     async def site_status(deps: D) -> dict[str, Any]:

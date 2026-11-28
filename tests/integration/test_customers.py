@@ -57,6 +57,7 @@ from propfirm.customers.scaling import Scaling
 from propfirm.customers.sign_ins import SignIns
 from propfirm.customers.stale_price import StalePrice
 from propfirm.customers.store import CustomerStore, migrate
+from propfirm.customers.subscribers import Subscribers
 from propfirm.customers.transfers import Transfers, WithdrawalRails
 from propfirm.journal.stream import InputStreamWriter
 from propfirm.market.types import PriceUpdate
@@ -354,6 +355,9 @@ async def platform(
         cohorts=cohorts,
         sign_ins=sign_ins,
         stale=stale,
+        subscribers=Subscribers(
+            pool, config.customer_schema, settings, mailer, "https://pipridge.test"
+        ),
         latitude_header="X-Latitude",
         longitude_header="X-Longitude",
         receipts=Receipts(pool, config.customer_schema, checkout, rails),
@@ -637,7 +641,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 35))
+            assert await migrate(conn, schema) == list(range(1, 36))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

@@ -1095,3 +1095,29 @@ Nov 2026 and the request of 28 Nov 2026, "complete all of step 5").
     an internal reference that is never shown or redistributed should be
     confirmed with OANDA, or replaced by a paid data licence, before paid
     launch.
+
+D-14.36a, OANDA kept for later (owner, 28 Nov 2026: "keep door open for
+oanda, we will do it in future"). The reference connector and the stale
+price check stay in the code, switched on in policy but idle: with no
+`OANDA_TOKEN` the `reference` service is not started and the check finds
+no quotes. Starting it later needs only the account, the two variables and
+the compose profile.
+
+D-15.1, subscribers with a consent record (build plan step 6, line 1;
+rule AC25; decided by the owner's rule of 20 Nov 2026).
+- The portal footer asks for an email beside one wording from policy
+  (`[subscribers] wording`). The visitor's request names the wording's
+  version, and an older version is refused, so a record never names
+  wording the visitor did not see.
+- Each step is an append-only event (migration 35):
+  - subscribed: time, source, wording, version and country;
+  - confirmed: by the emailed link (double opt-in; links last 7 days);
+  - unsubscribed: by the link in every email.
+- Only confirmed addresses are on the list. Tokens are random and stored
+  only as hashes.
+- Abuse limits: a second request for the same address within 24 hours
+  sends nothing; at most 200 confirmation emails an hour. The answer
+  never reveals whether an address is known.
+- Staff with settings rights read the consents and export the confirmed
+  list as CSV (back office, Subscribers).
+- Sending campaigns is out of scope: the CSV goes to any mailing tool.

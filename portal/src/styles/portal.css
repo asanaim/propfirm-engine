@@ -2694,3 +2694,23 @@ a soft fade and a slight scale, on the system's spring-like curve */
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0.02em;
 }
+
+/* newsletter (rule AC25) */
+.newsletter {
+  display: grid;
+  gap: 6px;
+  max-width: 420px;
+  margin: 12px 0;
+}
+.newsletter label {
+  font-size: 0.85rem;
+  color: var(--muted, inherit);
+}
+.newsletter-row {
+  display: flex;
+  gap: 8px;
+}
+.newsletter-row input {
+  flex: 1;
+  min-width: 0;
+}

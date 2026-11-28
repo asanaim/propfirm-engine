@@ -90,6 +90,7 @@ from propfirm.customers.scaling import Scaling
 from propfirm.customers.sign_ins import SignIns
 from propfirm.customers.stale_price import StalePrice
 from propfirm.customers.store import CustomerStore
+from propfirm.customers.subscribers import Subscribers
 from propfirm.customers.transfers import NoPayoutRail, Transfers, WithdrawalRails
 from propfirm.customers.trials import Trials
 from propfirm.journal.stream import InputStreamWriter
@@ -468,6 +469,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             pool, config.customer_schema, config.read_schema, settings, cases, desk, live
         )
         sign_ins = SignIns(pool, config.customer_schema, settings, customers, cases)
+        subscribers = Subscribers(
+            pool,
+            config.customer_schema,
+            settings,
+            mailer,
+            config.public_url,
+        )
         stale = StalePrice(
             pool,
             config.customer_schema,
@@ -621,6 +629,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             longitude_header=config.longitude_header,
             sign_ins=sign_ins,
             stale=stale,
+            subscribers=subscribers,
             audit=AuditStore(pool, config.audit_schema),
             client_ip_header=config.client_ip_header,
             price_source=config.price_source,
