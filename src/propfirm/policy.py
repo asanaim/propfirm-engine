@@ -344,6 +344,11 @@ class DetectorsPolicy:
     reentry_seconds: int = 60
     reentry_matches: int = 3
     reentry_days: int = 30
+    stale: bool = False  # stale price: fills against the reference source
+    stale_spreads: int = 1  # better than the reference by more than this many spreads
+    stale_quote_age_ms: int = 2_000  # the reference quote at most this much older
+    stale_fills: int = 5  # this many stale fills ...
+    stale_days: int = 30  # ... in this many days: alert and class C
     rate: bool = False
     rate_orders_per_day: int = 2_000
     rate_repeats: int = 2
@@ -900,6 +905,11 @@ def _detectors(t: _Table) -> DetectorsPolicy:
         reentry_seconds=t.integer("reentry_seconds", 1),
         reentry_matches=t.integer("reentry_matches", 1),
         reentry_days=t.integer("reentry_days", 1),
+        stale=t.boolean("stale"),
+        stale_spreads=t.integer("stale_spreads", 1),
+        stale_quote_age_ms=t.integer("stale_quote_age_ms", 1),
+        stale_fills=t.integer("stale_fills", 1),
+        stale_days=t.integer("stale_days", 1),
         rate=t.boolean("rate"),
         rate_orders_per_day=t.integer("rate_orders_per_day", 1),
         rate_repeats=t.integer("rate_repeats", 1),

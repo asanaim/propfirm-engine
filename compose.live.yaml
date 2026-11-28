@@ -47,3 +47,23 @@ services:
     volumes:
       - ./config:/app/config:ro
     command: ["/opt/venv/bin/python", "-m", "propfirm.service.twelvedata"]
+
+  # the reference (second) price source for the stale price detector
+  # (D-14.36): OANDA's v20 stream into a 10 minute window in Valkey; never
+  # prices a trade. Start with --profile reference once OANDA_TOKEN and
+  # OANDA_ACCOUNT are in .env.
+  reference:
+    profiles: ["reference"]
+    build: {context: ., target: runtime}
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+    environment:
+      VALKEY_URL: redis://valkey:6379/0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-propfirm}:${POSTGRES_PASSWORD:-propfirm-dev}@postgres:5432/${POSTGRES_DB:-propfirm}
+      OANDA_TOKEN: ${OANDA_TOKEN:-}
+      OANDA_ACCOUNT: ${OANDA_ACCOUNT:-}
+      OANDA_STREAM: ${OANDA_STREAM:-https://stream-fxpractice.oanda.com}
+      PROPFIRM_REFERENCE_SYMBOLS: ${PROPFIRM_REFERENCE_SYMBOLS:-}
+    command: ["/opt/venv/bin/python", "-m", "propfirm.service.reference"]

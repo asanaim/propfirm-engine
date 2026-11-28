@@ -1056,3 +1056,42 @@ of 28 Nov 2026, "complete all of step 5").
   `GET /staff/customers/{cif}/sign-ins`.
 - Without the location headers the travel rule cannot fire; the device
   and country rules still work.
+
+D-14.36, stale price detector and the reference price source (build plan
+step 5, line 3; strategic review v3, D6; decided by the owner's rule of 20
+Nov 2026 and the request of 28 Nov 2026, "complete all of step 5").
+- Reference source: OANDA's v20 price stream (bid and ask). The practice
+  server is free with a demo account, which is the lowest cost
+  available; a paid vendor can replace it by writing to the same window.
+  - It covers forex, metals and oil. Crypto is not on OANDA's global
+    practice server, so crypto fills are not checked yet.
+  - The connector (`python -m propfirm.service.reference`, compose
+    profile `reference`) keeps each symbol's quotes for 10 minutes in
+    Valkey and trims the rest.
+  - These prices never reach the engine or price anything. Rounding widens
+    them: bid down, ask up.
+- Check: every minute the API loop takes the fills of the last minutes
+  that the trader timed (market opens and client closes; stops, limits
+  and forced closes are left out). Each is compared with the last
+  reference quote at or before it, at most 2 seconds older.
+  - A fill better for the trader than the quote's same side by more than
+    one reference spread is stale.
+  - It is kept as evidence with the quote (`stale_fills`, migration 34;
+    never updated; deleted only by the reference purge).
+- Action: 5 stale fills on an account in 30 days raise a high fraud alert
+  (a case holds payouts) and set class C as the system, so lot caps are
+  halved in the engine (D-14.34) and the daily job does not lift it. Two
+  people decide a void or a profit removal on the case.
+- A fill outside the 10 minute window cannot be checked, for example
+  when the API was down. It is logged, not guessed.
+- Purge, within 30 days of cancelling:
+  `python -m propfirm.service.reference --purge --confirm "purge reference prices"`
+  deletes the window and the stale fill evidence.
+- Owner action, flagged:
+  - create an OANDA practice account and set `OANDA_TOKEN` and
+    `OANDA_ACCOUNT`; without them the check finds no quotes and does
+    nothing;
+  - OANDA's API licence is written for the licensee's own trading. Use as
+    an internal reference that is never shown or redistributed should be
+    confirmed with OANDA, or replaced by a paid data licence, before paid
+    launch.

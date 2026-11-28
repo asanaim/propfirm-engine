@@ -1079,6 +1079,36 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.step_ups FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        34,
+        """
+        -- stale price (D-14.36): each client fill better than the reference
+        -- source by more than its spread, with the reference quote it was
+        -- measured against (evidence). Never updated; deleted only by the
+        -- licensed-data purge (the reference quote is the vendor's)
+        CREATE TABLE {s}.stale_fills (
+            acc text NOT NULL REFERENCES {s}.accounts (acc),
+            position_id text NOT NULL,
+            kind text NOT NULL CHECK (kind IN ('open', 'close')),
+            ts bigint NOT NULL,
+            symbol text NOT NULL,
+            price bigint NOT NULL,
+            ref_ts bigint NOT NULL,
+            ref_bid bigint NOT NULL,
+            ref_ask bigint NOT NULL,
+            advantage bigint NOT NULL,
+            PRIMARY KEY (acc, position_id, kind, ts)
+        );
+        CREATE INDEX ON {s}.stale_fills (acc, ts);
+        CREATE FUNCTION {s}.no_update() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION '% is never updated', TG_TABLE_NAME;
+        END;
+        $$;
+        CREATE TRIGGER stale_fills_no_update BEFORE UPDATE
+            ON {s}.stale_fills FOR EACH ROW EXECUTE FUNCTION {s}.no_update();
+        """,
+    ),
 )
 
 

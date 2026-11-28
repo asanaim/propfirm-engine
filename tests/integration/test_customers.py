@@ -55,6 +55,7 @@ from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.risk_sync import RiskSync
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.sign_ins import SignIns
+from propfirm.customers.stale_price import StalePrice
 from propfirm.customers.store import CustomerStore, migrate
 from propfirm.customers.transfers import Transfers, WithdrawalRails
 from propfirm.journal.stream import InputStreamWriter
@@ -67,6 +68,7 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
+from propfirm.service.reference import ReferenceReader
 from propfirm.service.setup import setup_from_policy
 from propfirm.settings.methods import Vault
 from propfirm.settings.newsdesk import NewsDesk, NewsStore
@@ -136,6 +138,7 @@ class Platform:
     exposure: Exposure | None = None  # the exposure desk (D-14.32)
     cohorts: Cohorts | None = None  # the cohort alarm (D-14.33)
     risk: RiskSync | None = None  # automatic risk limits to the engine (D-14.34)
+    stale: StalePrice | None = None  # the stale price detector (D-14.36)
 
     async def call(
         self,
@@ -288,6 +291,15 @@ async def platform(
     payouts.cohorts = cohorts
     sign_ins = SignIns(pool, config.customer_schema, settings, store, cases)
     payouts.step_ups = sign_ins
+    stale = StalePrice(
+        pool,
+        config.customer_schema,
+        config.read_schema,
+        settings,
+        ReferenceReader(client, f"{config.live_prefix}:reference"),
+        cases,
+        store,
+    )
     clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
     request_rate = RequestRate(pool, config.customer_schema, settings, cases)
     detectors = Detectors(
@@ -341,6 +353,7 @@ async def platform(
         exposure=exposure,
         cohorts=cohorts,
         sign_ins=sign_ins,
+        stale=stale,
         latitude_header="X-Latitude",
         longitude_header="X-Longitude",
         receipts=Receipts(pool, config.customer_schema, checkout, rails),
@@ -437,6 +450,7 @@ async def platform(
             exposure=exposure,
             cohorts=cohorts,
             risk=RiskSync(pool, config.customer_schema, settings, exposure, gateway),
+            stale=stale,
         )
     finally:
         await stop_engine()
@@ -623,7 +637,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 34))
+            assert await migrate(conn, schema) == list(range(1, 35))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

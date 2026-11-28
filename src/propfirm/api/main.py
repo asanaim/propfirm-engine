@@ -88,6 +88,7 @@ from propfirm.customers.reserve import Evaluations, Reserve, limits
 from propfirm.customers.risk_sync import RiskSync
 from propfirm.customers.scaling import Scaling
 from propfirm.customers.sign_ins import SignIns
+from propfirm.customers.stale_price import StalePrice
 from propfirm.customers.store import CustomerStore
 from propfirm.customers.transfers import NoPayoutRail, Transfers, WithdrawalRails
 from propfirm.customers.trials import Trials
@@ -101,6 +102,7 @@ from propfirm.service.feeder import now_ms
 from propfirm.service.gateway import Gateway
 from propfirm.service.live import LiveReader
 from propfirm.service.projector import HistoryReader
+from propfirm.service.reference import ReferenceReader
 from propfirm.settings.methods import Vault
 from propfirm.settings.newsdesk import Author, NewsDesk, NewsStore
 from propfirm.settings.service import Settings
@@ -188,6 +190,7 @@ async def _lifecycle_forever(
     exposure: Exposure | None = None,
     cohorts: Cohorts | None = None,
     risk: RiskSync | None = None,
+    stale: StalePrice | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -234,6 +237,11 @@ async def _lifecycle_forever(
                 await risk.sync(now_ms())
             except Exception:
                 log.exception("risk limit sync failed")
+        if stale is not None:
+            try:  # fills against the reference source, every minute (D-14.36)
+                await stale.check(now_ms())
+            except Exception:
+                log.exception("stale price check failed")
         if classes is not None:
             try:  # classes every funded account, once a day (D-14.28)
                 await classes.run(now_ms())
@@ -460,6 +468,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             pool, config.customer_schema, config.read_schema, settings, cases, desk, live
         )
         sign_ins = SignIns(pool, config.customer_schema, settings, customers, cases)
+        stale = StalePrice(
+            pool,
+            config.customer_schema,
+            config.read_schema,
+            settings,
+            ReferenceReader(client),
+            cases,
+            customers,
+        )
         if payouts is not None:
             payouts.cohorts = cohorts
             payouts.step_ups = sign_ins
@@ -537,6 +554,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     exposure,
                     cohorts,
                     RiskSync(pool, config.customer_schema, settings, exposure, gateway),
+                    stale,
                 )
             )
         )
@@ -602,6 +620,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             latitude_header=config.latitude_header,
             longitude_header=config.longitude_header,
             sign_ins=sign_ins,
+            stale=stale,
             audit=AuditStore(pool, config.audit_schema),
             client_ip_header=config.client_ip_header,
             price_source=config.price_source,

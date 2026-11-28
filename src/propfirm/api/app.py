@@ -131,6 +131,7 @@ from propfirm.customers.reserve import (
 )
 from propfirm.customers.scaling import Scaling, ScalingRefused
 from propfirm.customers.sign_ins import SignIns, device_hash, tenths
+from propfirm.customers.stale_price import StalePrice
 from propfirm.customers.store import (
     AccountRecord,
     AlreadyRegisteredError,
@@ -431,6 +432,7 @@ class Deps:
     latitude_header: str | None = None  # the client's rough place, by the proxy (D-14.35)
     longitude_header: str | None = None
     sign_ins: SignIns | None = None  # account sharing (D-14.35)
+    stale: StalePrice | None = None  # stale price detector (D-14.36)
     vault: Vault = field(default_factory=Vault.from_env)  # method secrets (AC14)
     clock: Callable[[], int] = now_ms
     today: Callable[[], date] = _today
@@ -2324,6 +2326,14 @@ def create_app(
         """An account's class in force (B when none) and every change."""
         history = await _classes(deps).history(acc)
         return {"class": history[-1]["class"] if history else "B", "history": history}
+
+    @app.get("/staff/accounts/{acc}/stale-fills")
+    async def stale_fills(deps: D, me: CaseWorker, acc: Ident) -> list[dict[str, Any]]:
+        """An account's stale fills, each with the reference quote it was
+        measured against (D-14.36)."""
+        if deps.stale is None:
+            raise HTTPException(status_code=503, detail="the stale price check is not configured")
+        return await deps.stale.of(acc)
 
     @app.get("/staff/customers/{cif}/sign-ins")
     async def customer_sign_ins(deps: D, me: CaseWorker, cif: Ident) -> dict[str, Any]:
