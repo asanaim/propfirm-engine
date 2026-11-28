@@ -259,6 +259,19 @@ class ClassesPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class SharingPolicy:
+    """The account sharing detector (D-14.35). Off when the policy file
+    has no [sharing]."""
+
+    on: bool = False
+    window_days: int = 7
+    max_devices: int = 3  # more in the window: an alert
+    max_countries: int = 3
+    travel_km: int = 500  # two sign ins further apart than this ...
+    travel_minutes: int = 60  # ... within this: an alert
+
+
+@dataclass(frozen=True, slots=True)
 class CohortsPolicy:
     """The cohort alarm (D-14.33). Off when the policy file has no
     [cohorts]. `bounds`: the zero edge pass rate per product; a product
@@ -457,6 +470,7 @@ class Policy:
     detectors: DetectorsPolicy = field(default_factory=DetectorsPolicy)
     exposure: ExposurePolicy = field(default_factory=ExposurePolicy)
     cohorts: CohortsPolicy = field(default_factory=CohortsPolicy)
+    sharing: SharingPolicy = field(default_factory=SharingPolicy)
 
     def rule_sets(self) -> tuple[RuleSet, ...]:
         """Each product's stages, in order."""
@@ -730,6 +744,7 @@ def parse_policy(data: Mapping[str, Any]) -> Policy:
                 _exposure(root.table("exposure")) if root.has("exposure") else ExposurePolicy()
             ),
             cohorts=_cohorts(root.table("cohorts")) if root.has("cohorts") else CohortsPolicy(),
+            sharing=_sharing(root.table("sharing")) if root.has("sharing") else SharingPolicy(),
         )
     except (TypeError, ValueError) as exc:
         if isinstance(exc, PolicyError):
@@ -790,6 +805,19 @@ def _referrals(t: _Table) -> ReferralsPolicy:
     t.done()
     if not 0 < policy.commission < 1:
         raise PolicyError("referrals: commission_percent between 0 and 100")
+    return policy
+
+
+def _sharing(t: _Table) -> SharingPolicy:
+    policy = SharingPolicy(
+        on=t.boolean("on"),
+        window_days=t.integer("window_days", 1),
+        max_devices=t.integer("max_devices", 1),
+        max_countries=t.integer("max_countries", 1),
+        travel_km=t.integer("travel_km", 1),
+        travel_minutes=t.integer("travel_minutes", 1),
+    )
+    t.done()
     return policy
 
 

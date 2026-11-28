@@ -75,6 +75,10 @@ class ServiceConfig:
     sandbox: bool = False  # sandbox payments and screening; never in production
     country_header: str | None = None  # header a trusted proxy sets with the IP country
     client_ip_header: str | None = None  # header a trusted proxy sets with the client's address
+    # headers a trusted proxy sets with the client's rough place (D-14.35),
+    # e.g. Cloudflare's cf-iplatitude and cf-iplongitude
+    latitude_header: str | None = None
+    longitude_header: str | None = None
     didit_api_key: str | None = None  # Tier 2 identity checks (C7); secret
     didit_workflow_id: str | None = None
     didit_webhook_secret: str | None = None  # secret
@@ -224,6 +228,8 @@ class ServiceConfig:
             sandbox=sandbox == "1",
             country_header=env.get("PROPFIRM_COUNTRY_HEADER") or None,
             client_ip_header=env.get("PROPFIRM_CLIENT_IP_HEADER") or None,
+            latitude_header=env.get("PROPFIRM_LATITUDE_HEADER") or None,
+            longitude_header=env.get("PROPFIRM_LONGITUDE_HEADER") or None,
             didit_api_key=env.get("DIDIT_API_KEY") or None,
             didit_workflow_id=env.get("DIDIT_WORKFLOW_ID") or None,
             didit_webhook_secret=env.get("DIDIT_WEBHOOK_SECRET") or None,

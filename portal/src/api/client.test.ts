@@ -1,4 +1,4 @@
-import { ApiError, StepUpRequired, createApi, parseEvents, parseStepUp } from "./client";
+import { ApiError, StepUpRequired, createApi, deviceId, parseEvents, parseStepUp } from "./client";
 
 function respond(status: number, body: unknown, headers: Record<string, string> = {}) {
   return vi.fn<typeof fetch>().mockResolvedValue(
@@ -81,4 +81,22 @@ it("reads events from a response body with the token", async () => {
     .events("/accounts/Z/stream", () => undefined, new AbortController().signal)
     .catch((e: unknown) => e);
   expect(error).toMatchObject({ status: 404, message: "unknown account" });
+});
+
+it("keeps one random device id per browser and sends it signed in", async () => {
+  const memory = new Map<string, string>();
+  const store = { getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => void memory.set(k, v) };
+  const first = deviceId(store);
+  expect(first).toMatch(/^[0-9a-f-]{36}$/);
+  expect(deviceId(store)).toBe(first);
+  expect(deviceId(null)).toBeNull();
+  const broken = { getItem: () => { throw new Error("denied"); }, setItem: () => undefined };
+  expect(deviceId(broken)).toBeNull();
+
+  const fetcher = respond(200, {});
+  await createApi("/api", () => Promise.resolve("t"), fetcher).get("/me");
+  expect(fetcher.mock.calls[0]?.[1]?.headers).toHaveProperty("X-Device-Id");
+  const anonymous = respond(200, {});
+  await createApi("/api", () => Promise.resolve(null), anonymous).get("/catalogue");
+  expect(anonymous.mock.calls[0]?.[1]?.headers).not.toHaveProperty("X-Device-Id");
 });
