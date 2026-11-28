@@ -1009,6 +1009,34 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.exposure_moves FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        31,
+        """
+        -- cohort alarm (D-14.33): a cohort above its zero edge bound, and the
+        -- staff decision that clears it (both append-only)
+        CREATE TABLE {s}.cohort_alarms (
+            id bigserial PRIMARY KEY,
+            kind text NOT NULL CHECK (kind IN ('product', 'affiliate')),
+            key text NOT NULL,
+            product_id text NOT NULL,
+            resolved integer NOT NULL CHECK (resolved > 0),
+            passed integer NOT NULL CHECK (passed >= 0 AND passed <= resolved),
+            bound text NOT NULL,
+            raised_at bigint NOT NULL
+        );
+        CREATE INDEX ON {s}.cohort_alarms (kind, key);
+        CREATE TABLE {s}.cohort_clears (
+            alarm bigint PRIMARY KEY REFERENCES {s}.cohort_alarms (id),
+            cleared_at bigint NOT NULL,
+            cleared_by text NOT NULL,
+            reason text NOT NULL CHECK (reason <> '')
+        );
+        CREATE TRIGGER cohort_alarms_append_only BEFORE UPDATE OR DELETE
+            ON {s}.cohort_alarms FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        CREATE TRIGGER cohort_clears_append_only BEFORE UPDATE OR DELETE
+            ON {s}.cohort_clears FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 

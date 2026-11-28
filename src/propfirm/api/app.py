@@ -85,6 +85,9 @@ from propfirm.customers.checkout import Checkout, CheckoutError, Registration
 from propfirm.customers.classes import Classes
 from propfirm.customers.classes import counts as class_counts
 from propfirm.customers.clusters import Clusters
+from propfirm.customers.cohorts import Cohorts
+from propfirm.customers.cohorts import alarmed as cohort_alarmed
+from propfirm.customers.cohorts import percent as cohort_percent
 from propfirm.customers.corrections import CorrectionRefused, Corrections
 from propfirm.customers.directory import (
     SEGMENTS,
@@ -405,6 +408,7 @@ class Deps:
     app_clients: AppClients | None = None  # token-to-app binding (D-14.19); None: off
     liabilities: Liabilities | None = None  # the liability desk (D-14.18)
     exposure: Exposure | None = None  # the exposure desk (D-14.32)
+    cohorts: Cohorts | None = None  # the cohort alarm (D-14.33)
     evaluations: Evaluations | None = None  # reserve coverage: evaluations (D-14.20)
     reconciliations: Reconciliations | None = None  # processor statements (D-14.21)
     disputes: Disputes | None = None  # refunds and chargebacks (D-14.22)
@@ -510,6 +514,10 @@ class PublishedNewsBody(NewsReasonBody):
 
 class ClassBody(_Body):
     cls: Annotated[Literal["A", "B", "C", "D"], Field(alias="class")]
+    reason: Annotated[str, StringConstraints(min_length=3, max_length=500)]
+
+
+class ClearBody(_Body):
     reason: Annotated[str, StringConstraints(min_length=3, max_length=500)]
 
 
@@ -2289,6 +2297,45 @@ def create_app(
         """An account's class in force (B when none) and every change."""
         history = await _classes(deps).history(acc)
         return {"class": history[-1]["class"] if history else "B", "history": history}
+
+    def _cohorts(deps: Deps) -> Cohorts:
+        if deps.cohorts is None:
+            raise HTTPException(status_code=503, detail="the cohort alarm is not configured")
+        return deps.cohorts
+
+    @app.get("/staff/cohorts")
+    async def cohort_list(deps: D, me: CaseWorker) -> dict[str, Any]:
+        """Every cohort's results against its zero edge bound, and the
+        alarms with their clears (D-14.33)."""
+        c = _cohorts(deps)
+        policy = await c.policy()
+        return {
+            "significance": cohort_percent(policy.significance),
+            "min_resolved": policy.min_resolved,
+            "cohorts": [
+                {
+                    "kind": t.kind,
+                    "key": t.key,
+                    "product_id": t.product_id,
+                    "resolved": t.resolved,
+                    "passed": t.passed,
+                    "rate": cohort_percent(t.rate),
+                    "bound": cohort_percent(t.bound),
+                    "above": t.rate > t.bound,
+                    "alarmed": cohort_alarmed(t, policy.significance, policy.min_resolved),
+                }
+                for t in await c.tallies()
+            ],
+            "alarms": await c.alarms(),
+        }
+
+    @app.post("/staff/cohorts/{alarm}/clear")
+    async def cohort_clear(deps: D, me: CaseWorker, alarm: int, body: ClearBody) -> dict[str, Any]:
+        """Clear an alarm: the cohort's payouts and the affiliate's
+        commission resume (D-14.33)."""
+        if not await _cohorts(deps).clear(alarm, me.subject, body.reason, deps.clock()):
+            raise HTTPException(status_code=404, detail="no open alarm by that number")
+        return {"alarm": alarm, "cleared": True}
 
     def _clusters(deps: Deps) -> Clusters:
         if deps.clusters is None:

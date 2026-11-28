@@ -52,6 +52,7 @@ from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
 from propfirm.customers.classes import Classes
 from propfirm.customers.clusters import Clusters
+from propfirm.customers.cohorts import Cohorts
 from propfirm.customers.corrections import Corrections
 from propfirm.customers.detectors import Detectors
 from propfirm.customers.directory import Reports, TraderDirectory
@@ -183,6 +184,7 @@ async def _lifecycle_forever(
     classes: Classes | None = None,
     detectors: Detectors | None = None,
     exposure: Exposure | None = None,
+    cohorts: Cohorts | None = None,
 ) -> None:
     while True:
         await asyncio.sleep(LIFECYCLE_S)
@@ -219,6 +221,11 @@ async def _lifecycle_forever(
                 await exposure.watch(now_ms())
             except Exception:
                 log.exception("exposure watch failed")
+        if cohorts is not None:
+            try:  # the cohort alarm, every few hours (D-14.33)
+                await cohorts.watch(now_ms())
+            except Exception:
+                log.exception("cohort watch failed")
         if classes is not None:
             try:  # classes every funded account, once a day (D-14.28)
                 await classes.run(now_ms())
@@ -441,6 +448,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 scaling=scaling,
                 withdrawals=withdrawals,
             )
+        cohorts = Cohorts(pool, config.customer_schema, config.read_schema, settings, cases, desk)
+        if payouts is not None:
+            payouts.cohorts = cohorts
         liabilities = (
             None
             if payouts is None
@@ -513,6 +523,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     daily_classes,
                     detectors,
                     exposure,
+                    cohorts,
                 )
             )
         )
@@ -539,6 +550,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             clusters=clusters,
             daily_classes=daily_classes,
             exposure=exposure,
+            cohorts=cohorts,
             request_rate=RequestRate(pool, config.customer_schema, settings, cases),
             receipts=None
             if checkout is None

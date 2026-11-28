@@ -25,6 +25,7 @@ from propfirm.customers.casework import Casework
 from propfirm.customers.checkout import Checkout
 from propfirm.customers.classes import Classes
 from propfirm.customers.clusters import Clusters
+from propfirm.customers.cohorts import Cohorts
 from propfirm.customers.corrections import Corrections
 from propfirm.customers.detectors import Detectors
 from propfirm.customers.directory import Reports, TraderDirectory
@@ -131,6 +132,7 @@ class Platform:
     detectors: Detectors | None = None  # behaviour detectors (D-14.29)
     request_rate: RequestRate | None = None  # order request limit (D-14.31)
     exposure: Exposure | None = None  # the exposure desk (D-14.32)
+    cohorts: Cohorts | None = None  # the cohort alarm (D-14.33)
 
     async def call(
         self,
@@ -278,6 +280,8 @@ async def platform(
     )
     await staff.bootstrap(clock())
     desk = StaffDesk(pool, config.staff_schema, load_duties())
+    cohorts = Cohorts(pool, config.customer_schema, config.read_schema, settings, cases, desk)
+    payouts.cohorts = cohorts
     clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
     request_rate = RequestRate(pool, config.customer_schema, settings, cases)
     detectors = Detectors(
@@ -329,6 +333,7 @@ async def platform(
         daily_classes=daily_classes,
         request_rate=request_rate,
         exposure=exposure,
+        cohorts=cohorts,
         receipts=Receipts(pool, config.customer_schema, checkout, rails),
         vault=vault,
         reconciliations=Reconciliations(pool, config.customer_schema),
@@ -421,6 +426,7 @@ async def platform(
             detectors=detectors,
             request_rate=request_rate,
             exposure=exposure,
+            cohorts=cohorts,
         )
     finally:
         await stop_engine()
@@ -607,7 +613,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 31))
+            assert await migrate(conn, schema) == list(range(1, 32))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

@@ -948,3 +948,37 @@ D4, starting values in `[exposure]`; decided by the owner's rule of 20 Nov
 - Simplification: a symbol's scenario moves only that symbol, plus the
   conversion rate it is itself the route for. Correlation between symbols
   is captured only through the blocs.
+
+D-14.33, cohort alarm (build plan step 5, line 5; strategic review v3, D3
+and D6; starting values in `[cohorts]`; decided by the owner's rule of 20
+Nov 2026).
+- Zero edge bounds per product:
+  - Lite 25 %, 1 Step 37.5 % and Instant 36.8 %, from the pricing study;
+  - Classic 27.35 %: 8/18 x 8/13 for its two static loss stages. Its
+    daily loss limit is ignored, so this is an upper bound and alarms
+    less often.
+- Cohorts, one result per order:
+  - each product's orders bought in a calendar month (UTC);
+  - each affiliate's referred orders of a product, all time.
+- Results:
+  - a challenge passes when its last evaluation stage passes. This is
+    counted at the pass, not at funding, which waits on a review;
+  - it fails when an evaluation account is breached or expires;
+  - Instant succeeds when its trailing floor locks at the starting
+    balance before any breach;
+  - running and voided orders are not results.
+- Alarm: at least 10 results, a rate above the bound, and an exact one
+  sided binomial tail of 1 % or less, computed in integers. Checked every
+  6 hours.
+- On an alarm:
+  - every account of the cohort fails the new payout check "cohort";
+  - for an affiliate, commission stops accruing, and the orders left out
+    accrue once cleared;
+  - a high fraud alert opens a case on the affiliate, where two people
+    may end the partnership;
+  - the risk desk is told.
+- Staff with case rights clear an alarm with a reason (Cohort alarm
+  page). Alarms and clears are append-only (migration 31).
+- A cleared cohort alarms again only after 10 more results.
+- Instant lock is read from the daily reset and breach events. A lock
+  inside the day counts from the next 17:00 New York reset.
