@@ -85,6 +85,7 @@ from propfirm.customers.checkout import Checkout, CheckoutError, Registration
 from propfirm.customers.classes import Classes
 from propfirm.customers.classes import counts as class_counts
 from propfirm.customers.clusters import Clusters
+from propfirm.customers.cohorts import ClearRefused as CohortClearRefused
 from propfirm.customers.cohorts import Cohorts
 from propfirm.customers.cohorts import alarmed as cohort_alarmed
 from propfirm.customers.cohorts import percent as cohort_percent
@@ -2331,11 +2332,22 @@ def create_app(
 
     @app.post("/staff/cohorts/{alarm}/clear")
     async def cohort_clear(deps: D, me: CaseWorker, alarm: int, body: ClearBody) -> dict[str, Any]:
-        """Clear an alarm: the cohort's payouts and the affiliate's
-        commission resume (D-14.33)."""
-        if not await _cohorts(deps).clear(alarm, me.subject, body.reason, deps.clock()):
-            raise HTTPException(status_code=404, detail="no open alarm by that number")
-        return {"alarm": alarm, "cleared": True}
+        """Ask to clear an alarm, or confirm another person's request: once
+        confirmed, the cohort's payouts and the affiliate's commission
+        resume (D-14.33)."""
+        try:
+            status = await _cohorts(deps).clear(alarm, me.subject, body.reason, deps.clock())
+        except CohortClearRefused as exc:
+            if exc.code == "same_person":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "same_person",
+                        "message": "a second person confirms the clear",
+                    },
+                ) from exc
+            raise HTTPException(status_code=404, detail="no open alarm by that number") from exc
+        return {"alarm": alarm, "status": status}
 
     def _clusters(deps: Deps) -> Clusters:
         if deps.clusters is None:

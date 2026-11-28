@@ -448,7 +448,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 scaling=scaling,
                 withdrawals=withdrawals,
             )
-        cohorts = Cohorts(pool, config.customer_schema, config.read_schema, settings, cases, desk)
+        cohorts = Cohorts(
+            pool, config.customer_schema, config.read_schema, settings, cases, desk, live
+        )
         if payouts is not None:
             payouts.cohorts = cohorts
         liabilities = (

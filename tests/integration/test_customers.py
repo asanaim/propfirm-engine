@@ -280,7 +280,7 @@ async def platform(
     )
     await staff.bootstrap(clock())
     desk = StaffDesk(pool, config.staff_schema, load_duties())
-    cohorts = Cohorts(pool, config.customer_schema, config.read_schema, settings, cases, desk)
+    cohorts = Cohorts(pool, config.customer_schema, config.read_schema, settings, cases, desk, live)
     payouts.cohorts = cohorts
     clusters = Clusters(pool, config.customer_schema, config.read_schema, cases)
     request_rate = RequestRate(pool, config.customer_schema, settings, cases)
@@ -613,7 +613,7 @@ def test_migrations_run_once(database_url: str, pg_schema: str) -> None:
         schema = f"{pg_schema}_m"
         conn = await asyncpg.connect(database_url)
         try:
-            assert await migrate(conn, schema) == list(range(1, 32))
+            assert await migrate(conn, schema) == list(range(1, 33))
             assert await migrate(conn, schema) == []
         finally:
             await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")

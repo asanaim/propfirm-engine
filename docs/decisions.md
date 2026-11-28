@@ -982,3 +982,20 @@ Nov 2026).
 - A cleared cohort alarms again only after 10 more results.
 - Instant lock is read from the daily reset and breach events. A lock
   inside the day counts from the next 17:00 New York reset.
+
+D-14.33a, cohort alarm flags resolved (owner, 28 Nov 2026: "solve all the
+flag").
+- The Classic bound is exact, not loose. With zero edge, equity is a
+  martingale stopped at the target or the loss limit, so a stage passes
+  with probability at most L / (T + L) under any strategy (optional
+  stopping). A daily loss limit only adds more ways to stop. Classic has
+  no time limit, so a trader can keep daily risk small and approach the
+  static figure as closely as they like. The supremum is therefore
+  8/18 x 8/13 = 32/117 = 27.35 %. The same argument fits the other
+  bounds.
+- An Instant lock inside the day now counts at once. For a running
+  Instant account with no lock in its events, the live view's floor is
+  read; a lock is never undone.
+- Clearing an alarm needs two people. One asks with a reason; a second,
+  different person confirms (409 `same_person` otherwise). Requests are
+  append-only (migration 32). Payouts stay held until the confirmation.

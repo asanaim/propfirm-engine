@@ -27,6 +27,9 @@ interface AlarmRow {
   passed: number;
   bound: string;
   raised_at: number;
+  requested_at: number | null;
+  requested_by: string | null;
+  request_reason: string | null;
   cleared_at: number | null;
   cleared_by: string | null;
   reason: string | null;
@@ -58,8 +61,11 @@ export function CohortsPage() {
   async function clear(id: number) {
     setMessage(null);
     try {
-      await api.post(`/staff/cohorts/${String(id)}/clear`, { reason });
-      setMessage({ ok: true, text: `Alarm ${String(id)} cleared.` });
+      const done = await api.post<{ status: "requested" | "cleared" }>(`/staff/cohorts/${String(id)}/clear`, { reason });
+      setMessage({
+        ok: true,
+        text: done.status === "cleared" ? `Alarm ${String(id)} cleared.` : `Clearing alarm ${String(id)} asked; a second person confirms it.`,
+      });
       setReason("");
       reload();
     } catch (exc) {
@@ -78,7 +84,7 @@ export function CohortsPage() {
           <Card>
             <CardHeader
               title="Alarms"
-              subheader="An open alarm holds the cohort's payouts; for an affiliate it also pauses their commission. Clear it once reviewed."
+              subheader="An open alarm holds the cohort's payouts; for an affiliate it also pauses their commission. Two people clear it: one asks, another confirms."
             />
             <CardContent>
               {result.data.alarms.length === 0 ? (
@@ -113,18 +119,25 @@ export function CohortsPage() {
                           <TableCell>{when(a.raised_at)}</TableCell>
                           <TableCell>
                             {a.cleared_at === null ? (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                disabled={reason.trim().length < 3}
-                                onClick={() => {
-                                  void clear(a.id);
-                                }}
-                              >
-                                Clear
-                              </Button>
+                              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                                {a.requested_by === null ? null : (
+                                  <Typography variant="body2" color="text.secondary">
+                                    Asked by {a.requested_by}: {a.request_reason ?? ""}
+                                  </Typography>
+                                )}
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  disabled={reason.trim().length < 3}
+                                  onClick={() => {
+                                    void clear(a.id);
+                                  }}
+                                >
+                                  {a.requested_by === null ? "Ask to clear" : "Confirm clear"}
+                                </Button>
+                              </Stack>
                             ) : (
-                              `Cleared by ${a.cleared_by ?? ""}: ${a.reason ?? ""}`
+                              `Cleared by ${a.requested_by ?? ""} and ${a.cleared_by ?? ""}: ${a.reason ?? ""}`
                             )}
                           </TableCell>
                         </TableRow>

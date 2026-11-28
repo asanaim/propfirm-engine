@@ -11,6 +11,7 @@ level of an exact one sided binomial test, the cohort is alarmed:
   (orders left out accrue once cleared) and an alert opens a case on the
   affiliate, where two people may terminate them;
 - the risk desk is told.
+Two people clear an alarm: one asks with a reason, another confirms.
 
 Cohorts, one result per order:
 - product: the product's orders bought in one calendar month (UTC);
@@ -20,7 +21,8 @@ Results:
 - a challenge passes when its last evaluation stage passed, and fails when
   one of its evaluation accounts was breached or expired;
 - an Instant account succeeds when its trailing floor locked at the
-  starting balance, and fails when it was breached before that;
+  starting balance, and fails when it was breached before that; a lock
+  inside the day is read from the live view at once;
 - anything still running, or voided, is not a result.
 
 A cleared cohort alarms again only once it has `min_resolved` more
@@ -42,6 +44,12 @@ from propfirm.customers.clusters import Alerts
 log = logging.getLogger(__name__)
 
 SOURCE = "cohort"
+
+
+class ClearRefused(Exception):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 def binomial_tail_at_most(n: int, k: int, p: Fraction, alpha: Fraction) -> bool:
@@ -148,6 +156,10 @@ def outcome(
     return None
 
 
+class Live(Protocol):
+    async def account(self, account_id: str) -> dict[str, Any] | None: ...
+
+
 class Notifier(Protocol):
     async def notify(
         self,
@@ -170,7 +182,9 @@ class Cohorts:
         policy: Any,
         alerts: Alerts,
         notifier: Notifier | None = None,
+        live: Live | None = None,
     ) -> None:
+        self._live = live
         self._pool = pool
         self._s = schema
         self._r = read_schema
@@ -187,6 +201,7 @@ class Cohorts:
         last_stage = {p.id: last_evaluation_stage(p) for p in current.products}
         rows = await self._pool.fetch(
             f"SELECT o.ord, o.product_id, o.created_at, ref.referrer_cif, a.acc, a.stage, "
+            f"a.size_cents, "
             f"min(e.ts) FILTER (WHERE e.kind = 'StagePassed') AS passed_at, "
             f"min(e.ts) FILTER (WHERE e.kind IN ('AccountBreached', 'AccountExpired')) "
             f"  AS failed_at, "
@@ -199,7 +214,8 @@ class Cohorts:
             f"  'DayStarted') "
             f"LEFT JOIN {s}.referrals ref ON ref.cif = o.cif "
             f"WHERE o.rsv_id NOT LIKE '%-trial' "
-            f"GROUP BY o.ord, o.product_id, o.created_at, ref.referrer_cif, a.acc, a.stage "
+            f"GROUP BY o.ord, o.product_id, o.created_at, ref.referrer_cif, a.acc, a.stage, "
+            f"a.size_cents "
             f"ORDER BY o.ord, a.acc"
         )
         by_order: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
@@ -210,11 +226,25 @@ class Cohorts:
             first = accounts[0]
             product = str(first["product_id"])
             passed = outcome(accounts, product in instant, last_stage.get(product))
+            if passed is None and product in instant:
+                passed = await self._locked_now(accounts)
             if passed is None:
                 continue
             referrer = None if first["referrer_cif"] is None else str(first["referrer_cif"])
             out.append(Result(ord_id, product, int(first["created_at"]), referrer, passed))
         return out
+
+    async def _locked_now(self, accounts: Iterable[Mapping[str, Any]]) -> bool | None:
+        """An Instant account still running whose trailing floor has locked
+        at the start inside the day, before any reset recorded it: the
+        live view shows it at once (a lock is never undone)."""
+        if self._live is None:
+            return None
+        for a in accounts:
+            view = await self._live.account(str(a["acc"]))
+            if view is not None and int(view.get("max_floor_cents", -1)) >= int(a["size_cents"]):
+                return True
+        return None
 
     async def policy(self) -> Any:
         return (await self._policy.current()).cohorts
@@ -226,8 +256,10 @@ class Cohorts:
     async def alarms(self) -> list[dict[str, Any]]:
         rows = await self._pool.fetch(
             f"SELECT a.id, a.kind, a.key, a.product_id, a.resolved, a.passed, a.bound, "
-            f"a.raised_at, c.cleared_at, c.cleared_by, c.reason "
+            f"a.raised_at, r.requested_at, r.requested_by, r.reason AS request_reason, "
+            f"c.cleared_at, c.cleared_by, c.reason "
             f"FROM {self._s}.cohort_alarms a "
+            f"LEFT JOIN {self._s}.cohort_clear_requests r ON r.alarm = a.id "
             f"LEFT JOIN {self._s}.cohort_clears c ON c.alarm = a.id ORDER BY a.id DESC"
         )
         return [dict(r) for r in rows]
@@ -307,18 +339,42 @@ class Cohorts:
                 urgent=True,
             )
 
-    async def clear(self, alarm: int, by: str, reason: str, now: int) -> bool:
-        """Clear an open alarm; False when there is none open by that id."""
-        done = await self._pool.fetchval(
-            f"INSERT INTO {self._s}.cohort_clears (alarm, cleared_at, cleared_by, reason) "
-            f"SELECT id, $2, $3, $4 FROM {self._s}.cohort_alarms WHERE id = $1 "
-            f"ON CONFLICT (alarm) DO NOTHING RETURNING alarm",
-            alarm,
-            now,
-            by,
-            reason,
-        )
-        return done is not None
+    async def clear(self, alarm: int, by: str, reason: str, now: int) -> str:
+        """Two people clear an alarm: the first asks ("requested"), a
+        second confirms ("cleared"). Raises ClearRefused: "unknown" (no
+        open alarm by that id) or "same_person" (the asker cannot confirm)."""
+        s = self._s
+        async with self._pool.acquire() as conn, conn.transaction():
+            row = await conn.fetchrow(
+                f"SELECT a.id, r.requested_by, c.alarm IS NOT NULL AS cleared "
+                f"FROM {s}.cohort_alarms a "
+                f"LEFT JOIN {s}.cohort_clear_requests r ON r.alarm = a.id "
+                f"LEFT JOIN {s}.cohort_clears c ON c.alarm = a.id WHERE a.id = $1 FOR UPDATE OF a",
+                alarm,
+            )
+            if row is None or row["cleared"]:
+                raise ClearRefused("unknown")
+            if row["requested_by"] is None:
+                await conn.execute(
+                    f"INSERT INTO {s}.cohort_clear_requests (alarm, requested_at, requested_by, "
+                    f"reason) VALUES ($1, $2, $3, $4)",
+                    alarm,
+                    now,
+                    by,
+                    reason,
+                )
+                return "requested"
+            if row["requested_by"] == by:
+                raise ClearRefused("same_person")
+            await conn.execute(
+                f"INSERT INTO {s}.cohort_clears (alarm, cleared_at, cleared_by, reason) "
+                f"VALUES ($1, $2, $3, $4)",
+                alarm,
+                now,
+                by,
+                reason,
+            )
+            return "cleared"
 
     async def held(self, acc: str) -> bool:
         """Whether the account's payouts are held by an open alarm on a

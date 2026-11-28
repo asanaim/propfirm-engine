@@ -1037,6 +1037,21 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON {s}.cohort_clears FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
         """,
     ),
+    (
+        32,
+        """
+        -- cohort alarm, four eyes (D-14.33): the first person's request to
+        -- clear an alarm; a second person confirms it in cohort_clears
+        CREATE TABLE {s}.cohort_clear_requests (
+            alarm bigint PRIMARY KEY REFERENCES {s}.cohort_alarms (id),
+            requested_at bigint NOT NULL,
+            requested_by text NOT NULL,
+            reason text NOT NULL CHECK (reason <> '')
+        );
+        CREATE TRIGGER cohort_clear_requests_append_only BEFORE UPDATE OR DELETE
+            ON {s}.cohort_clear_requests FOR EACH ROW EXECUTE FUNCTION {s}.append_only();
+        """,
+    ),
 )
 
 
